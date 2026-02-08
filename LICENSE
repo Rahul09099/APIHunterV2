@@ -1,0 +1,72 @@
+UnsecuredAPIKeys Open Source License
+Based on MIT License with Attribution Requirements
+
+Copyright (c) 2025 TSCarterJr
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+1. The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+2. MANDATORY UI ATTRIBUTION REQUIREMENT:
+   Any software, application, or system that incorporates, uses, modifies, or 
+   derives from ANY portion of this Software (including but not limited to APIs, 
+   backend processes, algorithms, data structures, bots, validation logic, or any 
+   other component) and provides a public-facing user interface MUST display a 
+   prominent link to the original project repository: 
+   https://github.com/TSCarterJr/UnsecuredAPIKeys-OpenSource
+
+   This attribution must be:
+   - Clearly visible in the user interface
+   - Accessible from the main/home page or footer
+   - Contain the text "Based on UnsecuredAPIKeys Open Source" or similar
+   - Link directly to https://github.com/TSCarterJr/UnsecuredAPIKeys-OpenSource
+   
+   This requirement applies regardless of the extent of modification, whether the
+   entire codebase is used or only small portions, and whether the derivative work
+   is commercial or non-commercial.
+
+3. SCOPE OF APPLICATION:
+   This attribution requirement applies to any use of the Software, including but
+   not limited to:
+   - Using the backend APIs or database schemas
+   - Implementing the validation algorithms or provider patterns
+   - Using the bot architecture or scraping logic  
+   - Incorporating the data models or business logic
+   - Using any code, concepts, or implementations from this project
+
+4. EDUCATIONAL PURPOSE AND USER RESPONSIBILITY:
+   This Software is provided for EDUCATIONAL and SECURITY RESEARCH purposes only.
+
+   By using this Software, you acknowledge and agree that:
+   - You are solely responsible for your use of this Software
+   - You will comply with all applicable laws and regulations
+   - You will not use this Software for unauthorized access to any systems
+   - You will not use discovered API keys for any malicious or illegal purposes
+   - You will practice responsible disclosure when discovering exposed credentials
+
+   The author(s) and copyright holder(s) expressly disclaim any responsibility for:
+   - How you choose to use this Software
+   - Any actions you take based on information obtained through this Software
+   - Any legal consequences arising from your use or misuse of this Software
+   - Any damages caused by unauthorized or unethical use of this Software
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+USE OF THIS SOFTWARE FOR ANY ILLEGAL, UNAUTHORIZED, OR UNETHICAL PURPOSES IS
+STRICTLY PROHIBITED. THE USER ASSUMES ALL RISKS AND FULL RESPONSIBILITY FOR
+THEIR ACTIONS.
+
+VIOLATION OF THE ATTRIBUTION REQUIREMENT CONSTITUTES COPYRIGHT INFRINGEMENT
+AND BREACH OF LICENSE TERMS, SUBJECT TO LEGAL ACTION AND DAMAGES.

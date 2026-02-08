@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: unsecuredapikeys-api
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: DATABASE_PATH
+        value: /app/data/unsecuredapikeys.db
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false # Set this in the Dashboard
+      - key: TELEGRAM_ADMIN_CHAT_ID
+        sync: false # Set this in the Dashboard
+      - key: PORT
+        generateValue: true
+    # Persistent disk for database (optional but recommended)
+    disk:
+      name: database
+      mountPath: /app/data
+      sizeGB: 1

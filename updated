@@ -1,0 +1,52 @@
+[
+  {
+    "Id": 114,
+    "ApiKey": "AIzaSyCuZDCq2Z2SSDAT3mb5uNYJiaaWarTn1Es",
+    "Type": "GoogleAI",
+    "Status": "Valid",
+    "FirstFoundUTC": "2026-01-25T06:01:29.1764227",
+    "LastCheckedUTC": "2026-01-25T06:05:16.3241213",
+    "ValidationResponse": "",
+    "Sources": []
+  },
+  {
+    "Id": 162,
+    "ApiKey": "AIzaSyB-jLhkFVfPtOs1txBjzu0anKk1BXWDsdg",
+    "Type": "GoogleAI",
+    "Status": "Valid",
+    "FirstFoundUTC": "2026-01-25T06:02:19.0179791",
+    "LastCheckedUTC": "2026-01-25T06:05:38.8473992",
+    "ValidationResponse": "",
+    "Sources": []
+  },
+  {
+    "Id": 163,
+    "ApiKey": "AIzaSyB21Sv2aZEJ33TJ02dfLMx-PklP4ZVcG40",
+    "Type": "GoogleAI",
+    "Status": "Valid",
+    "FirstFoundUTC": "2026-01-25T06:02:19.0197846",
+    "LastCheckedUTC": "2026-01-25T06:05:39.1410372",
+    "ValidationResponse": "",
+    "Sources": []
+  },
+  {
+    "Id": 164,
+    "ApiKey": "AIzaSyBUxZut5cKtGfWuex2RWy9oMf2GrbO3b2M",
+    "Type": "GoogleAI",
+    "Status": "Valid",
+    "FirstFoundUTC": "2026-01-25T06:02:19.0217774",
+    "LastCheckedUTC": "2026-01-25T06:05:39.2611236",
+    "ValidationResponse": "",
+    "Sources": []
+  },
+  {
+    "Id": 249,
+    "ApiKey": "AIzaSyBUpcsO_Y0txvI7Zd-0Y6V6wCkhJf_jvg4",
+    "Type": "GoogleAI",
+    "Status": "Valid",
+    "FirstFoundUTC": "2026-01-25T06:04:08.9217896",
+    "LastCheckedUTC": "2026-01-25T06:06:08.6540079",
+    "ValidationResponse": "",
+    "Sources": []
+  }
+]

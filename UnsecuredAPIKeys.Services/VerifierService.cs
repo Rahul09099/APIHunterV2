@@ -1,0 +1,443 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Spectre.Console;
+using UnsecuredAPIKeys.Data;
+using UnsecuredAPIKeys.Data.Common;
+using UnsecuredAPIKeys.Data.Models;
+using UnsecuredAPIKeys.Providers;
+using UnsecuredAPIKeys.Providers._Interfaces;
+
+namespace UnsecuredAPIKeys.Services;
+
+/// <summary>
+/// Verifier service that maintains up to 50 valid API keys.
+/// When a key becomes invalid, verifies new keys to maintain the limit.
+/// </summary>
+public class VerifierService(
+    DBContext dbContext,
+    IHttpClientFactory httpClientFactory,
+    HashSet<ApiTypeEnum>? selectedApiTypes = null,
+    ILogger<VerifierService>? logger = null)
+{
+    private readonly IReadOnlyList<IApiKeyProvider> _providers = ApiProviderRegistry.VerifierProviders;
+    private readonly HashSet<ApiTypeEnum>? _selectedApiTypes = selectedApiTypes;
+    private CancellationTokenSource? _cancellationTokenSource;
+
+    private int _validCount;
+    private int _invalidCount;
+    private int _verifiedCount;
+    private bool _isIdle;
+
+    public async Task RunAsync(CancellationToken cancellationToken)
+    {
+        _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        AnsiConsole.MarkupLine("[green]Starting verifier service...[/]");
+        AnsiConsole.MarkupLine($"[dim]Target valid keys: [yellow]{LiteLimits.MAX_VALID_KEYS}[/][/]");
+        AnsiConsole.MarkupLine($"[dim]Loaded {_providers.Count} verification providers[/]");
+
+        if (_selectedApiTypes != null && _selectedApiTypes.Count > 0)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Verifying only selected API types:[/]");
+            foreach (var apiType in _selectedApiTypes.OrderBy(t => t.ToString()))
+            {
+                AnsiConsole.MarkupLine($"  [dim]- {apiType}[/]");
+            }
+        }
+        else
+        {
+            foreach (var provider in _providers)
+            {
+                AnsiConsole.MarkupLine($"  [dim]- {Markup.Escape(provider.ProviderName)}[/]");
+            }
+        }
+
+        // Run continuously
+        while (!_cancellationTokenSource.Token.IsCancellationRequested)
+        {
+            try
+            {
+                await RunVerificationCycleAsync();
+
+                if (_cancellationTokenSource.Token.IsCancellationRequested)
+                    break;
+
+                // Wait before next cycle
+                if (!_isIdle)
+                {
+                    AnsiConsole.MarkupLine($"[dim]Waiting {LiteLimits.VERIFICATION_DELAY_MS / 1000}s before next verification cycle...[/]");
+                }
+                await Task.Delay(LiteLimits.VERIFICATION_DELAY_MS, _cancellationTokenSource.Token);
+
+                // Reset counters
+                _validCount = 0;
+                _invalidCount = 0;
+                _verifiedCount = 0;
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[red]Error during verification: {Markup.Escape(ex.Message)}[/]");
+                logger?.LogError(ex, "Verification cycle error");
+                await Task.Delay(5000, _cancellationTokenSource.Token);
+            }
+        }
+
+        AnsiConsole.MarkupLine("[green]Verifier stopped.[/]");
+    }
+
+    private async Task RunVerificationCycleAsync()
+    {
+        // Count current valid keys (filtered by selected types if applicable)
+        var query = dbContext.APIKeys.Where(k => k.Status == ApiStatusEnum.Valid);
+        if (_selectedApiTypes != null && _selectedApiTypes.Count > 0)
+        {
+            query = query.Where(k => _selectedApiTypes.Contains(k.ApiType));
+        }
+        var currentValidCount = await query.CountAsync(_cancellationTokenSource!.Token);
+        
+        if (!_isIdle)
+        {
+            AnsiConsole.MarkupLine($"[dim]Current valid keys: [yellow]{currentValidCount}[/] / [yellow]{LiteLimits.MAX_VALID_KEYS}[/][/]");
+        }
+
+        if (currentValidCount >= LiteLimits.MAX_VALID_KEYS)
+        {
+            // Re-verify existing valid keys to ensure they're still valid
+            await ReVerifyExistingKeysAsync();
+        }
+        else
+        {
+            // Verify unverified keys until we reach the limit
+            await VerifyNewKeysAsync(LiteLimits.MAX_VALID_KEYS - currentValidCount);
+        }
+
+        // Display summary only if not idle
+        if (!_isIdle)
+        {
+            var table = new Table()
+                .Border(TableBorder.Rounded)
+                .AddColumn("[bold]Metric[/]")
+                .AddColumn("[bold]Value[/]");
+
+            table.AddRow("Keys Verified", _verifiedCount.ToString());
+            table.AddRow("Now Valid", $"[green]{_validCount}[/]");
+            table.AddRow("Now Invalid", $"[red]{_invalidCount}[/]");
+
+            var newValidCount = await dbContext.APIKeys
+                .CountAsync(k => k.Status == ApiStatusEnum.Valid, _cancellationTokenSource!.Token);
+            table.AddRow("Total Valid", $"[yellow]{newValidCount}[/] / [yellow]{LiteLimits.MAX_VALID_KEYS}[/]");
+
+            AnsiConsole.Write(table);
+        }
+    }
+
+    private async Task ReVerifyExistingKeysAsync()
+    {
+        AnsiConsole.MarkupLine("[dim]Re-verifying existing valid keys...[/]");
+
+        // Get oldest verified keys first (filtered by selected types if applicable)
+        var query = dbContext.APIKeys.Where(k => k.Status == ApiStatusEnum.Valid);
+        if (_selectedApiTypes != null && _selectedApiTypes.Count > 0)
+        {
+            query = query.Where(k => _selectedApiTypes.Contains(k.ApiType));
+        }
+        var keysToReVerify = await query
+            .OrderBy(k => k.LastCheckedUTC)
+            .Take(LiteLimits.VERIFICATION_BATCH_SIZE)
+            .ToListAsync(_cancellationTokenSource!.Token);
+
+        _isIdle = false;
+
+        await AnsiConsole.Progress()
+            .StartAsync(async ctx =>
+            {
+                var task = ctx.AddTask("[green]Re-verifying keys[/]", maxValue: keysToReVerify.Count);
+
+                foreach (var key in keysToReVerify)
+                {
+                    if (_cancellationTokenSource.Token.IsCancellationRequested)
+                        break;
+
+                    await VerifyKeyAsync(key);
+                    task.Increment(1);
+                }
+            });
+
+        await dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+    }
+
+    private async Task VerifyNewKeysAsync(int neededCount)
+    {
+        if (!_isIdle)
+        {
+            AnsiConsole.MarkupLine($"[dim]Verifying unverified keys (need {neededCount} more valid)...[/]");
+        }
+
+        // Get unverified keys (filtered by selected types if applicable)
+        // Get keys that need verification (Unverified or previously encountered an Error)
+        var query = dbContext.APIKeys.Where(k => k.Status == ApiStatusEnum.Unverified || k.Status == ApiStatusEnum.Error);
+        if (_selectedApiTypes != null && _selectedApiTypes.Count > 0)
+        {
+            query = query.Where(k => _selectedApiTypes.Contains(k.ApiType));
+        }
+        // Debug: Log breakdown of keys for selected types
+        if (_selectedApiTypes != null && _selectedApiTypes.Count > 0 && !_isIdle)
+        {
+            foreach (var apiType in _selectedApiTypes)
+            {
+                var unverified = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.Unverified).CountAsync(_cancellationTokenSource!.Token);
+                var valid = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.Valid).CountAsync(_cancellationTokenSource!.Token);
+                var invalid = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.Invalid).CountAsync(_cancellationTokenSource!.Token);
+                var noCredits = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.ValidNoCredits).CountAsync(_cancellationTokenSource!.Token);
+                var errorCount = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.Error).CountAsync(_cancellationTokenSource!.Token);
+                
+                AnsiConsole.MarkupLine($"[dim]Type {apiType}: {unverified} unverified, {valid} valid, {invalid} invalid, {noCredits} no-credits, {errorCount} error[/]");
+            }
+        }
+
+        var keysToVerify = await query
+            .OrderBy(k => k.FirstFoundUTC)
+            .Take(Math.Max(neededCount * 2, LiteLimits.VERIFICATION_BATCH_SIZE))
+            .ToListAsync(_cancellationTokenSource!.Token);
+
+        if (keysToVerify.Count == 0)
+        {
+            if (!_isIdle)
+            {
+                AnsiConsole.MarkupLine("[yellow]No unverified keys available.[/]");
+                _isIdle = true;
+            }
+            return;
+        }
+
+        _isIdle = false;
+
+        await AnsiConsole.Progress()
+            .StartAsync(async ctx =>
+            {
+                var task = ctx.AddTask("[green]Verifying new keys[/]", maxValue: keysToVerify.Count);
+                var validFound = 0;
+
+                foreach (var key in keysToVerify)
+                {
+                    if (_cancellationTokenSource.Token.IsCancellationRequested)
+                        break;
+
+                    // Stop if we've reached our target
+                    if (validFound >= neededCount)
+                    {
+                        task.Value = keysToVerify.Count;
+                        break;
+                    }
+
+                    var wasValid = await VerifyKeyAsync(key);
+                    if (wasValid)
+                        validFound++;
+
+                    task.Increment(1);
+                }
+            });
+
+        await dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+    }
+
+    private async Task<bool> VerifyKeyAsync(APIKey key)
+    {
+        Interlocked.Increment(ref _verifiedCount);
+
+        // Clear previous validation response and reset error count for a fresh start
+        key.ValidationResponse = null;
+        key.ErrorCount = 0;
+
+        // Build list of providers to try, starting with the assigned one
+        var providersToTry = GetProvidersToTry(key);
+
+        if (providersToTry.Count == 0)
+        {
+            key.Status = ApiStatusEnum.Error;
+            key.LastCheckedUTC = DateTime.UtcNow;
+            AnsiConsole.MarkupLine($"[yellow]No matching providers for key[/]");
+            return false;
+        }
+
+        // Try each matching provider until one succeeds
+        foreach (var provider in providersToTry)
+        {
+            try
+            {
+                var result = await provider.ValidateKeyAsync(key.ApiKey, httpClientFactory);
+                key.ValidationResponse = result.Detail; // Store the raw response/error
+                key.LastCheckedUTC = DateTime.UtcNow;
+
+                switch (result.Status)
+                {
+                    case Providers.Common.ValidationAttemptStatus.Valid:
+                        // Check if the response indicates quota/rate limit issues FIRST
+                        // even if provider marked it as "Valid"
+                        if (result.Detail?.Contains("quota", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("credit", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("billing", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("rate limit", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("rate_limit", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("exceeded", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            // Update the key's API type if a different provider validated it
+                            if (key.ApiType != provider.ApiType)
+                            {
+                                AnsiConsole.MarkupLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
+                                key.ApiType = provider.ApiType;
+                            }
+                            key.Status = ApiStatusEnum.ValidNoCredits;
+                            key.ErrorCount = 0;
+                            key.ValidationResponse = result.Detail ?? "Valid key but no credits";
+                            Interlocked.Increment(ref _validCount);
+                            AnsiConsole.MarkupLine($"[yellow]✓ Valid [no credits]: {Markup.Escape(provider.ProviderName)} key[/]");
+                            if (!string.IsNullOrEmpty(result.Detail))
+                                AnsiConsole.MarkupLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
+                            return true;
+                        }
+                        
+                        // Otherwise, it's genuinely valid with credits
+                        // Update the key's API type if a different provider validated it
+                        if (key.ApiType != provider.ApiType)
+                        {
+                            AnsiConsole.MarkupLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
+                            key.ApiType = provider.ApiType;
+                        }
+                        key.Status = ApiStatusEnum.Valid;
+                        key.ErrorCount = 0;
+                        key.ValidationResponse = result.Detail ?? "Key is valid";
+                        Interlocked.Increment(ref _validCount);
+                        AnsiConsole.MarkupLine($"[green]✓ Valid: {Markup.Escape(provider.ProviderName)} key[/]");
+                        if (!string.IsNullOrEmpty(result.Detail))
+                            AnsiConsole.MarkupLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
+                        return true;
+
+                    case Providers.Common.ValidationAttemptStatus.HttpError:
+                        // Check if it's a quota/credits issue based on detail
+                        if (result.Detail?.Contains("quota", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("credit", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("billing", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            // Update the key's API type if a different provider validated it
+                            if (key.ApiType != provider.ApiType)
+                            {
+                                AnsiConsole.MarkupLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
+                                key.ApiType = provider.ApiType;
+                            }
+                            key.Status = ApiStatusEnum.ValidNoCredits;
+                            key.ErrorCount = 0;
+                            key.ValidationResponse = result.Detail ?? "Valid key but quota issue";
+                            Interlocked.Increment(ref _validCount);
+                            AnsiConsole.MarkupLine($"[yellow]✓ Valid [no credits]: {Markup.Escape(provider.ProviderName)} key[/]");
+                            if (!string.IsNullOrEmpty(result.Detail))
+                                AnsiConsole.MarkupLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
+                            return true;
+                        }
+                        // HTTP error but not quota - try next provider
+                        continue;
+
+                    case Providers.Common.ValidationAttemptStatus.Unauthorized:
+                        // If the provider explicitly says "leaked", trust it and stop trying others.
+                        if (result.Detail?.Contains("leaked", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            key.Status = ApiStatusEnum.Invalid;
+                            key.ValidationResponse = result.Detail;
+                            // Reset error count as this is a definitive result, not a transient error
+                            key.ErrorCount = 0; 
+                            return false; // Stop checking other providers
+                        }
+
+                        // This provider explicitly rejected it - try next provider
+                        continue;
+
+                    case Providers.Common.ValidationAttemptStatus.NetworkError:
+                        // Network error - don't try other providers, just increment error count
+                        key.ErrorCount++;
+                        if (key.ErrorCount >= 3)
+                        {
+                            key.Status = ApiStatusEnum.Error;
+                            key.ValidationResponse = $"Network error: {result.Detail}";
+                        }
+                        return false;
+
+                    default:
+                        // Provider-specific error - try next provider
+                        continue;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Error verifying key {KeyId} with provider {Provider}", key.Id, provider.ProviderName);
+                key.ValidationResponse = $"Exception: {ex.Message}";
+                // Continue to next provider on exception
+                continue;
+            }
+        }
+
+        // All providers failed - mark as invalid
+        key.Status = ApiStatusEnum.Invalid;
+        // If we have a stored response from the last attempt (often "Unauthorized"), keep it or set a generic one
+        if (string.IsNullOrEmpty(key.ValidationResponse))
+        {
+             key.ValidationResponse = "Invalid or unauthorized";
+        }
+        
+        Interlocked.Increment(ref _invalidCount);
+        return false;
+    }
+
+    /// <summary>
+    /// Gets providers to try for a key, ordered by: assigned provider first, then other matching providers.
+    /// </summary>
+    private List<IApiKeyProvider> GetProvidersToTry(APIKey key)
+    {
+        var result = new List<IApiKeyProvider>();
+
+        // First, add the assigned provider (if it exists)
+        var assignedProvider = _providers.FirstOrDefault(p => p.ApiType == key.ApiType);
+        if (assignedProvider != null)
+        {
+            // Always try the assigned provider, even if we are filtering the verification run.
+            // If the key is in our queue, we should verify it properly.
+            result.Add(assignedProvider);
+        }
+
+        // Then add other providers whose patterns match this key
+        foreach (var provider in _providers)
+        {
+            // Skip the already-added assigned provider
+            if (provider.ApiType == key.ApiType)
+                continue;
+
+            // Note: We intentionally do NOT filter by _selectedApiTypes here.
+            // If the user selected "DeepSeek" but we found a key that matches "OpenAI" patterns,
+            // we should try validating it as OpenAI as a fallback if DeepSeek fails.
+            // The _selectedApiTypes filter is used to select WHICH keys to run, not HOW to run them.
+
+            // Check if any of this provider's patterns match the key
+            foreach (var pattern in provider.RegexPatterns)
+            {
+                try
+                {
+                    var regex = new System.Text.RegularExpressions.Regex(pattern);
+                    if (regex.IsMatch(key.ApiKey))
+                    {
+                        result.Add(provider);
+                        break; // One match is enough for this provider
+                    }
+                }
+                catch
+                {
+                    // Invalid regex pattern - skip it
+                }
+            }
+        }
+
+        return result;
+    }
+}
