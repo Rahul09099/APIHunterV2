@@ -251,39 +251,39 @@ public class TelegramBotService : BackgroundService
     private async Task HandleHelpCommand(long chatId, CancellationToken ct)
     {
         var help = new StringBuilder();
-        help.AppendLine("🤖 *UnsecuredAPIKeys Bot Commands*");
+        help.AppendLine("🤖 <b>UnsecuredAPIKeys Bot Commands</b>");
         help.AppendLine();
-        help.AppendLine("📊 *General*");
+        help.AppendLine("📊 <b>General</b>");
         help.AppendLine("/status - Overall status & active jobs");
         help.AppendLine("/stats - Detailed statistics");
         help.AppendLine("/help - Show this message");
         help.AppendLine();
-        help.AppendLine("🔍 *Scraper*");
+        help.AppendLine("🔍 <b>Scraper</b>");
         help.AppendLine("/start_scraper - Start interactive scraper");
-        help.AppendLine("/stop_scraper <id> - Stop a job");
+        help.AppendLine("/stop_scraper &lt;id&gt; - Stop a job");
         help.AppendLine("/scraper_jobs - List scraper jobs");
         help.AppendLine();
-        help.AppendLine("✅ *Verifier*");
+        help.AppendLine("✅ <b>Verifier</b>");
         help.AppendLine("/start_verifier [types] - Start verifier");
-        help.AppendLine("/stop_verifier <id> - Stop a job");
+        help.AppendLine("/stop_verifier &lt;id&gt; - Stop a job");
         help.AppendLine("/verifier_jobs - List verifier jobs");
         help.AppendLine("/api_types - List supported API types");
         help.AppendLine();
-        help.AppendLine("⚙️ *Config*");
+        help.AppendLine("⚙️ <b>Config</b>");
         help.AppendLine("/tokens - List GitHub tokens");
-        help.AppendLine("/add_token <token> - Add GitHub token");
-        help.AppendLine("/delete_token <id> - Delete GitHub token");
+        help.AppendLine("/add_token &lt;token&gt; - Add GitHub token");
+        help.AppendLine("/delete_token &lt;id&gt; - Delete GitHub token");
         help.AppendLine("/queries - List search queries");
-        help.AppendLine("/add_query <query> - Add search query");
-        help.AppendLine("/delete_query <id> - Delete search query");
-        help.AppendLine("/toggle_query <id> - Toggle a query");
+        help.AppendLine("/add_query &lt;query&gt; - Add search query");
+        help.AppendLine("/delete_query &lt;id&gt; - Delete search query");
+        help.AppendLine("/toggle_query &lt;id&gt; - Toggle a query");
         help.AppendLine();
-        help.AppendLine("💾 *Data*");
+        help.AppendLine("💾 <b>Data</b>");
         help.AppendLine("/valid_keys - Count of valid keys");
         help.AppendLine("/export [csv|json] - Get keys file");
         help.AppendLine("/reset_database CONFIRM_RESET - Wipe DB");
 
-        await _botClient.SendMessage(chatId, help.ToString(), parseMode: ParseMode.Markdown, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, help.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleStatusCommand(long chatId, CancellationToken ct)
