@@ -297,9 +297,9 @@ public class DatabaseService(DBContext dbContext)
         // Clear all connection pools to ensure the file is not locked by SQLite
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
 
-        if (File.Exists(dbPath))
+        if (File.Exists(_dbPath))
         {
-            File.Delete(dbPath);
+            File.Delete(_dbPath);
         }
 
         // Reinitialize
