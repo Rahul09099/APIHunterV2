@@ -50,17 +50,32 @@ public class ScraperService
 
     public async Task<List<string>> GetAvailableGroupsAsync(CancellationToken cancellationToken = default)
     {
+        var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Get groups from enabled search queries
         var allQueries = await _dbContext.SearchQueries
             .Where(q => q.IsEnabled)
             .ToListAsync(cancellationToken);
 
-        if (allQueries.Count == 0) return new List<string>();
+        foreach (var q in allQueries)
+        {
+            groups.Add(InferProviderFromQuery(q.Query));
+        }
 
-        return allQueries
-            .Select(q => InferProviderFromQuery(q.Query))
-            .Distinct()
-            .OrderBy(g => g)
-            .ToList();
+        // 2. Get groups from enabled provider tokens
+        var allTokens = await _dbContext.SearchProviderTokens
+            .Where(t => t.IsEnabled)
+            .ToListAsync(cancellationToken);
+
+        foreach (var t in allTokens)
+        {
+            if (t.SearchProvider == SearchProviderEnum.GitHub)
+            {
+                groups.Add("GitHub");
+            }
+        }
+
+        return groups.OrderBy(g => g).ToList();
     }
 
     public async Task RunScrapeByGroupAsync(string selectedGroupName, bool isDeepSearch, CancellationToken cancellationToken)
