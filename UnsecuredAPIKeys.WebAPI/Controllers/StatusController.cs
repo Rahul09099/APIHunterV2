@@ -25,7 +25,7 @@ public class StatusController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetStatus()
     {
-        var stats = await _dbService.GetCategorizedStatsAsync();
+        var stats = await _dbService.GetCategorizedStatisticsAsync(_dbContext);
         
         return Ok(new
         {
@@ -45,7 +45,7 @@ public class StatusController : ControllerBase
     [HttpGet("detailed")]
     public async Task<IActionResult> GetDetailedStatus()
     {
-        var stats = await _dbService.GetCategorizedStatsAsync();
+        var stats = await _dbService.GetCategorizedStatisticsAsync(_dbContext);
         return Ok(stats);
     }
 
@@ -62,7 +62,7 @@ public class StatusController : ControllerBase
 
         var keysCount = await _dbContext.APIKeys
             .Where(k => k.ApiType == apiTypeEnum)
-            .GroupBy(k => k.VerificationStatus)
+            .GroupBy(k => k.Status)
             .Select(g => new { status = g.Key.ToString(), count = g.Count() })
             .ToListAsync();
 
@@ -81,15 +81,15 @@ public class StatusController : ControllerBase
     public async Task<IActionResult> GetRecentKeys([FromQuery] int limit = 100)
     {
         var keys = await _dbContext.APIKeys
-            .OrderByDescending(k => k.CreatedAt)
+            .OrderByDescending(k => k.FirstFoundUTC)
             .Take(Math.Min(limit, 500))
             .Select(k => new
             {
                 k.Id,
                 k.ApiType,
-                k.VerificationStatus,
-                k.CreatedAt,
-                k.LastVerifiedAt,
+                k.Status,
+                k.FirstFoundUTC,
+                k.LastCheckedUTC,
                 keyPreview = k.ApiKey.Length > 20 ? k.ApiKey.Substring(0, 20) + "..." : k.ApiKey
             })
             .ToListAsync();
@@ -104,7 +104,7 @@ public class StatusController : ControllerBase
     public async Task<IActionResult> GetValidKeys()
     {
         var validKeys = await _dbContext.APIKeys
-            .Where(k => k.VerificationStatus == VerificationStatusEnum.Valid)
+            .Where(k => k.Status == ApiStatusEnum.Valid)
             .GroupBy(k => k.ApiType)
             .Select(g => new { apiType = g.Key.ToString(), count = g.Count() })
             .ToListAsync();
@@ -123,14 +123,13 @@ public class StatusController : ControllerBase
     [HttpGet("github-tokens")]
     public async Task<IActionResult> GetGitHubTokens()
     {
-        var tokens = await _dbContext.GitHubTokens
+        var tokens = await _dbContext.SearchProviderTokens
+            .Where(t => t.SearchProvider == SearchProviderEnum.GitHub)
             .Select(t => new
             {
                 t.Id,
-                t.IsRateLimited,
-                t.RateLimitResetTime,
-                t.RequestCount,
-                t.LastUsedAt,
+                t.IsEnabled,
+                t.LastUsedUTC,
                 tokenPreview = t.Token.Length > 10 ? t.Token.Substring(0, 10) + "..." : "***"
             })
             .ToListAsync();
@@ -150,7 +149,7 @@ public class StatusController : ControllerBase
                 q.Id,
                 q.Query,
                 q.IsEnabled,
-                q.CreatedAt
+                q.LastSearchUTC
             })
             .ToListAsync();
 
