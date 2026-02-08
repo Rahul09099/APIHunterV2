@@ -8,6 +8,7 @@ COPY UnsecuredAPIKeys.WebAPI/*.csproj ./UnsecuredAPIKeys.WebAPI/
 COPY UnsecuredAPIKeys.Data/*.csproj ./UnsecuredAPIKeys.Data/
 COPY UnsecuredAPIKeys.Services/*.csproj ./UnsecuredAPIKeys.Services/
 COPY UnsecuredAPIKeys.Providers/*.csproj ./UnsecuredAPIKeys.Providers/
+COPY UnsecuredAPIKeys.CLI/*.csproj ./UnsecuredAPIKeys.CLI/
 
 # Restore dependencies
 RUN dotnet restore
