@@ -2,13 +2,8 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Copy solution and project files
-COPY *.sln ./
-COPY UnsecuredAPIKeys.WebAPI/*.csproj ./UnsecuredAPIKeys.WebAPI/
-COPY UnsecuredAPIKeys.Data/*.csproj ./UnsecuredAPIKeys.Data/
-COPY UnsecuredAPIKeys.Services/*.csproj ./UnsecuredAPIKeys.Services/
-COPY UnsecuredAPIKeys.Providers/*.csproj ./UnsecuredAPIKeys.Providers/
-COPY UnsecuredAPIKeys.CLI/*.csproj ./UnsecuredAPIKeys.CLI/
+# Copy everything
+COPY . .
 
 # Restore dependencies
 RUN dotnet restore
