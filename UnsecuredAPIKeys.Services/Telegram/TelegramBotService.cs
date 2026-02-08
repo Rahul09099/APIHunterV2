@@ -346,11 +346,11 @@ public class TelegramBotService : BackgroundService
 
         var groups = await scraper.GetAvailableGroupsAsync(ct);
 
-        if (groups.Count == 0)
-        {
-            await _botClient.SendMessage(chatId, "⚠️ No search queries or tokens configured.", cancellationToken: ct);
-            return;
-        }
+    if (groups.Count == 0)
+    {
+        await _botClient.SendMessage(chatId, "⚠️ No targets to scrape. Please ensure you have:\n1. Enabled <b>Search Queries</b> (/queries)\n2. Enabled <b>GitHub Tokens</b> (/tokens)", parseMode: ParseMode.Html, cancellationToken: ct);
+        return;
+    }
 
         var buttons = groups.Select(g => new[] { InlineKeyboardButton.WithCallbackData(g, $"scrape_group:{g}:lite"), InlineKeyboardButton.WithCallbackData($"{g} (Deep)", $"scrape_group:{g}:deep") }).ToArray();
         
