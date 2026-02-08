@@ -10,12 +10,17 @@ namespace UnsecuredAPIKeys.Services;
 /// <summary>
 /// Service for database initialization and common operations.
 /// </summary>
-public class DatabaseService(string dbPath = "unsecuredapikeys.db")
+public class DatabaseService(DBContext dbContext)
 {
+    private readonly string _dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") ?? "unsecuredapikeys.db";
+
+    public DatabaseService(string dbPath) : this(new DBContext(dbPath))
+    {
+        _dbPath = dbPath;
+    }
+
     public async Task<DBContext> InitializeDatabaseAsync()
     {
-        var dbContext = new DBContext(dbPath);
-
         // Ensure database is created
         await dbContext.Database.EnsureCreatedAsync();
         
