@@ -33,7 +33,7 @@ public class StatusController : ControllerBase
             validKeys = stats.ValidKeys,
             invalidKeys = stats.InvalidKeys,
             unverifiedKeys = stats.UnverifiedKeys,
-            quotaExhaustedKeys = stats.QuotaExhaustedKeys,
+            quotaExhaustedKeys = stats.ValidNoCreditsKeys,
             gitHubTokensCount = stats.GitHubTokensCount,
             timestamp = DateTime.UtcNow
         });
