@@ -13,12 +13,12 @@ namespace UnsecuredAPIKeys.Data
 
         public DBContext(DbContextOptions<DBContext> options) : base(options)
         {
-            _dbPath = "unsecuredapikeys.db";
+            _dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") ?? "unsecuredapikeys.db";
         }
 
         public DBContext()
         {
-            _dbPath = "unsecuredapikeys.db";
+            _dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") ?? "unsecuredapikeys.db";
         }
 
         public DBContext(string dbPath)
