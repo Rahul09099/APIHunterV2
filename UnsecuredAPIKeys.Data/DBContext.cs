@@ -33,7 +33,15 @@ namespace UnsecuredAPIKeys.Data
         {
             if (!optionsBuilder.IsConfigured)
             {
-                optionsBuilder.UseSqlite($"Data Source={_dbPath}");
+                var connectionString = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING");
+                if (!string.IsNullOrEmpty(connectionString))
+                {
+                    optionsBuilder.UseNpgsql(connectionString);
+                }
+                else
+                {
+                    optionsBuilder.UseSqlite($"Data Source={_dbPath}");
+                }
             }
         }
 
