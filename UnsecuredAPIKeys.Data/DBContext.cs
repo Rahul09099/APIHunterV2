@@ -16,7 +16,12 @@ namespace UnsecuredAPIKeys.Data
             _dbPath = "unsecuredapikeys.db";
         }
 
-        public DBContext(string dbPath = "unsecuredapikeys.db")
+        public DBContext()
+        {
+            _dbPath = "unsecuredapikeys.db";
+        }
+
+        public DBContext(string dbPath)
         {
             _dbPath = dbPath;
         }
