@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Npgsql.EntityFrameworkCore.PostgreSQL;
 using UnsecuredAPIKeys.Data.Models;
 
 namespace UnsecuredAPIKeys.Data
