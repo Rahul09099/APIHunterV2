@@ -488,7 +488,7 @@ public class ScraperService
         {
             results = await searchProvider.SearchAsync(query, token, extraParams, startPage);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Re-throw so the main loop can handle token rotation
             throw;
