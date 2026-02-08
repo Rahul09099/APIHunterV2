@@ -52,14 +52,33 @@ namespace UnsecuredAPIKeys.Data
 
         public static string ConvertPostgresUrl(string url)
         {
-            if (string.IsNullOrEmpty(url) || !url.StartsWith("postgres://")) return url;
+            if (string.IsNullOrEmpty(url)) return url;
+            
+            // If it doesn't look like a URI, return it as is (might be a standard connection string)
+            if (!url.Contains("://")) return url;
+
             try
             {
-                var uri = new Uri(url);
+                // Ensure we support both postgres:// and postgresql://
+                var uriString = url;
+                if (url.StartsWith("postgres://"))
+                {
+                    uriString = "postgresql://" + url.Substring("postgres://".Length);
+                }
+
+                var uri = new Uri(uriString);
                 var userInfo = uri.UserInfo.Split(':');
-                return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.TrimStart('/')};Username={userInfo[0]};Password={(userInfo.Length > 1 ? userInfo[1] : "")};SSL Mode=Require;Trust Server Certificate=true";
+                var username = userInfo[0];
+                var password = userInfo.Length > 1 ? userInfo[1] : "";
+                var database = uri.AbsolutePath.TrimStart('/');
+                
+                return $"Host={uri.Host};Port={uri.Port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
             }
-            catch { return url; }
+            catch 
+            { 
+                // Fallback to returning original string if parsing fails
+                return url; 
+            }
         }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
