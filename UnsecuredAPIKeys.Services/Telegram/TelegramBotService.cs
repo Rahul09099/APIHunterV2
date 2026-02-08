@@ -296,20 +296,21 @@ public class TelegramBotService : BackgroundService
         var activeJobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine("📊 *Current Status*");
+        sb.AppendLine("<b>📊 Current Status</b>");
         sb.AppendLine($"Total Keys: {stats.TotalKeys}");
         sb.AppendLine($"Valid: {stats.ValidKeys} ✅");
         sb.AppendLine($"Invalid: {stats.InvalidKeys} ❌");
         sb.AppendLine($"Unverified: {stats.UnverifiedKeys} ⏳");
         sb.AppendLine($"GitHub Tokens: {stats.GitHubTokensCount}");
         sb.AppendLine();
-        sb.AppendLine($"🏃 *Active Jobs:* {activeJobs.Count}");
+        sb.AppendLine($"<b>🏃 Active Jobs:</b> {activeJobs.Count}");
         foreach (var job in activeJobs)
         {
-            sb.AppendLine($"- {job.JobType}: `{job.JobId}`");
+            var jobId = System.Net.WebUtility.HtmlEncode(job.JobId);
+            sb.AppendLine($"- {job.JobType}: <code>{jobId}</code>");
         }
 
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Markdown, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleStatsCommand(long chatId, CancellationToken ct)
@@ -321,19 +322,19 @@ public class TelegramBotService : BackgroundService
         var stats = await dbService.GetCategorizedStatisticsAsync(dbContext);
 
         var sb = new StringBuilder();
-        sb.AppendLine("📈 *Detailed Statistics*");
+        sb.AppendLine("<b>📈 Detailed Statistics</b>");
         
         foreach (var category in stats.Categories)
         {
             sb.AppendLine();
-            sb.AppendLine($"*【 {category.Value.CategoryName} 】*");
+            sb.AppendLine($"<b>【 {System.Net.WebUtility.HtmlEncode(category.Value.CategoryName)} 】</b>");
             foreach (var type in category.Value.ApiTypes)
             {
-                sb.AppendLine($"{type.ApiTypeName}: {type.KeyCount}");
+                sb.AppendLine($"{System.Net.WebUtility.HtmlEncode(type.ApiTypeName)}: {type.KeyCount}");
             }
         }
 
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Markdown, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleStartScraperCommand(long chatId, CancellationToken ct)
@@ -388,7 +389,7 @@ public class TelegramBotService : BackgroundService
             await verifier.RunAsync(cancellationToken);
         });
 
-        await _botClient.SendMessage(chatId, $"✅ Verifier started! Job ID: `{jobId}`", parseMode: ParseMode.Markdown, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, $"✅ Verifier started! Job ID: <code>{System.Net.WebUtility.HtmlEncode(jobId)}</code>", parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleStopJobCommand(long chatId, string jobId, string type, CancellationToken ct)
@@ -409,7 +410,7 @@ public class TelegramBotService : BackgroundService
 
         var success = _jobManager.StopJob(jobId);
         if (success)
-            await _botClient.SendMessage(chatId, $"⏹️ Stop requested for {type} job `{jobId}`.", parseMode: ParseMode.Markdown, cancellationToken: ct);
+            await _botClient.SendMessage(chatId, $"⏹️ Stop requested for {type} job <code>{System.Net.WebUtility.HtmlEncode(jobId)}</code>.", parseMode: ParseMode.Html, cancellationToken: ct);
         else
             await _botClient.SendMessage(chatId, "⚠️ Job not found or already stopped.", cancellationToken: ct);
     }
@@ -424,25 +425,26 @@ public class TelegramBotService : BackgroundService
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine($"📋 *Recent {type} Jobs:*");
+        sb.AppendLine($"<b>📋 Recent {type} Jobs:</b>");
         foreach (var job in jobs.TakeLast(5))
         {
-            sb.AppendLine($"- `{job.JobId}`: {job.Status} (Started: {job.StartedAt})");
+            var jobId = System.Net.WebUtility.HtmlEncode(job.JobId);
+            sb.AppendLine($"- <code>{jobId}</code>: {job.Status} (Started: {job.StartedAt})");
         }
 
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Markdown, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleListApiTypesCommand(long chatId, CancellationToken ct)
     {
         var types = Enum.GetValues<ApiTypeEnum>().Where(t => t != ApiTypeEnum.Unknown).ToList();
         var sb = new StringBuilder();
-        sb.AppendLine("📋 *Supported API Types:*");
+        sb.AppendLine("<b>📋 Supported API Types:</b>");
         foreach (var type in types.OrderBy(t => t.ToString()))
         {
             sb.AppendLine($"- {type}");
         }
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Markdown, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleListTokensCommand(long chatId, CancellationToken ct)
@@ -458,14 +460,14 @@ public class TelegramBotService : BackgroundService
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine("🔑 *GitHub Tokens:*");
+        sb.AppendLine("<b>🔑 GitHub Tokens:</b>");
         foreach (var t in tokens)
         {
-            var preview = t.Token.Length > 10 ? t.Token.Substring(0, 10) + "..." : "***";
-            sb.AppendLine($"- ID: `{t.Id}` | {preview} | Enabled: {t.IsEnabled}");
+            var preview = t.Token.Length > 10 ? System.Net.WebUtility.HtmlEncode(t.Token.Substring(0, 10)) + "..." : "***";
+            sb.AppendLine($"- ID: <code>{t.Id}</code> | {preview} | Enabled: {t.IsEnabled}");
         }
 
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Markdown, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleAddTokenCommand(long chatId, string token, CancellationToken ct)
@@ -507,14 +509,15 @@ public class TelegramBotService : BackgroundService
         var queries = await dbContext.SearchQueries.ToListAsync(ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine("🔍 *Search Queries:*");
+        sb.AppendLine("<b>🔍 Search Queries:</b>");
         foreach (var q in queries.Take(20))
         {
-            sb.AppendLine($"- ID: `{q.Id}` | {q.Query} | Enabled: {q.IsEnabled}");
+            var queryText = System.Net.WebUtility.HtmlEncode(q.Query);
+            sb.AppendLine($"- ID: <code>{q.Id}</code> | {queryText} | Enabled: {q.IsEnabled}");
         }
         if (queries.Count > 20) sb.AppendLine("...(more queries in DB)");
 
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Markdown, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleAddQueryCommand(long chatId, string query, CancellationToken ct)
@@ -584,15 +587,15 @@ public class TelegramBotService : BackgroundService
             .ToListAsync(ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine("✅ *Valid Keys Count:*");
+        sb.AppendLine("<b>✅ Valid Keys Count:</b>");
         foreach (var v in validKeys.OrderByDescending(x => x.count))
         {
-            sb.AppendLine($"- {v.apiType}: {v.count}");
+            sb.AppendLine($"- {System.Net.WebUtility.HtmlEncode(v.apiType)}: {v.count}");
         }
         sb.AppendLine();
         sb.AppendLine($"Total Valid: {validKeys.Sum(x => x.count)}");
 
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Markdown, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleExportCommand(long chatId, string format, CancellationToken ct)
