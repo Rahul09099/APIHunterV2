@@ -71,8 +71,8 @@ namespace UnsecuredAPIKeys.Data
                 var username = userInfo[0];
                 var password = userInfo.Length > 1 ? userInfo[1] : "";
                 var database = uri.AbsolutePath.TrimStart('/');
-                
-                return $"Host={uri.Host};Port={uri.Port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
+                var port = uri.Port == -1 ? 5432 : uri.Port;
+                return $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
             }
             catch 
             { 
