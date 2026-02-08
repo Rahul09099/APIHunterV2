@@ -31,22 +31,22 @@ public class ConfigController : ControllerBase
         }
 
         // Check if token already exists
-        var exists = await _dbContext.GitHubTokens
-            .AnyAsync(t => t.Token == request.Token);
+        var exists = await _dbContext.SearchProviderTokens
+            .AnyAsync(t => t.Token == request.Token && t.SearchProvider == SearchProviderEnum.GitHub);
 
         if (exists)
         {
             return Conflict(new { message = "Token already exists" });
         }
 
-        var token = new GitHubToken
+        var token = new SearchProviderToken
         {
             Token = request.Token,
-            IsRateLimited = false,
-            RequestCount = 0
+            SearchProvider = SearchProviderEnum.GitHub,
+            IsEnabled = true
         };
 
-        _dbContext.GitHubTokens.Add(token);
+        _dbContext.SearchProviderTokens.Add(token);
         await _dbContext.SaveChangesAsync();
 
         return Ok(new { message = "GitHub token added successfully", tokenId = token.Id });
@@ -58,14 +58,14 @@ public class ConfigController : ControllerBase
     [HttpDelete("github-token/{id}")]
     public async Task<IActionResult> DeleteGitHubToken(int id)
     {
-        var token = await _dbContext.GitHubTokens.FindAsync(id);
+        var token = await _dbContext.SearchProviderTokens.FindAsync(id);
         
         if (token == null)
         {
             return NotFound(new { message = "Token not found" });
         }
 
-        _dbContext.GitHubTokens.Remove(token);
+        _dbContext.SearchProviderTokens.Remove(token);
         await _dbContext.SaveChangesAsync();
 
         return Ok(new { message = "GitHub token deleted successfully" });
@@ -86,7 +86,7 @@ public class ConfigController : ControllerBase
         {
             Query = request.Query,
             IsEnabled = true,
-            CreatedAt = DateTime.UtcNow
+            LastSearchUTC = DateTime.UtcNow
         };
 
         _dbContext.SearchQueries.Add(query);
@@ -143,13 +143,13 @@ public class ConfigController : ControllerBase
     public async Task<IActionResult> ExportKeys([FromQuery] string format = "json")
     {
         var validKeys = await _dbContext.APIKeys
-            .Where(k => k.VerificationStatus == Data.Common.VerificationStatusEnum.Valid)
+            .Where(k => k.Status == ApiStatusEnum.Valid)
             .Select(k => new
             {
                 k.ApiType,
                 k.ApiKey,
-                k.LastVerifiedAt,
-                k.CreatedAt
+                k.LastCheckedUTC,
+                k.FirstFoundUTC
             })
             .ToListAsync();
 
@@ -157,7 +157,7 @@ public class ConfigController : ControllerBase
         {
             var csv = "ApiType,ApiKey,LastVerifiedAt,CreatedAt\n";
             csv += string.Join("\n", validKeys.Select(k => 
-                $"{k.ApiType},\"{k.ApiKey}\",{k.LastVerifiedAt},{k.CreatedAt}"));
+                $"{k.ApiType},\"{k.ApiKey}\",{k.LastCheckedUTC},{k.FirstFoundUTC}"));
             
             return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", "valid_keys.csv");
         }
@@ -179,7 +179,7 @@ public class ConfigController : ControllerBase
         }
 
         await _dbService.ResetDatabaseAsync();
-        await _dbService.InitializeAsync();
+        await _dbService.InitializeDatabaseAsync();
 
         return Ok(new { message = "Database reset successfully" });
     }
