@@ -10,7 +10,8 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new() { 
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    { 
         Title = "UnsecuredAPIKeys API", 
         Version = "v1",
         Description = "API for managing GitHub API key scraping and verification"
@@ -52,7 +53,7 @@ using (var scope = app.Services.CreateScope())
     await db.Database.EnsureCreatedAsync();
     
     var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
-    await dbService.InitializeAsync();
+    await dbService.InitializeDatabaseAsync();
 }
 
 // Configure the HTTP request pipeline
