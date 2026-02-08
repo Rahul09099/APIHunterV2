@@ -11,11 +11,20 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 // Configure Database
+var connectionString = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING");
 var dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") 
     ?? Path.Combine(AppContext.BaseDirectory, "unsecuredapikeys.db");
 
-builder.Services.AddDbContext<DBContext>(options =>
-    options.UseSqlite($"Data Source={dbPath}"));
+if (!string.IsNullOrEmpty(connectionString))
+{
+    builder.Services.AddDbContext<DBContext>(options =>
+        options.UseNpgsql(connectionString));
+}
+else
+{
+    builder.Services.AddDbContext<DBContext>(options =>
+        options.UseSqlite($"Data Source={dbPath}"));
+}
 
 // Register services
 builder.Services.AddHttpClient();
