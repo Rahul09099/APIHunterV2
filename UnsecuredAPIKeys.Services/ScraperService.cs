@@ -62,19 +62,6 @@ public class ScraperService
             groups.Add(InferProviderFromQuery(q.Query));
         }
 
-        // 2. Get groups from enabled provider tokens
-        var allTokens = await _dbContext.SearchProviderTokens
-            .Where(t => t.IsEnabled)
-            .ToListAsync(cancellationToken);
-
-        foreach (var t in allTokens)
-        {
-            if (t.SearchProvider == SearchProviderEnum.GitHub)
-            {
-                groups.Add("GitHub");
-            }
-        }
-
         return groups.OrderBy(g => g).ToList();
     }
 
