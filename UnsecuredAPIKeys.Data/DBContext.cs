@@ -41,13 +41,25 @@ namespace UnsecuredAPIKeys.Data
                 var connectionString = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING");
                 if (!string.IsNullOrEmpty(connectionString))
                 {
-                    optionsBuilder.UseNpgsql(connectionString);
+                    optionsBuilder.UseNpgsql(ConvertPostgresUrl(connectionString));
                 }
                 else
                 {
                     optionsBuilder.UseSqlite($"Data Source={_dbPath}");
                 }
             }
+        }
+
+        public static string ConvertPostgresUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url) || !url.StartsWith("postgres://")) return url;
+            try
+            {
+                var uri = new Uri(url);
+                var userInfo = uri.UserInfo.Split(':');
+                return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.TrimStart('/')};Username={userInfo[0]};Password={(userInfo.Length > 1 ? userInfo[1] : "")};SSL Mode=Require;Trust Server Certificate=true";
+            }
+            catch { return url; }
         }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
