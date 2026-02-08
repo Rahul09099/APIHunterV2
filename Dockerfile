@@ -2,21 +2,20 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Copy everything
+# Copy project files for restore
+COPY UnsecuredAPIKeys.WebAPI/*.csproj ./UnsecuredAPIKeys.WebAPI/
+COPY UnsecuredAPIKeys.Data/*.csproj ./UnsecuredAPIKeys.Data/
+COPY UnsecuredAPIKeys.Services/*.csproj ./UnsecuredAPIKeys.Services/
+COPY UnsecuredAPIKeys.Providers/*.csproj ./UnsecuredAPIKeys.Providers/
+
+# Restore Web API project (restores all dependencies)
+RUN dotnet restore UnsecuredAPIKeys.WebAPI/UnsecuredAPIKeys.WebAPI.csproj
+
+# Copy remaining source code
 COPY . .
 
-# Restore dependencies
-RUN dotnet restore
-
-# Copy everything else
-COPY . .
-
-# Build the Web API project
+# Publish the Web API
 WORKDIR /src/UnsecuredAPIKeys.WebAPI
-RUN dotnet build -c Release -o /app/build
-
-# Publish stage
-FROM build AS publish
 RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 
 # Runtime stage
