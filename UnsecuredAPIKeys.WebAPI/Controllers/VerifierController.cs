@@ -32,7 +32,7 @@ public class VerifierController : ControllerBase
     /// </summary>
     /// <param name="apiTypes">Optional comma-separated list of API types (e.g., "OpenAI,Anthropic")</param>
     [HttpPost("start")]
-    public async Task<IActionResult> StartVerifier([FromQuery] string? apiTypes = null)
+    public IActionResult StartVerifier([FromQuery] string? apiTypes = null)
     {
         HashSet<ApiTypeEnum>? selectedTypes = null;
         
