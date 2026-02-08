@@ -17,11 +17,13 @@ var dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH")
 
 if (!string.IsNullOrEmpty(connectionString))
 {
+    Console.WriteLine("🗄️ Database: Using PostgreSQL");
     builder.Services.AddDbContext<DBContext>(options =>
         options.UseNpgsql(connectionString));
 }
 else
 {
+    Console.WriteLine($"🗄️ Database: Using SQLite ({dbPath})");
     builder.Services.AddDbContext<DBContext>(options =>
         options.UseSqlite($"Data Source={dbPath}"));
 }
