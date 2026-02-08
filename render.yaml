@@ -12,13 +12,17 @@ services:
       - key: DATABASE_PATH
         value: /app/data/unsecuredapikeys.db
       - key: TELEGRAM_BOT_TOKEN
-        sync: false # Set this in the Dashboard
+        sync: false
       - key: TELEGRAM_ADMIN_CHAT_ID
-        sync: false # Set this in the Dashboard
+        sync: false
+      - key: POSTGRES_CONNECTION_STRING
+        fromDatabase:
+          name: apikeys-db
+          property: connectionString
       - key: PORT
         generateValue: true
-    # Persistent disk for database (optional but recommended)
-    disk:
-      name: database
-      mountPath: /app/data
-      sizeGB: 1
+
+databases:
+  - name: apikeys-db
+    plan: free
+    region: oregon
