@@ -8,15 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
-    { 
-        Title = "UnsecuredAPIKeys API", 
-        Version = "v1",
-        Description = "API for managing GitHub API key scraping and verification"
-    });
-});
+builder.Services.AddSwaggerGen();
 
 // Configure Database
 var dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") 
