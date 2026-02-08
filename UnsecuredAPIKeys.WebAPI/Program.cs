@@ -18,7 +18,13 @@ var dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH")
 if (!string.IsNullOrEmpty(connectionString))
 {
     var parsedConnectionString = DBContext.ConvertPostgresUrl(connectionString);
+    var maskedConnectionString = parsedConnectionString.Contains("Password=") 
+        ? System.Text.RegularExpressions.Regex.Replace(parsedConnectionString, "Password=[^;]+", "Password=********")
+        : parsedConnectionString;
+
     Console.WriteLine("🗄️ Database: Using PostgreSQL");
+    Console.WriteLine($"🗄️ Connection: {maskedConnectionString}");
+
     builder.Services.AddDbContext<DBContext>(options =>
         options.UseNpgsql(parsedConnectionString));
 }
