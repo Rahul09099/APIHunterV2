@@ -17,7 +17,7 @@ var dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH")
 
 if (!string.IsNullOrEmpty(connectionString))
 {
-    var parsedConnectionString = ConvertPostgresUrl(connectionString);
+    var parsedConnectionString = DBContext.ConvertPostgresUrl(connectionString);
     Console.WriteLine("🗄️ Database: Using PostgreSQL");
     builder.Services.AddDbContext<DBContext>(options =>
         options.UseNpgsql(parsedConnectionString));
@@ -76,15 +76,3 @@ app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
 
 app.Run();
-
-static string ConvertPostgresUrl(string url)
-{
-    if (string.IsNullOrEmpty(url) || !url.StartsWith("postgres://")) return url;
-    try
-    {
-        var uri = new Uri(url);
-        var userInfo = uri.UserInfo.Split(':');
-        return $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.TrimStart('/')};Username={userInfo[0]};Password={(userInfo.Length > 1 ? userInfo[1] : "")};SSL Mode=Require;Trust Server Certificate=true";
-    }
-    catch { return url; }
-}
