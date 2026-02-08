@@ -8,7 +8,7 @@ COPY UnsecuredAPIKeys.Data/*.csproj ./UnsecuredAPIKeys.Data/
 COPY UnsecuredAPIKeys.Services/*.csproj ./UnsecuredAPIKeys.Services/
 COPY UnsecuredAPIKeys.Providers/*.csproj ./UnsecuredAPIKeys.Providers/
 
-# Restore Web API project (restores all dependencies)
+# Restore Web API project
 RUN dotnet restore UnsecuredAPIKeys.WebAPI/UnsecuredAPIKeys.WebAPI.csproj
 
 # Copy remaining source code
@@ -16,7 +16,7 @@ COPY . .
 
 # Publish the Web API
 WORKDIR /src/UnsecuredAPIKeys.WebAPI
-RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish -c Release -o /app/publish --no-restore
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
