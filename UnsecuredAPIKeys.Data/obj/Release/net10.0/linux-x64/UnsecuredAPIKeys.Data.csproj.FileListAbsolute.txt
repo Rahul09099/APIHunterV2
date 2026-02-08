@@ -1,0 +1,12 @@
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\bin\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.deps.json
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\bin\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.runtimeconfig.json
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\bin\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.csproj.AssemblyReference.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.AssemblyInfoInputs.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.AssemblyInfo.cs
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.csproj.CoreCompileInputs.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Release\net10.0\linux-x64\refint\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Release\net10.0\linux-x64\UnsecuredAPIKeys.Data.genruntimeconfig.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Release\net10.0\linux-x64\ref\UnsecuredAPIKeys.Data.dll

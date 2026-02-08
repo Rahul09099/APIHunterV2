@@ -1,0 +1,56 @@
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.deps.json
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.runtimeconfig.json
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.csproj.AssemblyReference.cache
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.AssemblyInfoInputs.cache
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.AssemblyInfo.cs
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.csproj.CoreCompileInputs.cache
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\refint\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.genruntimeconfig.cache
+C:\Users\rk170\Downloads\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Lite-main\UnsecuredAPIKeys.Data\obj\Debug\net10.0\ref\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.deps.json
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.runtimeconfig.json
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.csproj.AssemblyReference.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.AssemblyInfoInputs.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.AssemblyInfo.cs
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.csproj.CoreCompileInputs.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\refint\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.genruntimeconfig.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys\UnsecuredAPIKeys.Data\obj\Debug\net10.0\ref\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.deps.json
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.runtimeconfig.json
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.csproj.AssemblyReference.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.AssemblyInfoInputs.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.AssemblyInfo.cs
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.csproj.CoreCompileInputs.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\refint\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.genruntimeconfig.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (final kling )\UnsecuredAPIKeys.Data\obj\Debug\net10.0\ref\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.deps.json
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.runtimeconfig.json
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\bin\Debug\net10.0\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.csproj.AssemblyReference.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.AssemblyInfoInputs.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.AssemblyInfo.cs
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.csproj.CoreCompileInputs.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\refint\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\UnsecuredAPIKeys.Data.genruntimeconfig.cache
+C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.Data\obj\Debug\net10.0\ref\UnsecuredAPIKeys.Data.dll
