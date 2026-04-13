@@ -21,8 +21,8 @@ public class DatabaseService(DBContext dbContext)
 
     public async Task<DBContext> InitializeDatabaseAsync()
     {
-        // Ensure database is created
-        await dbContext.Database.EnsureCreatedAsync();
+        // Ensure database is created (Bypassed for stability on Render Free tier)
+        // await dbContext.Database.EnsureCreatedAsync();
         
         // Re-classify any keys that might be misclassified or have legacy IDs
         await FixLegacyKeysAsync(dbContext);
@@ -42,7 +42,7 @@ public class DatabaseService(DBContext dbContext)
             
         if (keysToFix.Count == 0) return;
         
-        AnsiConsole.MarkupLine($"[dim]Checking {keysToFix.Count} legacy/unknown keys for re-classification...[/]");
+        Console.WriteLine($"[DB] Checking {keysToFix.Count} legacy/unknown keys for re-classification...");
         int fixedCount = 0;
         
         foreach (var key in keysToFix)
@@ -64,7 +64,7 @@ public class DatabaseService(DBContext dbContext)
         if (fixedCount > 0)
         {
             await dbContext.SaveChangesAsync();
-            AnsiConsole.MarkupLine($"[green]Successfully re-classified {fixedCount} keys.[/]");
+            Console.WriteLine($"[DB] Successfully re-classified {fixedCount} keys.");
         }
     }
 
@@ -160,7 +160,7 @@ public class DatabaseService(DBContext dbContext)
         if (addedAny)
         {
             await dbContext.SaveChangesAsync();
-            AnsiConsole.MarkupLine($"[dim]Updated default search queries.[/]");
+            Console.WriteLine("[DB] Updated default search queries.");
         }
     }
 
