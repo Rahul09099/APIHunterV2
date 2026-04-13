@@ -88,9 +88,6 @@ var app = builder.Build();
 // Initialize database
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<DBContext>();
-    await db.Database.EnsureCreatedAsync();
-    
     var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
     await dbService.InitializeDatabaseAsync();
 }
