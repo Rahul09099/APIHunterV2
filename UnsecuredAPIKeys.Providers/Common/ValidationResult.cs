@@ -36,6 +36,9 @@ namespace UnsecuredAPIKeys.Providers.Common
         // Model information discovered during validation
         public List<ModelInfo>? AvailableModels { get; set; }
 
+        public string? Balance { get; set; }
+        public string? AccountTier { get; set; }
+
         // Helper factory methods for convenience
         public static ValidationResult Success(HttpStatusCode statusCode, List<ModelInfo>? models = null) =>
             new() { Status = ValidationAttemptStatus.Valid, HttpStatusCode = statusCode, AvailableModels = models };

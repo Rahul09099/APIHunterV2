@@ -251,7 +251,7 @@ public class ScraperService
         if (q.Contains("eleven") || q.Contains("xi-")) return "ElevenLabs";
         if (q.Contains("stability")) return "StabilityAI";
         if (q.Contains("together")) return "TogetherAI";
-        if (q.Contains("xai")) return "XAI";
+        if (q.Contains("xai") || q.Contains("grok")) return "XAI";
         if (q.Contains("replicate") || q.Contains("r8_")) return "Replicate";
         if (q.Contains("fireworks") || q.Contains("fw_")) return "Fireworks";
         if (q.Contains("hugging") || q.Contains("hf_")) return "HuggingFace";

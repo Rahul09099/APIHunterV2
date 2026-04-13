@@ -125,6 +125,10 @@ public class DatabaseService(DBContext dbContext)
             // XAI
             "xai-",
             "XAI_API_KEY",
+            "GROK_API_KEY",
+            "xai_api_key",
+            "XAI_SECRET",
+            "grok-",
 
             // Pollo AI patterns
             "POLLO_API_KEY",
@@ -353,10 +357,13 @@ public class DatabaseService(DBContext dbContext)
         {
             k.Id,
             k.ApiKey,
-            Type = k.ApiType.ToString(),
-            Status = k.Status.ToString(),
+            k.ApiType,
+            k.Status,
+            k.Balance,
+            k.AccountTier,
             k.FirstFoundUTC,
             k.LastCheckedUTC,
+            k.TimesDisplayed,
             k.ValidationResponse,
             Sources = k.References.Select(r => new
             {
@@ -377,19 +384,17 @@ public class DatabaseService(DBContext dbContext)
     {
         var lines = new List<string>
         {
-            "Id,ApiKey,Type,Status,ValidationResponse,FirstFoundUTC,LastCheckedUTC,Source,SourceFoundUTC"
+            "Id,ApiKey,Type,Status,Balance,Tier,ValidationResponse,FirstFoundUTC,LastCheckedUTC,Source,SourceFoundUTC"
         };
 
         foreach (var key in keys)
         {
-            var firstRef = key.References.OrderByDescending(r => r.FoundUTC).FirstOrDefault();
-            var source = firstRef?.FileURL ?? (firstRef != null ? $"{firstRef.RepoURL}/blob/{firstRef.Branch ?? "main"}/{firstRef.FilePath}" : "");
-            var sourceFoundUTC = firstRef != null ? firstRef.FoundUTC.ToString("O") : "";
-            
-            // Escape quotes and handle newlines in validation response
-            var valResponse = key.ValidationResponse?.Replace("\"", "\"\"").Replace("\n", " ") ?? "";
-            
-            lines.Add($"{key.Id},\"{key.ApiKey}\",{key.ApiType},{key.Status},\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"{source}\",\"{sourceFoundUTC}\"");
+            foreach (var r in key.References)
+            {
+                var source = r.FileURL ?? $"{r.RepoURL}/blob/{r.Branch ?? "main"}/{r.FilePath}";
+                var valResponse = key.ValidationResponse?.Replace("\"", "\"\"").Replace("\n", " ") ?? "";
+                lines.Add($"{key.Id},{key.ApiKey},{key.ApiType},{key.Status},{key.Balance},{key.AccountTier},\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"{source}\",{r.FoundUTC:O}");
+            }
         }
 
         await File.WriteAllLinesAsync(filePath, lines);

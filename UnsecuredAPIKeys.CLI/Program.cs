@@ -294,6 +294,30 @@ async Task ShowStatusAsync(DBContext db, DatabaseService dbService)
     summaryTable.AddRow("GitHub Tokens", catStats.GitHubTokensCount > 0 ? $"[green]{catStats.GitHubTokensCount} Configured[/]" : "[red]Not configured[/]");
 
     AnsiConsole.Write(summaryTable);
+
+    // Show top keys with balance
+    var richKeys = await db.APIKeys
+        .Where(k => !string.IsNullOrEmpty(k.Balance))
+        .OrderByDescending(k => k.LastCheckedUTC)
+        .Take(5)
+        .ToListAsync();
+
+    if (richKeys.Any())
+    {
+        AnsiConsole.WriteLine();
+        var richTable = new Table().Border(TableBorder.Rounded).BorderColor(Color.Green);
+        richTable.Title("[bold green]Top Detected Balances[/]");
+        richTable.AddColumn("Type");
+        richTable.AddColumn("Tier");
+        richTable.AddColumn("Balance");
+
+        foreach (var key in richKeys)
+        {
+            richTable.AddRow(key.ApiType.ToString(), key.AccountTier ?? "N/A", $"[bold green]{key.Balance}[/]");
+        }
+        AnsiConsole.Write(richTable);
+    }
+
     AnsiConsole.WriteLine();
 
     // Display categorized breakdown

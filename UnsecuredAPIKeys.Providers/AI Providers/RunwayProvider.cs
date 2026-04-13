@@ -41,7 +41,22 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, "Valid RunwayML key");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid RunwayML key");
+                    
+                    try 
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        var root = doc.RootElement;
+                        
+                        if (root.TryGetProperty("usage_tier", out var tier))
+                            result.AccountTier = tier.GetString();
+                            
+                        if (root.TryGetProperty("billing", out var billing) && billing.TryGetProperty("credits", out var credits))
+                            result.Balance = $"{credits.GetInt64()} Credits";
+                    }
+                    catch { /* Best effort parsing */ }
+
+                    return result;
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
                 {
