@@ -13,15 +13,10 @@ RUN dotnet publish UnsecuredAPIKeys.WebAPI/UnsecuredAPIKeys.WebAPI.csproj -c Rel
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 WORKDIR /app
 
-# Install SQLite (needed for database operations)
-RUN apt-get update && apt-get install -y sqlite3 libsqlite3-dev && rm -rf /var/lib/apt/lists/*
-
 # Copy published files
 COPY --from=publish /app/publish .
 
 # Create directory for database
-RUN mkdir -p /app/data
-
 # Set environment variables
 ENV ASPNETCORE_URLS=http://+:$PORT
 ENV DATABASE_PATH=/app/data/unsecuredapikeys.db

@@ -16,6 +16,18 @@ namespace UnsecuredAPIKeys.Data
             _dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") ?? "unsecuredapikeys.db";
         }
 
+        public async Task InitializeDatabaseAsync()
+        {
+            // Ensure database is created (Bypassed for stability on Render Free tier)
+            // await dbContext.Database.EnsureCreatedAsync();
+            
+            // Skip legacy processing at startup to save memory on Render Free tier
+            // await FixLegacyKeysAsync(dbContext);
+            
+            // Skip seeding at startup to prevent timeouts on Supabase pooler
+            // await SeedDefaultDataAsync(dbContext);
+        }
+
         public DBContext()
         {
             _dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") ?? "unsecuredapikeys.db";
@@ -75,10 +87,10 @@ namespace UnsecuredAPIKeys.Data
                 var port = uri.Port == -1 ? 5432 : uri.Port;
                 var connStr = $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
                 
-                // If using the pooler (6543), disable prepared statements to prevent hangs during EnsureCreated
+                // If using the pooler (6543), disable prepared statements and pooling
                 if (port == 6543)
                 {
-                    connStr += ";Max Auto Prepare=0;";
+                    connStr += ";Max Auto Prepare=0;Pooling=false;";
                 }
                 
                 return connStr;

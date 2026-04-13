@@ -24,11 +24,11 @@ public class DatabaseService(DBContext dbContext)
         // Ensure database is created (Bypassed for stability on Render Free tier)
         // await dbContext.Database.EnsureCreatedAsync();
         
-        // Re-classify any keys that might be misclassified or have legacy IDs
-        await FixLegacyKeysAsync(dbContext);
- 
-        // Seed default data if needed
-        await SeedDefaultDataAsync(dbContext);
+        // Skip legacy processing at startup to save memory on Render Free tier
+        // await FixLegacyKeysAsync(dbContext);
+        
+        // Skip seeding at startup to prevent timeouts on Supabase pooler
+        // await SeedDefaultDataAsync(dbContext);
  
         return dbContext;
     }

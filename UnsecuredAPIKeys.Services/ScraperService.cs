@@ -146,7 +146,7 @@ public class ScraperService
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        AnsiConsole.MarkupLine("[cyan]Starting GitHub scraper...[/]");
+        Console.WriteLine("[cyan]Starting GitHub scraper...[/]");
 
         // Get GitHub tokens
         var tokens = await _dbContext.SearchProviderTokens
@@ -155,11 +155,11 @@ public class ScraperService
 
         if (tokens.Count == 0)
         {
-            AnsiConsole.MarkupLine("[red]No GitHub tokens configured. Use 'Configure Settings' to add one.[/]");
+            Console.WriteLine("[red]No GitHub tokens configured. Use 'Configure Settings' to add one.[/]");
             return;
         }
 
-        AnsiConsole.MarkupLine($"[dim]Loaded {tokens.Count} GitHub token(s).[/]");
+        Console.WriteLine($"[dim]Loaded {tokens.Count} GitHub token(s).[/]");
         var tokenCursor = new TokenCursor { Index = 0 };
 
         while (!_cancellationTokenSource.Token.IsCancellationRequested)
@@ -173,7 +173,7 @@ public class ScraperService
 
                 if (allQueries.Count == 0)
                 {
-                    AnsiConsole.MarkupLine("[yellow]No search queries defined.[/]");
+                    Console.WriteLine("[yellow]No search queries defined.[/]");
                     return;
                 }
 
@@ -221,7 +221,7 @@ public class ScraperService
                 bool isDeepSearch = modeSelection.StartsWith("2");
                 var queriesToRun = groups.First(g => g.Key == selectedGroupName).ToList();
 
-                AnsiConsole.MarkupLine($"\n[green]Starting {(isDeepSearch ? "DEEP" : "LITE")} scrape for {queriesToRun.Count} queries...[/]");
+                Console.WriteLine($"\n[green]Starting {(isDeepSearch ? "DEEP" : "LITE")} scrape for {queriesToRun.Count} queries...[/]");
                 
                 foreach (var query in queriesToRun)
                 {
@@ -239,13 +239,13 @@ public class ScraperService
                     // Delay between queries (if not the last one)
                     if (query != queriesToRun.Last())
                     {
-                        AnsiConsole.MarkupLine($"[dim]Waiting {LiteLimits.SEARCH_DELAY_MS / 1000}s before next query...[/]");
+                        Console.WriteLine($"[dim]Waiting {LiteLimits.SEARCH_DELAY_MS / 1000}s before next query...[/]");
                         await Task.Delay(LiteLimits.SEARCH_DELAY_MS, _cancellationTokenSource.Token);
                     }
                 }
 
-                AnsiConsole.MarkupLine($"[green]Completed scraping for {selectedGroupName}.[/]");
-                AnsiConsole.MarkupLine("[dim]Press any key to continue to menu...[/]");
+                Console.WriteLine($"[green]Completed scraping for {selectedGroupName}.[/]");
+                Console.WriteLine("[dim]Press any key to continue to menu...[/]");
                 if (!Console.IsInputRedirected) Console.ReadKey(true);
             }
             catch (OperationCanceledException)
@@ -254,7 +254,7 @@ public class ScraperService
             }
             catch (Exception ex)
             {
-                AnsiConsole.MarkupLine($"[red]Error during scraping: {Markup.Escape(ex.Message)}[/]");
+                Console.WriteLine($"[red]Error during scraping: {Markup.Escape(ex.Message)}[/]");
                 _logger?.LogError(ex, "Scraping cycle error");
                 await Task.Delay(2000, _cancellationTokenSource.Token);
             }
@@ -286,9 +286,9 @@ public class ScraperService
     {
         // Deep search strategy using language and file extension filters with progress tracking
         
-        AnsiConsole.MarkupLine("\n[cyan]═══ Deep Search Configuration ═══[/]");
-        AnsiConsole.MarkupLine("[yellow]Deep Search will partition results by language and file type to bypass the 1000-result limit.[/]");
-        AnsiConsole.MarkupLine("[dim]Note: GitHub Code Search doesn't support date filtering.[/]\n");
+        Console.WriteLine("\n[cyan]═══ Deep Search Configuration ═══[/]");
+        Console.WriteLine("[yellow]Deep Search will partition results by language and file type to bypass the 1000-result limit.[/]");
+        Console.WriteLine("[dim]Note: GitHub Code Search doesn't support date filtering.[/]\n");
         
         // Define search partitions
         var languages = new[] { "python", "javascript", "typescript", "go", "java", "csharp", "ruby", "php", "shell" };
@@ -302,7 +302,7 @@ public class ScraperService
         // Display progress if any exists
         if (existingProgress.Any())
         {
-            AnsiConsole.MarkupLine("[yellow]Found existing progress for this query:[/]\n");
+            Console.WriteLine("[yellow]Found existing progress for this query:[/]\n");
             
             var progressTable = new Table().Border(TableBorder.Rounded);
             progressTable.AddColumn("[bold]Partition[/]");
@@ -343,11 +343,11 @@ public class ScraperService
                 _dbContext.DeepSearchProgress.RemoveRange(existingProgress);
                 await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
                 existingProgress.Clear();
-                AnsiConsole.MarkupLine("[green]Progress cleared. Starting fresh...[/]\n");
+                Console.WriteLine("[green]Progress cleared. Starting fresh...[/]\n");
             }
             else
             {
-                AnsiConsole.MarkupLine("[green]Resuming from last position...[/]\n");
+                Console.WriteLine("[green]Resuming from last position...[/]\n");
             }
         }
         
@@ -365,8 +365,8 @@ public class ScraperService
             TotalResultsFound = totalExistingResults
         };
         
-        AnsiConsole.MarkupLine($"[yellow]Starting deep search for: {Markup.Escape(query.Query)}[/]");
-        AnsiConsole.MarkupLine($"[dim]Will search across {languages.Length} languages and {extensions.Length} file types[/]\n");
+        Console.WriteLine($"[yellow]Starting deep search for: {Markup.Escape(query.Query)}[/]");
+        Console.WriteLine($"[dim]Will search across {languages.Length} languages and {extensions.Length} file types[/]\n");
         
         // Search by language
         foreach (var language in languages)
@@ -385,7 +385,7 @@ public class ScraperService
         }
         
         // Display summary
-        AnsiConsole.MarkupLine("\n[cyan]═══ Deep Search Summary ═══[/]");
+        Console.WriteLine("\n[cyan]═══ Deep Search Summary ═══[/]");
         var summaryTable = new Table().Border(TableBorder.Rounded);
         summaryTable.AddColumn("[bold]Metric[/]");
         summaryTable.AddColumn("[bold]Value[/]");
@@ -429,14 +429,14 @@ public class ScraperService
         // Skip if already completed
         if (progress.IsCompleted)
         {
-            AnsiConsole.MarkupLine($"[dim]→ Skipping {partitionValue} ({partitionType}) - already completed[/]");
+            Console.WriteLine($"[dim]→ Skipping {partitionValue} ({partitionType}) - already completed[/]");
             return;
         }
         
         string filter = $"{partitionType}:{partitionValue}";
         int startPage = progress.LastPageSearched + 1;
         
-        AnsiConsole.MarkupLine($"[dim]→ Searching {partitionValue} ({partitionType}) from page {startPage}...[/]");
+        Console.WriteLine($"[dim]→ Searching {partitionValue} ({partitionType}) from page {startPage}...[/]");
         
         stats.TotalRangesSearched++;
         int resultCount = await RunScrapingCycleUtilsAsync(tokens, query, cursor, filter, discoveredBy, startPage);
@@ -480,13 +480,13 @@ public class ScraperService
             }
             catch (Exception ex)
             {
-                AnsiConsole.MarkupLine($"[yellow]Error with current token: {Markup.Escape(ex.Message)}. Switching token...[/]");
+                Console.WriteLine($"[yellow]Error with current token: {Markup.Escape(ex.Message)}. Switching token...[/]");
                 cursor.Index = (cursor.Index + 1) % tokens.Count;
                 retryCount++;
 
                 if (retryCount >= tokens.Count)
                 {
-                    AnsiConsole.MarkupLine("[red]All tokens exhausted or failed for this query.[/]");
+                    Console.WriteLine("[red]All tokens exhausted or failed for this query.[/]");
                 }
             }
         }
@@ -500,7 +500,7 @@ public class ScraperService
         _duplicateKeysFound = 0;
 
         string displayQuery = query.Query + (extraParams != null ? $" {extraParams}" : "");
-        AnsiConsole.MarkupLine($"[cyan]Searching: {Markup.Escape(displayQuery)}[/]");
+        Console.WriteLine($"[cyan]Searching: {Markup.Escape(displayQuery)}[/]");
 
         // Update last search time
         query.LastSearchUTC = DateTime.UtcNow;
@@ -522,13 +522,13 @@ public class ScraperService
 
         if (results == null)
         {
-            AnsiConsole.MarkupLine("[yellow]No results from search.[/]");
+            Console.WriteLine("[yellow]No results from search.[/]");
             return 0;
         }
 
         var resultsList = results.ToList();
         
-        AnsiConsole.MarkupLine($"[dim]Fetched {resultsList.Count} matches[/]");
+        Console.WriteLine($"[dim]Fetched {resultsList.Count} matches[/]");
 
         // Process each result
         await AnsiConsole.Progress()
@@ -665,9 +665,9 @@ public class ScraperService
                         await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
 
                         Interlocked.Increment(ref _newKeysFound);
-                        AnsiConsole.MarkupLine($"[green]+ New {Markup.Escape(provider.ProviderName)} key found![/]");
-                        AnsiConsole.MarkupLine($"  [dim]Source: {Markup.Escape(repoRef.FileURL ?? "Unknown")}[/]");
-                        AnsiConsole.MarkupLine($"  [dim]Repo: {Markup.Escape(repoRef.RepoURL ?? "Unknown")}[/]");
+                        Console.WriteLine($"[green]+ New {Markup.Escape(provider.ProviderName)} key found![/]");
+                        Console.WriteLine($"  [dim]Source: {Markup.Escape(repoRef.FileURL ?? "Unknown")}[/]");
+                        Console.WriteLine($"  [dim]Repo: {Markup.Escape(repoRef.RepoURL ?? "Unknown")}[/]");
                         }
                     }
                 }

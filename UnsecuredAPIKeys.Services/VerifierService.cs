@@ -32,23 +32,23 @@ public class VerifierService(
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        AnsiConsole.MarkupLine("[green]Starting verifier service...[/]");
-        AnsiConsole.MarkupLine($"[dim]Target valid keys: [yellow]{LiteLimits.MAX_VALID_KEYS}[/][/]");
-        AnsiConsole.MarkupLine($"[dim]Loaded {_providers.Count} verification providers[/]");
+        Console.WriteLine("[green]Starting verifier service...[/]");
+        Console.WriteLine($"[dim]Target valid keys: [yellow]{LiteLimits.MAX_VALID_KEYS}[/][/]");
+        Console.WriteLine($"[dim]Loaded {_providers.Count} verification providers[/]");
 
         if (_selectedApiTypes != null && _selectedApiTypes.Count > 0)
         {
-            AnsiConsole.MarkupLine($"[yellow]Verifying only selected API types:[/]");
+            Console.WriteLine($"[yellow]Verifying only selected API types:[/]");
             foreach (var apiType in _selectedApiTypes.OrderBy(t => t.ToString()))
             {
-                AnsiConsole.MarkupLine($"  [dim]- {apiType}[/]");
+                Console.WriteLine($"  [dim]- {apiType}[/]");
             }
         }
         else
         {
             foreach (var provider in _providers)
             {
-                AnsiConsole.MarkupLine($"  [dim]- {Markup.Escape(provider.ProviderName)}[/]");
+                Console.WriteLine($"  [dim]- {Markup.Escape(provider.ProviderName)}[/]");
             }
         }
 
@@ -65,7 +65,7 @@ public class VerifierService(
                 // Wait before next cycle
                 if (!_isIdle)
                 {
-                    AnsiConsole.MarkupLine($"[dim]Waiting {LiteLimits.VERIFICATION_DELAY_MS / 1000}s before next verification cycle...[/]");
+                    Console.WriteLine($"[dim]Waiting {LiteLimits.VERIFICATION_DELAY_MS / 1000}s before next verification cycle...[/]");
                 }
                 await Task.Delay(LiteLimits.VERIFICATION_DELAY_MS, _cancellationTokenSource.Token);
 
@@ -80,13 +80,13 @@ public class VerifierService(
             }
             catch (Exception ex)
             {
-                AnsiConsole.MarkupLine($"[red]Error during verification: {Markup.Escape(ex.Message)}[/]");
+                Console.WriteLine($"[red]Error during verification: {Markup.Escape(ex.Message)}[/]");
                 logger?.LogError(ex, "Verification cycle error");
                 await Task.Delay(5000, _cancellationTokenSource.Token);
             }
         }
 
-        AnsiConsole.MarkupLine("[green]Verifier stopped.[/]");
+        Console.WriteLine("[green]Verifier stopped.[/]");
     }
 
     private async Task RunVerificationCycleAsync()
@@ -101,7 +101,7 @@ public class VerifierService(
         
         if (!_isIdle)
         {
-            AnsiConsole.MarkupLine($"[dim]Current valid keys: [yellow]{currentValidCount}[/] / [yellow]{LiteLimits.MAX_VALID_KEYS}[/][/]");
+            Console.WriteLine($"[dim]Current valid keys: [yellow]{currentValidCount}[/] / [yellow]{LiteLimits.MAX_VALID_KEYS}[/][/]");
         }
 
         if (currentValidCount >= LiteLimits.MAX_VALID_KEYS)
@@ -137,7 +137,7 @@ public class VerifierService(
 
     private async Task ReVerifyExistingKeysAsync()
     {
-        AnsiConsole.MarkupLine("[dim]Re-verifying existing valid keys...[/]");
+        Console.WriteLine("[dim]Re-verifying existing valid keys...[/]");
 
         // Get oldest verified keys first (filtered by selected types if applicable)
         var query = dbContext.APIKeys.Where(k => k.Status == ApiStatusEnum.Valid);
@@ -187,7 +187,7 @@ public class VerifierService(
     {
         if (!_isIdle)
         {
-            AnsiConsole.MarkupLine($"[dim]Verifying unverified keys (need {neededCount} more valid)...[/]");
+            Console.WriteLine($"[dim]Verifying unverified keys (need {neededCount} more valid)...[/]");
         }
 
         // Get unverified keys (filtered by selected types if applicable)
@@ -208,7 +208,7 @@ public class VerifierService(
                 var noCredits = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.ValidNoCredits).CountAsync(_cancellationTokenSource!.Token);
                 var errorCount = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.Error).CountAsync(_cancellationTokenSource!.Token);
                 
-                AnsiConsole.MarkupLine($"[dim]Type {apiType}: {unverified} unverified, {valid} valid, {invalid} invalid, {noCredits} no-credits, {errorCount} error[/]");
+                Console.WriteLine($"[dim]Type {apiType}: {unverified} unverified, {valid} valid, {invalid} invalid, {noCredits} no-credits, {errorCount} error[/]");
             }
         }
 
@@ -221,7 +221,7 @@ public class VerifierService(
         {
             if (!_isIdle)
             {
-                AnsiConsole.MarkupLine("[yellow]No unverified keys available.[/]");
+                Console.WriteLine("[yellow]No unverified keys available.[/]");
                 _isIdle = true;
             }
             return;
@@ -279,7 +279,7 @@ public class VerifierService(
         {
             key.Status = ApiStatusEnum.Error;
             key.LastCheckedUTC = DateTime.UtcNow;
-            AnsiConsole.MarkupLine($"[yellow]No matching providers for key[/]");
+            Console.WriteLine($"[yellow]No matching providers for key[/]");
             return false;
         }
 
@@ -307,16 +307,16 @@ public class VerifierService(
                             // Update the key's API type if a different provider validated it
                             if (key.ApiType != provider.ApiType)
                             {
-                                AnsiConsole.MarkupLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
+                                Console.WriteLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
                                 key.ApiType = provider.ApiType;
                             }
                             key.Status = ApiStatusEnum.ValidNoCredits;
                             key.ErrorCount = 0;
                             key.ValidationResponse = result.Detail ?? "Valid key but no credits";
                             Interlocked.Increment(ref _validCount);
-                            AnsiConsole.MarkupLine($"[yellow]✓ Valid [no credits]: {Markup.Escape(provider.ProviderName)} key[/]");
+                            Console.WriteLine($"[yellow]✓ Valid [no credits]: {Markup.Escape(provider.ProviderName)} key[/]");
                             if (!string.IsNullOrEmpty(result.Detail))
-                                AnsiConsole.MarkupLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
+                                Console.WriteLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
                             return true;
                         }
                         
@@ -324,7 +324,7 @@ public class VerifierService(
                         // Update the key's API type if a different provider validated it
                         if (key.ApiType != provider.ApiType)
                         {
-                            AnsiConsole.MarkupLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
+                            Console.WriteLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
                             key.ApiType = provider.ApiType;
                         }
                         // Update balance and account tier info
@@ -339,9 +339,9 @@ public class VerifierService(
                         var balanceInfo = !string.IsNullOrEmpty(key.Balance) ? $" [dim](Balance: {key.Balance})[/]" : "";
                         var tierInfo = !string.IsNullOrEmpty(key.AccountTier) ? $" [dim](Tier: {key.AccountTier})[/]" : "";
                         
-                        AnsiConsole.MarkupLine($"[green]✓ Valid: {Markup.Escape(provider.ProviderName)} key[/]{balanceInfo}{tierInfo}");
+                        Console.WriteLine($"[green]✓ Valid: {Markup.Escape(provider.ProviderName)} key[/]{balanceInfo}{tierInfo}");
                         if (!string.IsNullOrEmpty(result.Detail) && result.Detail != "Key is valid")
-                            AnsiConsole.MarkupLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
+                            Console.WriteLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
                         return true;
 
                     case Providers.Common.ValidationAttemptStatus.HttpError:
@@ -353,16 +353,16 @@ public class VerifierService(
                             // Update the key's API type if a different provider validated it
                             if (key.ApiType != provider.ApiType)
                             {
-                                AnsiConsole.MarkupLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
+                                Console.WriteLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
                                 key.ApiType = provider.ApiType;
                             }
                             key.Status = ApiStatusEnum.ValidNoCredits;
                             key.ErrorCount = 0;
                             key.ValidationResponse = result.Detail ?? "Valid key but quota issue";
                             Interlocked.Increment(ref _validCount);
-                            AnsiConsole.MarkupLine($"[yellow]✓ Valid [no credits]: {Markup.Escape(provider.ProviderName)} key[/]");
+                            Console.WriteLine($"[yellow]✓ Valid [no credits]: {Markup.Escape(provider.ProviderName)} key[/]");
                             if (!string.IsNullOrEmpty(result.Detail))
-                                AnsiConsole.MarkupLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
+                                Console.WriteLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
                             return true;
                         }
                         // HTTP error but not quota - try next provider
