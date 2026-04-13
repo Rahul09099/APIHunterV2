@@ -164,18 +164,24 @@ public class DatabaseService(DBContext dbContext)
         }
     }
 
-    public async Task<Statistics> GetStatisticsAsync(DBContext dbContext)
+    public async Task<Statistics> GetStatisticsAsync(DBContext dbContext, long? filterByTelegramId = null)
     {
+        var query = dbContext.APIKeys.AsQueryable();
+        if (filterByTelegramId.HasValue)
+        {
+            query = query.Where(k => k.DiscoveredByTelegramId == filterByTelegramId.Value);
+        }
+
         var stats = new Statistics
         {
-            TotalKeys = await dbContext.APIKeys.CountAsync(),
-            ValidKeys = await dbContext.APIKeys.CountAsync(k => k.Status == ApiStatusEnum.Valid),
-            InvalidKeys = await dbContext.APIKeys.CountAsync(k => k.Status == ApiStatusEnum.Invalid),
-            UnverifiedKeys = await dbContext.APIKeys.CountAsync(k => k.Status == ApiStatusEnum.Unverified),
-            ValidNoCreditsKeys = await dbContext.APIKeys.CountAsync(k => k.Status == ApiStatusEnum.ValidNoCredits),
-            OpenAIKeys = await dbContext.APIKeys.CountAsync(k => k.ApiType == ApiTypeEnum.OpenAI),
-            AnthropicKeys = await dbContext.APIKeys.CountAsync(k => k.ApiType == ApiTypeEnum.AnthropicClaude),
-            GoogleKeys = await dbContext.APIKeys.CountAsync(k => k.ApiType == ApiTypeEnum.GoogleAI),
+            TotalKeys = await query.CountAsync(),
+            ValidKeys = await query.CountAsync(k => k.Status == ApiStatusEnum.Valid),
+            InvalidKeys = await query.CountAsync(k => k.Status == ApiStatusEnum.Invalid),
+            UnverifiedKeys = await query.CountAsync(k => k.Status == ApiStatusEnum.Unverified),
+            ValidNoCreditsKeys = await query.CountAsync(k => k.Status == ApiStatusEnum.ValidNoCredits),
+            OpenAIKeys = await query.CountAsync(k => k.ApiType == ApiTypeEnum.OpenAI),
+            AnthropicKeys = await query.CountAsync(k => k.ApiType == ApiTypeEnum.AnthropicClaude),
+            GoogleKeys = await query.CountAsync(k => k.ApiType == ApiTypeEnum.GoogleAI),
             GitHubTokensCount = await dbContext.SearchProviderTokens
                 .CountAsync(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub)
         };
@@ -183,9 +189,15 @@ public class DatabaseService(DBContext dbContext)
         return stats;
     }
 
-    public async Task<CategorizedStatistics> GetCategorizedStatisticsAsync(DBContext dbContext)
+    public async Task<CategorizedStatistics> GetCategorizedStatisticsAsync(DBContext dbContext, long? filterByTelegramId = null)
     {
-        var allKeys = await dbContext.APIKeys.ToListAsync();
+        var query = dbContext.APIKeys.AsQueryable();
+        if (filterByTelegramId.HasValue)
+        {
+            query = query.Where(k => k.DiscoveredByTelegramId == filterByTelegramId.Value);
+        }
+
+        var allKeys = await query.ToListAsync();
         
         var categorized = new CategorizedStatistics
         {
@@ -266,7 +278,7 @@ public class DatabaseService(DBContext dbContext)
         };
     }
 
-    public async Task AddGitHubTokenAsync(DBContext dbContext, string token)
+    public async Task AddGitHubTokenAsync(DBContext dbContext, string token, long? addedBy = null)
     {
         // Check if token already exists to prevent duplicates
         var exists = await dbContext.SearchProviderTokens
@@ -278,18 +290,24 @@ public class DatabaseService(DBContext dbContext)
             {
                 Token = token,
                 SearchProvider = SearchProviderEnum.GitHub,
-                IsEnabled = true
+                IsEnabled = true,
+                AddedByTelegramId = addedBy
             });
             await dbContext.SaveChangesAsync();
         }
     }
 
-    public async Task<List<SearchProviderToken>> GetGitHubTokensAsync(DBContext dbContext)
+    public async Task<List<SearchProviderToken>> GetGitHubTokensAsync(DBContext dbContext, long? filterByTelegramId = null)
     {
-        return await dbContext.SearchProviderTokens
-            .Where(t => t.SearchProvider == SearchProviderEnum.GitHub && t.IsEnabled)
-            .OrderBy(t => t.Id)
-            .ToListAsync();
+        var query = dbContext.SearchProviderTokens
+            .Where(t => t.SearchProvider == SearchProviderEnum.GitHub && t.IsEnabled);
+            
+        if (filterByTelegramId.HasValue)
+        {
+            query = query.Where(t => t.AddedByTelegramId == filterByTelegramId.Value);
+        }
+
+        return await query.OrderBy(t => t.Id).ToListAsync();
     }
 
     public async Task DeleteGitHubTokenAsync(DBContext dbContext, int tokenId)
@@ -322,9 +340,14 @@ public class DatabaseService(DBContext dbContext)
         await InitializeDatabaseAsync();
     }
 
-    public async Task ExportKeysAsync(DBContext dbContext, string filePath, bool validOnly, string format)
+    public async Task ExportKeysAsync(DBContext dbContext, string filePath, bool validOnly, string format, long? filterByTelegramId = null)
     {
         var query = dbContext.APIKeys.AsQueryable();
+
+        if (filterByTelegramId.HasValue)
+        {
+            query = query.Where(k => k.DiscoveredByTelegramId == filterByTelegramId.Value);
+        }
 
         if (validOnly)
         {

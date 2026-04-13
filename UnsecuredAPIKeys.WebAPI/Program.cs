@@ -35,13 +35,42 @@ else
         options.UseSqlite($"Data Source={dbPath}"));
 }
 
+// Detecting Mode
+var isWorkerMode = string.Equals(Environment.GetEnvironmentVariable("IS_WORKER_MODE"), "true", StringComparison.OrdinalIgnoreCase);
+var masterApiUrl = Environment.GetEnvironmentVariable("MASTER_API_URL");
+var nodeToken = Environment.GetEnvironmentVariable("NODE_TOKEN");
+
 // Register services
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<DatabaseService>();
-builder.Services.AddScoped<ScraperService>();
 builder.Services.AddScoped<VerifierService>();
 builder.Services.AddSingleton<BackgroundJobManager>();
-builder.Services.AddHostedService<TelegramBotService>();
+
+// Configure ScraperService with Worker Mode if applicable
+builder.Services.AddScoped<ScraperService>(sp => {
+    var db = sp.GetRequiredService<DBContext>();
+    var http = sp.GetRequiredService<IHttpClientFactory>();
+    var logger = sp.GetService<ILogger<ScraperService>>();
+    var scraper = new ScraperService(db, http, logger)
+    {
+        IsWorkerMode = isWorkerMode,
+        MasterApiUrl = masterApiUrl,
+        NodeToken = nodeToken
+    };
+    return scraper;
+});
+
+// Only start the Telegram Bot if NOT in worker mode
+if (!isWorkerMode)
+{
+    Console.WriteLine("🤖 Mode: Master (Telegram Bot Enabled)");
+    builder.Services.AddHostedService<TelegramBotService>();
+}
+else
+{
+    Console.WriteLine("👻 Mode: Ghost Worker (Telegram Bot Disabled)");
+    Console.WriteLine($"🛰️ Reporting to: {masterApiUrl}");
+}
 
 // Configure CORS (allow all for now, tighten in production)
 builder.Services.AddCors(options =>

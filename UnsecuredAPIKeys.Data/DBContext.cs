@@ -33,6 +33,7 @@ namespace UnsecuredAPIKeys.Data
         public DbSet<SearchProviderToken> SearchProviderTokens { get; set; } = null!;
         public DbSet<ApplicationSetting> ApplicationSettings { get; set; } = null!;
         public DbSet<DeepSearchProgress> DeepSearchProgress { get; set; } = null!;
+        public DbSet<TelegramSubscriber> TelegramSubscribers { get; set; } = null!;
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
@@ -100,6 +101,10 @@ namespace UnsecuredAPIKeys.Data
                 .HasDatabaseName("IX_APIKeys_LastCheckedUTC");
 
             modelBuilder.Entity<APIKey>()
+                .HasIndex(k => k.DiscoveredByTelegramId)
+                .HasDatabaseName("IX_APIKeys_DiscoveredByTelegramId");
+
+            modelBuilder.Entity<APIKey>()
                 .HasIndex(k => k.Status)
                 .HasDatabaseName("IX_APIKeys_Status");
 
@@ -118,6 +123,10 @@ namespace UnsecuredAPIKeys.Data
                 .HasIndex(t => t.SearchProvider)
                 .HasDatabaseName("IX_SearchProviderTokens_SearchProvider");
 
+            modelBuilder.Entity<SearchProviderToken>()
+                .HasIndex(t => t.AddedByTelegramId)
+                .HasDatabaseName("IX_SearchProviderTokens_AddedByTelegramId");
+
             // DeepSearchProgress indexes
             modelBuilder.Entity<DeepSearchProgress>()
                 .HasIndex(p => new { p.SearchQueryId, p.PartitionType, p.PartitionValue })
@@ -127,6 +136,11 @@ namespace UnsecuredAPIKeys.Data
             modelBuilder.Entity<DeepSearchProgress>()
                 .HasIndex(p => p.IsCompleted)
                 .HasDatabaseName("IX_DeepSearchProgress_IsCompleted");
+
+            modelBuilder.Entity<TelegramSubscriber>()
+                .HasIndex(s => s.NodeToken)
+                .IsUnique()
+                .HasDatabaseName("IX_TelegramSubscribers_NodeToken");
 
             // Relationships
             modelBuilder.Entity<RepoReference>()
