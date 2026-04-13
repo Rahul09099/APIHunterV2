@@ -143,9 +143,12 @@ public class DatabaseService(DBContext dbContext)
         };
 
         bool addedAny = false;
+        var existingQueries = await dbContext.SearchQueries.Select(q => q.Query).ToListAsync();
+        var existingSet = new HashSet<string>(existingQueries);
+
         foreach (var query in defaultQueries)
         {
-            if (!await dbContext.SearchQueries.AnyAsync(q => q.Query == query))
+            if (!existingSet.Contains(query))
             {
                 dbContext.SearchQueries.Add(new SearchQuery
                 {
