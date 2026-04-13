@@ -1,0 +1,16 @@
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\bin\Release\net9.0\UnsecuredAPIKeys.Providers.deps.json
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\bin\Release\net9.0\UnsecuredAPIKeys.Providers.dll
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\bin\Release\net9.0\UnsecuredAPIKeys.Providers.pdb
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\bin\Release\net9.0\UnsecuredAPIKeys.Data.dll
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\bin\Release\net9.0\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\UnsecuredAPIKeys.Providers.csproj.AssemblyReference.cache
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\UnsecuredAPIKeys.Providers.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\UnsecuredAPIKeys.Providers.AssemblyInfoInputs.cache
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\UnsecuredAPIKeys.Providers.AssemblyInfo.cs
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\UnsecuredAPIKeys.Providers.csproj.CoreCompileInputs.cache
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\UnsecuredAPIKeys.Providers.sourcelink.json
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\Unsecure.F1CCD160.Up2Date
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\UnsecuredAPIKeys.Providers.dll
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\refint\UnsecuredAPIKeys.Providers.dll
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\UnsecuredAPIKeys.Providers.pdb
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\UnsecuredAPIKeys.Providers\obj\Release\net9.0\ref\UnsecuredAPIKeys.Providers.dll

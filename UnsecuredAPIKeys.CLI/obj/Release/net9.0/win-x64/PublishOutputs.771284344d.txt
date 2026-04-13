@@ -1,0 +1,5 @@
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\publish_win\unsecuredapikeys.pdb
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\publish_win\UnsecuredAPIKeys.Data.pdb
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\publish_win\UnsecuredAPIKeys.Providers.pdb
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\publish_win\UnsecuredAPIKeys.Services.pdb
+C:\Users\rk170\Desktop\unsecureAPI project\APIHunterV2\publish_win\unsecuredapikeys.exe

@@ -73,7 +73,15 @@ namespace UnsecuredAPIKeys.Data
                 var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
                 var database = uri.AbsolutePath.TrimStart('/');
                 var port = uri.Port == -1 ? 5432 : uri.Port;
-                return $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
+                var connStr = $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
+                
+                // If using the pooler (6543), disable prepared statements to prevent hangs during EnsureCreated
+                if (port == 6543)
+                {
+                    connStr += ";Max Auto Prepare=0;";
+                }
+                
+                return connStr;
             }
             catch 
             { 
