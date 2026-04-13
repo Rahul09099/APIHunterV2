@@ -40,6 +40,9 @@ namespace UnsecuredAPIKeys.Data.Models
         // Discovery tracking for Private Pool method
         public long? DiscoveredByTelegramId { get; set; }
 
+        // Extra info (e.g., node name)
+        public string? Metadata { get; set; }
+
         // Navigation property to where this key was found
         public virtual ICollection<RepoReference> References { get; set; } = [];
     }

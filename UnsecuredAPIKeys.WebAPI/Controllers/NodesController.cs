@@ -63,7 +63,8 @@ namespace UnsecuredAPIKeys.WebAPI.Controllers
                     ApiType = discovery.ApiType,
                     Status = ApiStatusEnum.Unverified,
                     Metadata = discovery.Metadata,
-                    CreatedAtUTC = DateTime.UtcNow,
+                    FirstFoundUTC = DateTime.UtcNow,
+                    LastFoundUTC = DateTime.UtcNow,
                     DiscoveredByTelegramId = subscriber.TelegramId
                 };
 
@@ -72,8 +73,8 @@ namespace UnsecuredAPIKeys.WebAPI.Controllers
                     RepoName = discovery.RepoName,
                     RepoOwner = discovery.RepoOwner,
                     FilePath = discovery.FilePath,
-                    FileUrl = discovery.FileUrl,
-                    DiscoveredAtUTC = DateTime.UtcNow
+                    FileURL = discovery.FileUrl,
+                    FoundUTC = DateTime.UtcNow
                 });
 
                 _dbContext.APIKeys.Add(apiKey);

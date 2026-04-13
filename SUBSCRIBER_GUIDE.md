@@ -20,7 +20,7 @@ Open the Telegram bot and run these two commands to get your secret connection i
 1. Log in to your **[Render Dashboard](https://dashboard.render.com/)**.
 2. Click **New +** and select **Web Service**.
 3. Choose **"Deploy an existing image from a registry"**.
-4. Enter the Image URL provided by the Admin (e.g., `ghcr.io/admin/apihunter-worker:latest`).
+4. Enter the Image URL provided by the Admin: `rahul09099/apihunter-worker:latest`.
 5. Click **Next**.
 
 ---

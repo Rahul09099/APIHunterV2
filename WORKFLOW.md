@@ -67,8 +67,12 @@ To deploy this on a VPS (e.g., Ubuntu, Windows Server) for 24/7 scraping:
 
     *Note: Since the tool is interactive (TUI), it requires an attached terminal session. It does not currently run as a headless daemon service.*
 
-### Docker Deployment (Coming Soon)
-A Dockerfile is planned for future releases to allow containerized deployment.
+### 🐳 Docker Deployment (Ghost Nodes)
+You can now deploy decentralized "Ghost Nodes" using Docker. This allows you to host workers on platforms like Render or Fly.io.
+
+1. **Build & Publish**: Use `publish_worker.bat` to build and push the image to your registry.
+2. **Deploy**: Follow the [Subscriber Guide](SUBSCRIBER_GUIDE.md) to set up nodes on Render.
+3. **Connect**: Workers automatically report back to your Master API.
 
 ---
 

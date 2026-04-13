@@ -606,14 +606,14 @@ public class ScraperService
                             // In worker mode, we offload "exists" check and saving to the Master
                             await ReportDiscoveryAsync(new NodeReportDto
                             {
-                                ApiKey = apiKey,
-                                ApiType = provider.ApiType,
-                                Metadata = $"[Worker {NodeToken?.Substring(0, 5)}...]",
-                                RepoName = repoRef.RepoName,
-                                RepoOwner = repoRef.RepoOwner,
-                                FilePath = repoRef.FilePath,
-                                FileUrl = repoRef.FileUrl
-                            });
+                                 ApiKey = apiKey,
+                                 ApiType = provider.ApiType,
+                                 Metadata = $"[Worker {NodeToken?.Substring(0, 5)}...]",
+                                 RepoName = repoRef.RepoName ?? string.Empty,
+                                 RepoOwner = repoRef.RepoOwner ?? string.Empty,
+                                 FilePath = repoRef.FilePath ?? string.Empty,
+                                 FileUrl = repoRef.FileURL ?? string.Empty
+                             });
                             Interlocked.Increment(ref _newKeysFound);
                         }
                         else
@@ -668,13 +668,14 @@ public class ScraperService
                         AnsiConsole.MarkupLine($"[green]+ New {Markup.Escape(provider.ProviderName)} key found![/]");
                         AnsiConsole.MarkupLine($"  [dim]Source: {Markup.Escape(repoRef.FileURL ?? "Unknown")}[/]");
                         AnsiConsole.MarkupLine($"  [dim]Repo: {Markup.Escape(repoRef.RepoURL ?? "Unknown")}[/]");
+                        }
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error processing result: {Url}", repoRef.FileUrl);
+            _logger?.LogError(ex, "Error processing result: {Url}", repoRef.FileURL);
         }
     }
 

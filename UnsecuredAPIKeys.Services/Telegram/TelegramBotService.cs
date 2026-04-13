@@ -109,7 +109,9 @@ public class TelegramBotService : BackgroundService
                 var newValidKeys = await dbContext.APIKeys
                     .Where(k => (k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits) && k.LastCheckedUTC > lastCheck)
                     .OrderBy(k => k.LastCheckedUTC)
-                             if (newValidKeys.Any())
+                    .ToListAsync(stoppingToken);
+
+                if (newValidKeys.Any())
                 {
                     foreach (var key in newValidKeys)
                     {
@@ -291,7 +293,7 @@ public class TelegramBotService : BackgroundService
                     await HandleMySubCommand(chatId, user, cancellationToken);
                     break;
                 case "/id":
-                    await botClient.SendMessage(chatId, $"Your Telegram ID: <code>{chatId}</code>", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+                    await _botClient.SendMessage(chatId, $"Your Telegram ID: <code>{chatId}</code>", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
                     break;
                 case "/add_sub":
                     if (isAdmin) await HandleAddSubCommand(chatId, args, cancellationToken);
@@ -301,6 +303,9 @@ public class TelegramBotService : BackgroundService
                     break;
                 case "/list_subs":
                     if (isAdmin) await HandleListSubsCommand(chatId, cancellationToken);
+                    break;
+                case "/admins":
+                    if (isAdmin) await HandleListAdminsCommand(chatId, cancellationToken);
                     break;
                 case "/set_admin":
                     if (isSuperAdmin) await HandleSetAdminCommand(chatId, args, cancellationToken);
@@ -422,6 +427,8 @@ public class TelegramBotService : BackgroundService
             help.AppendLine("🛠️ <b>ADMIN MANAGEMENT</b>");
             help.AppendLine("├ /add_sub &lt;id&gt; &lt;days&gt; - Grant sub");
             help.AppendLine("├ /list_subs - See all users");
+            help.AppendLine("├ /admins - List all admins");
+            help.AppendLine("├ /set_admin &lt;id,id...&gt; &lt;t/f&gt; - Grant admin");
             help.AppendLine("├ /tokens - Manage GitHub tokens");
             help.AppendLine("└ /queries - Manage discovery targets");
         }
@@ -953,23 +960,58 @@ public class TelegramBotService : BackgroundService
     private async Task HandleSetAdminCommand(long chatId, string args, CancellationToken ct)
     {
         var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2 || !long.TryParse(parts[0], out long targetId) || !bool.TryParse(parts[1], out bool isAdmin))
+        if (parts.Length < 2)
         {
-            await _botClient.SendMessage(chatId, "❌ Usage: <code>/set_admin &lt;userId&gt; &lt;true|false&gt;</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+            await _botClient.SendMessage(chatId, "❌ Usage: <code>/set_admin &lt;id1,id2...&gt; &lt;true|false&gt;</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        var idsStr = parts[0].Split(',', StringSplitOptions.RemoveEmptyEntries);
+        if (!bool.TryParse(parts[1], out bool isAdmin))
+        {
+            await _botClient.SendMessage(chatId, "❌ Invalid boolean value. Use <code>true</code> or <code>false</code>.", parseMode: ParseMode.Html, cancellationToken: ct);
             return;
         }
 
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
-        var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetId }, ct);
         
-        if (user != null)
+        var results = new StringBuilder($"<b>Admin Update Results:</b>\n");
+        foreach (var idStr in idsStr)
         {
-            user.IsAdmin = isAdmin;
-            await dbContext.SaveChangesAsync(ct);
-            await _botClient.SendMessage(chatId, $"✅ User <code>{targetId}</code> admin status set to: <b>{isAdmin}</b>", parseMode: ParseMode.Html, cancellationToken: ct);
+            if (long.TryParse(idStr.Trim(), out long targetId))
+            {
+                var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetId }, ct);
+                if (user != null)
+                {
+                    user.IsAdmin = isAdmin;
+                    results.AppendLine($"- <code>{targetId}</code>: {(isAdmin ? "✅ Promoted" : "❌ Demoted")}");
+                }
+                else results.AppendLine($"- <code>{targetId}</code>: ⚠️ Not found");
+            }
+            else results.AppendLine($"- <code>{idStr}</code>: ❌ Invalid ID");
         }
-        else await _botClient.SendMessage(chatId, "❌ User not found.", cancellationToken: ct);
+
+        await dbContext.SaveChangesAsync(ct);
+        await _botClient.SendMessage(chatId, results.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    private async Task HandleListAdminsCommand(long chatId, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+        var admins = await dbContext.TelegramSubscribers.Where(s => s.IsAdmin).ToListAsync(ct);
+
+        var sb = new StringBuilder("<b>🛡️ COMMAND STAFF (ADMINS)</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n");
+        sb.AppendLine($"👑 Super Admin: <code>{_adminChatId}</code>");
+        
+        foreach (var admin in admins)
+        {
+            if (admin.TelegramId == _adminChatId) continue;
+            sb.AppendLine($"👤 Admin: <code>{admin.TelegramId}</code>");
+        }
+        
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleNodeTokenCommand(long chatId, CancellationToken ct)
