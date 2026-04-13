@@ -1,0 +1,15 @@
+bin/
+obj/
+.git/
+.vs/
+.vscode/
+*.user
+*.suo
+publish/
+out/
+dist/
+node_modules/
+.dockerignore
+Dockerfile*
+*.db
+*.log

@@ -1,0 +1,31 @@
+# BUILD STAGE
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+# Copy all source code
+COPY . .
+
+# Publish the project
+RUN dotnet publish UnsecuredAPIKeys.WebAPI/UnsecuredAPIKeys.WebAPI.csproj -c Release -o /app/publish /p:UseAppHost=false
+
+# RUNTIME STAGE
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runner
+WORKDIR /app
+
+# Install dependencies
+RUN apt-get update && apt-get install -y sqlite3 libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+
+# Copy from build stage
+COPY --from=build /app/publish .
+
+# Environment Variables for Worker Mode
+# These are the ones the subscriber will fill in Render
+ENV IS_WORKER_MODE=true
+ENV MASTER_API_URL=""
+ENV NODE_TOKEN=""
+ENV TELEGRAM_BOT_TOKEN="DISABLED"
+ENV PORT=10000
+
+# We still run the WebAPI dll, but we will modify the Program.cs 
+# to detect IS_WORKER_MODE and skip the Telegram Bot startup if needed.
+ENTRYPOINT ["dotnet", "UnsecuredAPIKeys.WebAPI.dll"]

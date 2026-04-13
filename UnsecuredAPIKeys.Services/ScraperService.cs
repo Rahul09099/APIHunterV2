@@ -2,8 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.Linq;
+using System.Net.Http.Json;
 using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.Common;
+using UnsecuredAPIKeys.Data.DTOs;
 using UnsecuredAPIKeys.Data.Models;
 using UnsecuredAPIKeys.Providers;
 using UnsecuredAPIKeys.Providers._Interfaces;
@@ -24,6 +26,11 @@ public class ScraperService
 
     private int _newKeysFound;
     private int _duplicateKeysFound;
+
+    // Worker Mode Properties
+    public bool IsWorkerMode { get; set; } = false;
+    public string? MasterApiUrl { get; set; }
+    public string? NodeToken { get; set; }
 
     // Helper class to manage token index across async calls
     private class TokenCursor
@@ -65,17 +72,28 @@ public class ScraperService
         return groups.OrderBy(g => g).ToList();
     }
 
-    public async Task RunScrapeByGroupAsync(string selectedGroupName, bool isDeepSearch, CancellationToken cancellationToken)
+    public async Task RunScrapeByGroupAsync(string selectedGroupName, bool isDeepSearch, long? discoveredBy, CancellationToken cancellationToken)
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         
-        var tokens = await _dbContext.SearchProviderTokens
-            .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub)
-            .ToListAsync(cancellationToken);
+        // Fetch tokens belonging to this user or ALL tokens if admin
+        var tokenQuery = _dbContext.SearchProviderTokens
+            .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub);
+
+        // If not admin, restrict to tokens added by this user
+        // We'll assume if discoveredBy has a value, we should check their role.
+        // Better: Fetch the subscriber record to check IsAdmin.
+        var user = await _dbContext.TelegramSubscribers.FindAsync(discoveredBy);
+        if (user != null && !user.IsAdmin && discoveredBy.HasValue)
+        {
+            tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == discoveredBy.Value);
+        }
+
+        var tokens = await tokenQuery.ToListAsync(cancellationToken);
 
         if (tokens.Count == 0)
         {
-            _logger?.LogWarning("No GitHub tokens configured.");
+            _logger?.LogWarning("No enabling GitHub tokens found for user {UserId}", discoveredBy);
             return;
         }
 
@@ -104,11 +122,11 @@ public class ScraperService
 
             if (isDeepSearch)
             {
-                await RunDeepSearchAsync(tokens, query, tokenCursor);
+                await RunDeepSearchAsync(tokens, query, tokenCursor, discoveredBy);
             }
             else
             {
-                await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null);
+                await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null, discoveredBy);
             }
 
             if (query != queriesToRun.Last())
@@ -118,7 +136,13 @@ public class ScraperService
         }
     }
 
+    // Default RunAsync for CLI (no discovery tagging)
     public async Task RunAsync(CancellationToken cancellationToken)
+    {
+        await RunAsync(null, cancellationToken);
+    }
+
+    public async Task RunAsync(long? discoveredBy, CancellationToken cancellationToken)
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -205,11 +229,11 @@ public class ScraperService
 
                     if (isDeepSearch)
                     {
-                        await RunDeepSearchAsync(tokens, query, tokenCursor);
+                        await RunDeepSearchAsync(tokens, query, tokenCursor, discoveredBy);
                     }
                     else
                     {
-                        await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null);
+                        await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null, discoveredBy);
                     }
 
                     // Delay between queries (if not the last one)
@@ -258,7 +282,7 @@ public class ScraperService
         return "Other";
     }
 
-    private async Task RunDeepSearchAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor)
+    private async Task RunDeepSearchAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, long? discoveredBy)
     {
         // Deep search strategy using language and file extension filters with progress tracking
         
@@ -349,7 +373,7 @@ public class ScraperService
         {
             if (_cancellationTokenSource.Token.IsCancellationRequested) break;
             
-            await SearchPartitionAsync(tokens, query, cursor, "language", language, stats);
+            await SearchPartitionAsync(tokens, query, cursor, "language", language, stats, discoveredBy);
         }
         
         // Search by file extension
@@ -357,7 +381,7 @@ public class ScraperService
         {
             if (_cancellationTokenSource.Token.IsCancellationRequested) break;
             
-            await SearchPartitionAsync(tokens, query, cursor, "extension", extension, stats);
+            await SearchPartitionAsync(tokens, query, cursor, "extension", extension, stats, discoveredBy);
         }
         
         // Display summary
@@ -376,7 +400,7 @@ public class ScraperService
         AnsiConsole.WriteLine();
     }
 
-    private async Task SearchPartitionAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string partitionType, string partitionValue, DeepSearchStats stats)
+    private async Task SearchPartitionAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string partitionType, string partitionValue, DeepSearchStats stats, long? discoveredBy)
     {
         // Get or create progress record
         var progress = await _dbContext.DeepSearchProgress
@@ -415,7 +439,7 @@ public class ScraperService
         AnsiConsole.MarkupLine($"[dim]→ Searching {partitionValue} ({partitionType}) from page {startPage}...[/]");
         
         stats.TotalRangesSearched++;
-        int resultCount = await RunScrapingCycleUtilsAsync(tokens, query, cursor, filter, startPage);
+        int resultCount = await RunScrapingCycleUtilsAsync(tokens, query, cursor, filter, discoveredBy, startPage);
         
         // Update progress
         progress.TotalResultsFound += resultCount;
@@ -440,7 +464,7 @@ public class ScraperService
             await Task.Delay(1000, _cancellationTokenSource.Token);
     }
 
-    private async Task<int> RunScrapingCycleUtilsAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string? extraParams, int startPage = 1)
+    private async Task<int> RunScrapingCycleUtilsAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string? extraParams, long? discoveredBy, int startPage = 1)
     {
         int retryCount = 0;
         bool querySuccess = false;
@@ -451,7 +475,7 @@ public class ScraperService
             var currentToken = tokens[cursor.Index];
             try
             {
-               totalResults = await RunScrapingCycleAsync(currentToken, query, extraParams, startPage);
+               totalResults = await RunScrapingCycleAsync(currentToken, query, extraParams, discoveredBy, startPage);
                querySuccess = true;
             }
             catch (Exception ex)
@@ -469,7 +493,7 @@ public class ScraperService
         return totalResults;
     }
 
-    private async Task<int> RunScrapingCycleAsync(SearchProviderToken token, SearchQuery query, string? extraParams, int startPage = 1)
+    private async Task<int> RunScrapingCycleAsync(SearchProviderToken token, SearchQuery query, string? extraParams, long? discoveredBy, int startPage = 1)
     {
         // Reset counters for this cycle
         _newKeysFound = 0;
@@ -517,7 +541,7 @@ public class ScraperService
                     if (_cancellationTokenSource!.Token.IsCancellationRequested)
                         break;
 
-                    await ProcessResultAsync(repoRef, token, query);
+                    await ProcessResultAsync(repoRef, token, query, discoveredBy);
                     task.Increment(1);
                 }
             });
@@ -534,10 +558,15 @@ public class ScraperService
         table.AddRow("Duplicates", $"[dim]{_duplicateKeysFound}[/]");
 
         AnsiConsole.Write(table);
+
+        // MEMORY OPTIMIZATION: Clear the change tracker to free up memory 
+        // from all the RepoReference and APIKey objects we just processed.
+        _dbContext.ChangeTracker.Clear();
+
         return resultsList.Count;
     }
 
-    private async Task ProcessResultAsync(RepoReference repoRef, SearchProviderToken token, SearchQuery query)
+    private async Task ProcessResultAsync(RepoReference repoRef, SearchProviderToken token, SearchQuery query, long? discoveredBy)
     {
         try
         {
@@ -572,14 +601,31 @@ public class ScraperService
                         }
 
                         // Check if already exists
-                        var exists = await _dbContext.APIKeys
-                            .AnyAsync(k => k.ApiKey == apiKey, _cancellationTokenSource!.Token);
-
-                        if (exists)
+                        if (IsWorkerMode)
                         {
-                            Interlocked.Increment(ref _duplicateKeysFound);
-                            continue;
+                            // In worker mode, we offload "exists" check and saving to the Master
+                            await ReportDiscoveryAsync(new NodeReportDto
+                            {
+                                 ApiKey = apiKey,
+                                 ApiType = provider.ApiType,
+                                 Metadata = $"[Worker {NodeToken?.Substring(0, 5)}...]",
+                                 RepoName = repoRef.RepoName ?? string.Empty,
+                                 RepoOwner = repoRef.RepoOwner ?? string.Empty,
+                                 FilePath = repoRef.FilePath ?? string.Empty,
+                                 FileUrl = repoRef.FileURL ?? string.Empty
+                             });
+                            Interlocked.Increment(ref _newKeysFound);
                         }
+                        else
+                        {
+                            var exists = await _dbContext.APIKeys
+                                .AnyAsync(k => k.ApiKey == apiKey, _cancellationTokenSource!.Token);
+
+                            if (exists)
+                            {
+                                Interlocked.Increment(ref _duplicateKeysFound);
+                                continue;
+                            }
 
                         // Add new key
                         var newKey = new APIKey
@@ -589,7 +635,8 @@ public class ScraperService
                             Status = ApiStatusEnum.Unverified,
                             SearchProvider = SearchProviderEnum.GitHub,
                             FirstFoundUTC = DateTime.UtcNow,
-                            LastFoundUTC = DateTime.UtcNow
+                            LastFoundUTC = DateTime.UtcNow,
+                            DiscoveredByTelegramId = discoveredBy
                         };
 
                         // Add repo reference (clone to avoid EF tracking conflicts if same file has multiple keys)
@@ -621,13 +668,43 @@ public class ScraperService
                         AnsiConsole.MarkupLine($"[green]+ New {Markup.Escape(provider.ProviderName)} key found![/]");
                         AnsiConsole.MarkupLine($"  [dim]Source: {Markup.Escape(repoRef.FileURL ?? "Unknown")}[/]");
                         AnsiConsole.MarkupLine($"  [dim]Repo: {Markup.Escape(repoRef.RepoURL ?? "Unknown")}[/]");
+                        }
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Error processing result: {Url}", repoRef.FileURL);
+            _logger?.LogError(ex, "Error processing result: {Url}", repoRef.FileURL);
+        }
+    }
+
+    private async Task ReportDiscoveryAsync(NodeReportDto discovery)
+    {
+        if (string.IsNullOrEmpty(MasterApiUrl) || string.IsNullOrEmpty(NodeToken))
+            return;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Node-Token", NodeToken);
+
+            var report = new NodeBulkReportDto { Discoveries = new List<NodeReportDto> { discovery } };
+            var response = await client.PostAsJsonAsync($"{MasterApiUrl.TrimEnd('/')}/api/v1/nodes/report", report);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<dynamic>();
+                // We could track successful reports here
+            }
+            else
+            {
+                _logger?.LogWarning("Failed to report discovery to master: {Status}", response.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Exception reporting discovery to master");
         }
     }
 
