@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using UnsecuredAPIKeys.Data.Common;
 using System.Text.Json.Serialization; // <-- Add this using directive
@@ -32,6 +32,10 @@ namespace UnsecuredAPIKeys.Data.Models
 
         // Validation response or error message
         public string? ValidationResponse { get; set; }
+
+        public string? Balance { get; set; }
+
+        public string? AccountTier { get; set; }
 
         // Navigation property to where this key was found
         public virtual ICollection<RepoReference> References { get; set; } = [];

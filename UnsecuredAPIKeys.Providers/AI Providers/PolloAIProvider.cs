@@ -41,7 +41,20 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, "Valid PolloAI key");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid PolloAI key");
+
+                    try 
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        if (doc.RootElement.TryGetProperty("data", out var data) && 
+                            data.TryGetProperty("balance", out var balance))
+                        {
+                            result.Balance = $"{balance.GetDouble()} Credits";
+                        }
+                    }
+                    catch { /* Best effort parsing */ }
+
+                    return result;
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
                 {

@@ -156,18 +156,31 @@ public class VerifierService(
             .StartAsync(async ctx =>
             {
                 var task = ctx.AddTask("[green]Re-verifying keys[/]", maxValue: keysToReVerify.Count);
+                var semaphore = new SemaphoreSlim(10); // Limit to 10 parallel verifications
 
-                foreach (var key in keysToReVerify)
+                var parallelTasks = keysToReVerify.Select(async key =>
                 {
-                    if (_cancellationTokenSource.Token.IsCancellationRequested)
-                        break;
+                    await semaphore.WaitAsync(_cancellationTokenSource.Token);
+                    try
+                    {
+                        // Use a fresh context per key to avoid thread-safety issues with SQLite
+                        using var localDb = new DBContext();
+                        var localKey = await localDb.APIKeys.FindAsync(new object[] { key.Id }, _cancellationTokenSource.Token);
+                        if (localKey != null)
+                        {
+                            await VerifyKeyAsync(localKey);
+                            await localDb.SaveChangesAsync(_cancellationTokenSource.Token);
+                        }
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                        task.Increment(1);
+                    }
+                });
 
-                    await VerifyKeyAsync(key);
-                    task.Increment(1);
-                }
+                await Task.WhenAll(parallelTasks);
             });
-
-        await dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
     }
 
     private async Task VerifyNewKeysAsync(int neededCount)
@@ -220,29 +233,35 @@ public class VerifierService(
             .StartAsync(async ctx =>
             {
                 var task = ctx.AddTask("[green]Verifying new keys[/]", maxValue: keysToVerify.Count);
+                var semaphore = new SemaphoreSlim(10); // Limit to 10 parallel verifications
                 var validFound = 0;
 
-                foreach (var key in keysToVerify)
+                var parallelTasks = keysToVerify.Select(async key =>
                 {
-                    if (_cancellationTokenSource.Token.IsCancellationRequested)
-                        break;
-
-                    // Stop if we've reached our target
-                    if (validFound >= neededCount)
+                    if (Volatile.Read(ref validFound) >= neededCount) return;
+                    
+                    await semaphore.WaitAsync(_cancellationTokenSource.Token);
+                    try
                     {
-                        task.Value = keysToVerify.Count;
-                        break;
+                        // Use a fresh context per key for concurrency safety
+                        using var localDb = new DBContext();
+                        var localKey = await localDb.APIKeys.FindAsync(new object[] { key.Id }, _cancellationTokenSource.Token);
+                        if (localKey != null)
+                        {
+                            var wasValid = await VerifyKeyAsync(localKey);
+                            if (wasValid) Interlocked.Increment(ref validFound);
+                            await localDb.SaveChangesAsync(_cancellationTokenSource.Token);
+                        }
                     }
+                    finally
+                    {
+                        semaphore.Release();
+                        task.Increment(1);
+                    }
+                });
 
-                    var wasValid = await VerifyKeyAsync(key);
-                    if (wasValid)
-                        validFound++;
-
-                    task.Increment(1);
-                }
+                await Task.WhenAll(parallelTasks);
             });
-
-        await dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
     }
 
     private async Task<bool> VerifyKeyAsync(APIKey key)
@@ -308,12 +327,20 @@ public class VerifierService(
                             AnsiConsole.MarkupLine($"[dim]Reclassified from {key.ApiType} to {provider.ApiType}[/]");
                             key.ApiType = provider.ApiType;
                         }
+                        // Update balance and account tier info
+                        key.Balance = result.Balance;
+                        key.AccountTier = result.AccountTier;
+
                         key.Status = ApiStatusEnum.Valid;
                         key.ErrorCount = 0;
                         key.ValidationResponse = result.Detail ?? "Key is valid";
                         Interlocked.Increment(ref _validCount);
-                        AnsiConsole.MarkupLine($"[green]✓ Valid: {Markup.Escape(provider.ProviderName)} key[/]");
-                        if (!string.IsNullOrEmpty(result.Detail))
+                        
+                        var balanceInfo = !string.IsNullOrEmpty(key.Balance) ? $" [dim](Balance: {key.Balance})[/]" : "";
+                        var tierInfo = !string.IsNullOrEmpty(key.AccountTier) ? $" [dim](Tier: {key.AccountTier})[/]" : "";
+                        
+                        AnsiConsole.MarkupLine($"[green]✓ Valid: {Markup.Escape(provider.ProviderName)} key[/]{balanceInfo}{tierInfo}");
+                        if (!string.IsNullOrEmpty(result.Detail) && result.Detail != "Key is valid")
                             AnsiConsole.MarkupLine($"  [dim]Response: {Markup.Escape(result.Detail.Length > 100 ? result.Detail.Substring(0, 100) + "..." : result.Detail)}[/]");
                         return true;
 

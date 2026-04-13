@@ -72,16 +72,86 @@ public class TelegramBotService : BackgroundService
             cancellationToken: stoppingToken
         );
 
+        // Set bot commands menu
+        await _botClient.SetMyCommands(new[]
+        {
+            new BotCommand { Command = "status", Description = "Mission Control Dashboard" },
+            new BotCommand { Command = "stats", Description = "Provider Scoreboard" },
+            new BotCommand { Command = "start_scraper", Description = "Launch New Hunt" },
+            new BotCommand { Command = "start_verifier", Description = "Verify Found Keys" },
+            new BotCommand { Command = "export", Description = "Extract Intelligence" },
+            new BotCommand { Command = "help", Description = "Show Help Menu" }
+        }, cancellationToken: stoppingToken);
+
         // Notify admin that bot is online
         if (_adminChatId != 0)
         {
             await _botClient.SendMessage(
                 chatId: _adminChatId,
-                text: "🚀 UnsecuredAPIKeys Bot is online!",
+                text: "<b>💎 APIHunterV2 Dashboard Online</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n<i>Satellite connection established.</i>",
+                parseMode: ParseMode.Html,
                 cancellationToken: stoppingToken);
         }
 
-        await Task.Delay(Timeout.Infinite, stoppingToken);
+        // Live Notification Loop
+        var lastCheck = DateTime.UtcNow;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+
+                if (_adminChatId == 0) continue;
+
+                using var scope = _serviceProvider.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+
+                var newValidKeys = await dbContext.APIKeys
+                    .Where(k => (k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits) && k.LastCheckedUTC > lastCheck)
+                    .OrderBy(k => k.LastCheckedUTC)
+                    .ToListAsync(stoppingToken);
+
+                if (newValidKeys.Any())
+                {
+                    foreach (var key in newValidKeys)
+                    {
+                        var statusStr = key.Status == ApiStatusEnum.Valid ? "✅ VALID" : "⚠️ QUOTA EXCEEDED";
+                        var colorIcon = key.Status == ApiStatusEnum.Valid ? "🟢" : "🟡";
+                        
+                        var sb = new StringBuilder();
+                        sb.AppendLine($"{colorIcon} <b>NEW {key.ApiType.ToString().ToUpper()} KEY FOUND</b>");
+                        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+                        sb.AppendLine($"<b>Status:</b> <code>{statusStr}</code>");
+                        
+                        if (!string.IsNullOrEmpty(key.AccountTier))
+                            sb.AppendLine($"<b>Tier:</b>   <code>{key.AccountTier}</code>");
+                            
+                        if (!string.IsNullOrEmpty(key.Balance))
+                            sb.AppendLine($"<b>Value:</b>  <code>{key.Balance}</code>");
+
+                        sb.AppendLine($"<b>Key:</b>    <code>{key.ApiKey.Substring(0, Math.Min(12, key.ApiKey.Length))}...</code>");
+                        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+                        
+                        var keyboard = new InlineKeyboardMarkup(new[]
+                        {
+                            new [] { InlineKeyboardButton.WithCallbackData("📂 Export Intelligence", $"export_key:{key.Id}") }
+                        });
+
+                        await _botClient.SendMessage(
+                            chatId: _adminChatId,
+                            text: sb.ToString(),
+                            parseMode: ParseMode.Html,
+                            replyMarkup: keyboard,
+                            cancellationToken: stoppingToken);
+                    }
+                    lastCheck = newValidKeys.Max(k => k.LastCheckedUTC) ?? lastCheck;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in Telegram notification loop");
+            }
+        }
     }
 
     private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
@@ -232,6 +302,27 @@ public class TelegramBotService : BackgroundService
                     await _botClient.SendMessage(chatId, $"🚀 Scraper started for *{groupName}* ({mode} mode)!\nJob ID: `{jobId}`", parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
                 }
             }
+            else if (callbackData == "status_refresh")
+            {
+                await HandleStatusCommand(chatId, cancellationToken);
+            }
+            else if (callbackData == "jobs_list")
+            {
+                var jobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
+                if (!jobs.Any())
+                {
+                    await _botClient.SendMessage(chatId, "No active jobs running.", cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    var sb = new StringBuilder("<b>🏃 ACTIVE DEPLOYMENTS</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n");
+                    foreach (var job in jobs)
+                    {
+                        sb.AppendLine($"▸ {job.JobType}: <code>{job.JobId.Substring(0, 8)}</code>");
+                    }
+                    await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -251,37 +342,29 @@ public class TelegramBotService : BackgroundService
     private async Task HandleHelpCommand(long chatId, CancellationToken ct)
     {
         var help = new StringBuilder();
-        help.AppendLine("🤖 <b>UnsecuredAPIKeys Bot Commands</b>");
+        help.AppendLine("<b>💎 APIHunterV2 Premium Dashboard</b>");
+        help.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        help.AppendLine("📊 <b>OVERVIEW</b>");
+        help.AppendLine("├ /status - Mission control dashboard");
+        help.AppendLine("└ /stats - Detailed provider scoreboard");
         help.AppendLine();
-        help.AppendLine("📊 <b>General</b>");
-        help.AppendLine("/status - Overall status & active jobs");
-        help.AppendLine("/stats - Detailed statistics");
-        help.AppendLine("/help - Show this message");
+        help.AppendLine("🔍 <b>SCRAPER ENGINE</b>");
+        help.AppendLine("├ /start_scraper - Launch new hunt 🚀");
+        help.AppendLine("├ /scraper_jobs - View active operations");
+        help.AppendLine("└ /stop_scraper &lt;id&gt; - Terminate job");
         help.AppendLine();
-        help.AppendLine("🔍 <b>Scraper</b>");
-        help.AppendLine("/start_scraper - Start interactive scraper");
-        help.AppendLine("/stop_scraper &lt;id&gt; - Stop a job");
-        help.AppendLine("/scraper_jobs - List scraper jobs");
+        help.AppendLine("✅ <b>VERIFIER SYSTEM</b>");
+        help.AppendLine("├ /start_verifier - Verify found keys");
+        help.AppendLine("├ /verifier_jobs - View active validation");
+        help.AppendLine("└ /api_types - Supported services");
         help.AppendLine();
-        help.AppendLine("✅ <b>Verifier</b>");
-        help.AppendLine("/start_verifier [types] - Start verifier");
-        help.AppendLine("/stop_verifier &lt;id&gt; - Stop a job");
-        help.AppendLine("/verifier_jobs - List verifier jobs");
-        help.AppendLine("/api_types - List supported API types");
-        help.AppendLine();
-        help.AppendLine("⚙️ <b>Config</b>");
-        help.AppendLine("/tokens - List GitHub tokens");
-        help.AppendLine("/add_token &lt;token&gt; - Add GitHub token");
-        help.AppendLine("/delete_token &lt;id&gt; - Delete GitHub token");
-        help.AppendLine("/queries - List search queries");
-        help.AppendLine("/add_query &lt;query&gt; - Add search query");
-        help.AppendLine("/delete_query &lt;id&gt; - Delete search query");
-        help.AppendLine("/toggle_query &lt;id&gt; - Toggle a query");
-        help.AppendLine();
-        help.AppendLine("💾 <b>Data</b>");
-        help.AppendLine("/valid_keys - Count of valid keys");
-        help.AppendLine("/export [csv|json] - Get keys file");
-        help.AppendLine("/reset_database CONFIRM_RESET - Wipe DB");
+        help.AppendLine("⚙️ <b>MANAGEMENT</b>");
+        help.AppendLine("├ /tokens - GitHub identities");
+        help.AppendLine("├ /queries - Discovery targets");
+        help.AppendLine("├ /valid_keys - Quick valid count");
+        help.AppendLine("└ /export - Extract intelligence 📂");
+        help.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        help.AppendLine("<i>Use the menu button for quick access.</i>");
 
         await _botClient.SendMessage(chatId, help.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
@@ -296,21 +379,47 @@ public class TelegramBotService : BackgroundService
         var activeJobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine("<b>📊 Current Status</b>");
-        sb.AppendLine($"Total Keys: {stats.TotalKeys}");
-        sb.AppendLine($"Valid: {stats.ValidKeys} ✅");
-        sb.AppendLine($"Invalid: {stats.InvalidKeys} ❌");
-        sb.AppendLine($"Unverified: {stats.UnverifiedKeys} ⏳");
-        sb.AppendLine($"GitHub Tokens: {stats.GitHubTokensCount}");
+        sb.AppendLine("<b>📡 SATELLITE STATUS</b>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        
+        double validPercent = stats.TotalKeys > 0 ? (double)stats.ValidKeys / stats.TotalKeys : 0;
+        sb.AppendLine($"<b>Health Index:</b> {GetProgressBar(validPercent)} {validPercent:P0}");
         sb.AppendLine();
-        sb.AppendLine($"<b>🏃 Active Jobs:</b> {activeJobs.Count}");
-        foreach (var job in activeJobs)
+        
+        sb.AppendLine($"<b>🟢 Valid:</b>  <code>{stats.ValidKeys}</code>");
+        sb.AppendLine($"<b>🔴 Invalid:</b> <code>{stats.InvalidKeys}</code>");
+        sb.AppendLine($"<b>⏳ Hidden:</b>  <code>{stats.UnverifiedKeys}</code>");
+        sb.AppendLine();
+        
+        sb.AppendLine($"<b>🔑 Tokens:</b>  {stats.GitHubTokensCount} active");
+        sb.AppendLine($"<b>🏃 Jobs:</b>    {activeJobs.Count} running");
+        
+        if (activeJobs.Any())
         {
-            var jobId = System.Net.WebUtility.HtmlEncode(job.JobId);
-            sb.AppendLine($"- {job.JobType}: <code>{jobId}</code>");
+            sb.AppendLine();
+            sb.AppendLine("<b>DEPLOYMENTS:</b>");
+            foreach (var job in activeJobs.DistinctBy(j => j.JobType))
+            {
+                sb.AppendLine($"▸ {job.JobType} 📡");
+            }
         }
+        
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine($"<i>System time: {DateTime.UtcNow:HH:mm} UTC</i>");
 
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+        var keyboard = new InlineKeyboardMarkup(new[]
+        {
+            new [] { InlineKeyboardButton.WithCallbackData("🔄 Refresh", "status_refresh"), InlineKeyboardButton.WithCallbackData("📋 Active Jobs", "jobs_list") }
+        });
+
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
+    }
+    
+    private string GetProgressBar(double percent)
+    {
+        const int totalBlocks = 10;
+        int activeBlocks = (int)(percent * totalBlocks);
+        return new string('█', activeBlocks) + new string('░', totalBlocks - activeBlocks);
     }
 
     private async Task HandleStatsCommand(long chatId, CancellationToken ct)
@@ -322,17 +431,27 @@ public class TelegramBotService : BackgroundService
         var stats = await dbService.GetCategorizedStatisticsAsync(dbContext);
 
         var sb = new StringBuilder();
-        sb.AppendLine("<b>📈 Detailed Statistics</b>");
+        sb.AppendLine("<b>🏆 PROVIDER SCOREBOARD</b>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         
         foreach (var category in stats.Categories)
         {
             sb.AppendLine();
-            sb.AppendLine($"<b>【 {System.Net.WebUtility.HtmlEncode(category.Value.CategoryName)} 】</b>");
-            foreach (var type in category.Value.ApiTypes)
+            sb.AppendLine($"<b>【 {System.Net.WebUtility.HtmlEncode(category.Value.CategoryName.ToUpper())} 】</b>");
+            foreach (var type in category.Value.ApiTypes.OrderByDescending(t => t.KeyCount))
             {
-                sb.AppendLine($"{System.Net.WebUtility.HtmlEncode(type.ApiTypeName)}: {type.KeyCount}");
+                if (type.KeyCount == 0) continue;
+                
+                string icon = type.ApiTypeName.Contains("OpenAI") ? "🤖" : 
+                             type.ApiTypeName.Contains("Google") ? "☁️" :
+                             type.ApiTypeName.Contains("Anthropic") ? "🧠" : "✨";
+                             
+                sb.AppendLine($"{icon} {System.Net.WebUtility.HtmlEncode(type.ApiTypeName)}: <code>{type.KeyCount}</code>");
             }
         }
+        
+        sb.AppendLine();
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }

@@ -16,9 +16,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"xai-[A-Za-z0-9]{32,}",  // XAI prefix pattern
-            @"grok[_-]?[A-Za-z0-9]{32,}",
-            @"XAI_API_KEY"
+            @"\bxai-[A-Za-z0-9]{32,}\b",  // XAI prefix pattern
+            @"\bgrok[_-]?[A-Za-z0-9]{32,}\b",
+            @"XAI_API_KEY",
+            @"GROK_API_KEY",
+            @"XAI_SECRET"
         ];
 
         public XAIProvider() : base() { }
@@ -79,7 +81,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length >= 32;
+            return !string.IsNullOrWhiteSpace(apiKey) && 
+                   (apiKey.StartsWith("xai-") || apiKey.StartsWith("grok-") || apiKey.Length >= 32);
         }
     }
 }

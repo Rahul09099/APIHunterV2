@@ -95,9 +95,28 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
             if (IsSuccessStatusCode(chatResponse.StatusCode))
             {
-                var success = ValidationResult.Success(chatResponse.StatusCode, discoveredModels);
-                success.AvailableModels = discoveredModels;
-                return success;
+                var result = ValidationResult.Success(chatResponse.StatusCode, discoveredModels);
+                result.AvailableModels = discoveredModels;
+
+                // Attempt to fetch billing info (Best effort)
+                try 
+                {
+                    using var billingRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.openai.com/dashboard/billing/credit_grants");
+                    billingRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                    var billingResponse = await httpClient.SendAsync(billingRequest);
+                    if (billingResponse.IsSuccessStatusCode)
+                    {
+                        var billingBody = await billingResponse.Content.ReadAsStringAsync();
+                        using var doc = JsonDocument.Parse(billingBody);
+                        if (doc.RootElement.TryGetProperty("total_available", out var total))
+                        {
+                            result.Balance = $"${total.GetDouble():F2} Available";
+                        }
+                    }
+                }
+                catch { /* Ignore billing fetch errors */ }
+
+                return result;
             }
 
             if (chatResponse.StatusCode == HttpStatusCode.Unauthorized ||
