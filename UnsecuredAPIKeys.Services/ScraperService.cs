@@ -244,6 +244,8 @@ public class ScraperService
         if (q.Contains("anthropic") || q.Contains("claude")) return "Anthropic";
         if (q.Contains("google") || q.Contains("gemini") || q.Contains("aizasy")) return "Google";
         if (q.Contains("kling")) return "KlingAI";
+        if (q.Contains("pollo")) return "PolloAI";
+        if (q.Contains("runway") || q.Contains("key_")) return "RunwayML";
         if (q.Contains("deepseek")) return "DeepSeek";
         if (q.Contains("cohere")) return "Cohere";
         if (q.Contains("eleven") || q.Contains("xi-")) return "ElevenLabs";
@@ -554,7 +556,20 @@ public class ScraperService
 
                     foreach (System.Text.RegularExpressions.Match match in matches)
                     {
-                        var apiKey = match.Value;
+                        var apiKey = match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
+
+                        // Special handling for Kling AI to find Access and Secret keys together
+                        if (provider.ApiType == ApiTypeEnum.KlingAI && !apiKey.Contains(':'))
+                        {
+                            var secretMatch = System.Text.RegularExpressions.Regex.Match(content, 
+                                @"(?:KLING|kling).*?(?:SECRET|secret|sk).*?['""]([a-zA-Z0-9]{16,})['""]", 
+                                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                
+                            if (secretMatch.Success)
+                            {
+                                apiKey = $"{apiKey}:{secretMatch.Groups[1].Value}";
+                            }
+                        }
 
                         // Check if already exists
                         var exists = await _dbContext.APIKeys

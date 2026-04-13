@@ -124,7 +124,18 @@ public class DatabaseService(DBContext dbContext)
 
             // XAI
             "xai-",
-            "XAI_API_KEY"
+            "XAI_API_KEY",
+
+            // Pollo AI patterns
+            "POLLO_API_KEY",
+            "pollo_api_key",
+            "POLLO_SECRET",
+            "pollo_",
+
+            // Runway ML
+            "key_",
+            "RUNWAYML_API_SECRET",
+            "RUNWAY_API_KEY",
         };
 
         bool addedAny = false;
@@ -226,7 +237,8 @@ public class DatabaseService(DBContext dbContext)
             ApiTypeEnum.OpenAI or ApiTypeEnum.AnthropicClaude or ApiTypeEnum.GoogleAI or
             ApiTypeEnum.Cohere or ApiTypeEnum.HuggingFace or ApiTypeEnum.StabilityAI or
             ApiTypeEnum.Replicate or ApiTypeEnum.TogetherAI or ApiTypeEnum.DeepSeek or
-            ApiTypeEnum.ElevenLabs or ApiTypeEnum.XAI or ApiTypeEnum.FireworksAI
+            ApiTypeEnum.ElevenLabs or ApiTypeEnum.XAI or ApiTypeEnum.FireworksAI or
+            ApiTypeEnum.KlingAI or ApiTypeEnum.PolloAI or ApiTypeEnum.RunwayML
                 => ApiCategoryEnum.AIAndLLM,
 
             ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack

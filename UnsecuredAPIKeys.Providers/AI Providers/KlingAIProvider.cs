@@ -15,10 +15,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"kling_api_key",
-            @"KLING_API_KEY",
-            @"KLING_ACCESS_KEY",
-            @"kling_access_key"
+            @"(?:KLING_ACCESS_KEY|kling_access_key|KLING_AK).*?['""]([a-zA-Z0-9]{16,})['""]",
+            @"\b[a-zA-Z0-9]{24,}\b" // Fallback for raw keys
         ];
 
         public KlingAIProvider() : base() { }
@@ -27,14 +25,35 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(string apiKey, HttpClient httpClient)
         {
-            // KlingAI typically uses JWTs or Access/Secret keys. 
-            // We'll attempt a request to a likely endpoint assuming a Bearer token.
-            // Note: Official docs for exact validation endpoint are scarce without login, 
-            // but we can try the standard model listing or similar if they offer it.
-            // Replicate integration often uses "Token <token>".
+            string ak = apiKey;
+            string? sk = null;
+
+            // Check if we have a paired key (AK:SK)
+            if (apiKey.Contains(':'))
+            {
+                var parts = apiKey.Split(':');
+                ak = parts[0];
+                sk = parts[1];
+            }
+
+            // If we only have AK, we try a direct Bearer test (some proxy providers support this)
+            // But for native Kling, we need the Secret Key to sign a JWT.
+            string authHeaderValue = apiKey; 
+
+            if (!string.IsNullOrEmpty(sk))
+            {
+                try 
+                {
+                    authHeaderValue = GenerateKlingJwt(ak, sk);
+                }
+                catch (Exception ex)
+                {
+                    return ValidationResult.HasHttpError(HttpStatusCode.BadRequest, $"JWT Generation failed: {ex.Message}");
+                }
+            }
             
-            using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.klingai.com/v1/videos"); // Guessing endpoint based on function
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.klingai.com/v1/user/info");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authHeaderValue);
 
             try 
             {
@@ -46,7 +65,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, "Valid KlingAI key");
+                    return ValidationResult.Success(response.StatusCode, "Valid KlingAI key (JWT Signed)");
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
                 {
@@ -68,10 +87,46 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             }
         }
 
+        private string GenerateKlingJwt(string ak, string sk)
+        {
+            // Standard HS256 JWT Generation for Kling AI
+            var header = new { alg = "HS256", typ = "JWT" };
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var payload = new 
+            { 
+                iss = ak, 
+                exp = now + 1800, // 30 mins
+                nbf = now - 5 
+            };
+
+            string encodedHeader = Base64UrlEncode(System.Text.Json.JsonSerializer.Serialize(header));
+            string encodedPayload = Base64UrlEncode(System.Text.Json.JsonSerializer.Serialize(payload));
+            
+            string dataToSign = $"{encodedHeader}.{encodedPayload}";
+            byte[] keyBytes = System.Text.Encoding.UTF8.GetBytes(sk);
+            byte[] dataBytes = System.Text.Encoding.UTF8.GetBytes(dataToSign);
+            
+            using var hmac = new System.Security.Cryptography.HMACSHA256(keyBytes);
+            byte[] hashBytes = hmac.ComputeHash(dataBytes);
+            string encodedSignature = Base64UrlEncode(hashBytes);
+            
+            return $"{dataToSign}.{encodedSignature}";
+        }
+
+        private static string Base64UrlEncode(string input) => Base64UrlEncode(System.Text.Encoding.UTF8.GetBytes(input));
+
+        private static string Base64UrlEncode(byte[] input)
+        {
+            return Convert.ToBase64String(input)
+                .Replace("+", "-")
+                .Replace("/", "_")
+                .TrimEnd('=');
+        }
+
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            // Since we don't have a strict regex, we'll accept non-empty strings of reasonable length
-            return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length > 20;
+            // Accept AK:SK pairs or single keys of length > 16
+            return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length > 16;
         }
     }
 }

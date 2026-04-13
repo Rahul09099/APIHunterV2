@@ -8,11 +8,11 @@ A powerful, modular, and resumable tool to scrape GitHub for exposed API keys an
 
 ## 🌟 Key Features
 
-*   **Multi-Provider Support**: Detects and verifies keys for OpenAI, Anthropic, Google (Gemini), DeepSeek, Mistral, and many more.
-*   **Resumable Deep Search**: 
-    *   Bypasses GitHub's 1000-result limit using smart partitioning (Language + File Extension).
-    *   **Tracks progress automatically**: Stop and resume scrapes at any time.
-    *   Visual progress tables and status reporting.
+*   **Multi-Provider Support**: Detects and verifies keys for OpenAI, Anthropic, Google (Gemini), DeepSeek, Mistral, Pollo AI, Runway ML, Kling AI (Pro), and many more.
+    *   **Resumable Deep Search**: 
+        *   Bypasses GitHub's 1000-result limit using smart partitioning (Language + File Extension).
+        *   **Tracks progress automatically**: Stop and resume scrapes at any time.
+        *   Visual progress tables and status reporting.
 *   **Lite Search**: Fast, targeted search for quick discovery.
 *   **Multiple GitHub Tokens**: Configure multiple tokens for rotation and load balancing to avoid rate limits.
 *   **Live Verification**: Validates keys against actual API endpoints to determine if they are `Valid`, `Unauthorized`, or `QuotaExhausted`.
@@ -53,6 +53,9 @@ Select **1. Start Scraper** -> Choose a Provider Group -> **Deep Search**.
 | **Fireworks** | `fw_...` | ✅ Live |
 | **TogetherAI** | Custom | ✅ Live |
 | **xAI (Grok)** | Custom | ✅ Live |
+| **Pollo AI** | `pollo_...` | ✅ Live |
+| **Runway ML** | `key_...` | ✅ Live |
+| **Kling AI** | AK:SK Pairs | ✅ Live (JWT) |
 
 ## 📚 Documentation
 
