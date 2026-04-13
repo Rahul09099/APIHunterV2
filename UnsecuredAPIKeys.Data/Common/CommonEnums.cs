@@ -62,6 +62,8 @@ namespace UnsecuredAPIKeys.Data.Common
         XAI = 207,
         FireworksAI = 208,
         KlingAI = 210,
+        PolloAI = 215,
+        RunwayML = 220,
 
         // Communication Category (4)
         SendGrid = 410,

@@ -1,0 +1,11 @@
+[Bb]in/
+[Oo]bj/
+publish_win/
+*.user
+*.userosscache
+*.sln.doccache
+.vs/
+.idea/
+.vscode/
+*.sqlite
+*.log
