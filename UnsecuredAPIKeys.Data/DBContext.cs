@@ -69,8 +69,8 @@ namespace UnsecuredAPIKeys.Data
 
                 var uri = new Uri(uriString);
                 var userInfo = uri.UserInfo.Split(':');
-                var username = userInfo[0];
-                var password = userInfo.Length > 1 ? userInfo[1] : "";
+                var username = Uri.UnescapeDataString(userInfo[0]);
+                var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
                 var database = uri.AbsolutePath.TrimStart('/');
                 var port = uri.Port == -1 ? 5432 : uri.Port;
                 return $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";

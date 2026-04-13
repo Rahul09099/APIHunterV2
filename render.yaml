@@ -9,20 +9,13 @@ services:
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
-      - key: DATABASE_PATH
-        value: /app/data/unsecuredapikeys.db
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_ADMIN_CHAT_ID
         sync: false
       - key: POSTGRES_CONNECTION_STRING
-        fromDatabase:
-          name: apikeys-db
-          property: connectionString
+        sync: false
       - key: PORT
-        generateValue: true
+        value: 10000
 
-databases:
-  - name: apikeys-db
-    plan: free
-    region: oregon
+# Databases section removed as we are using Supabase (External PostgreSQL)
