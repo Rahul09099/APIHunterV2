@@ -22,7 +22,7 @@ public static class LiteLimits
     /// <summary>
     /// Delay between GitHub search queries (milliseconds).
     /// </summary>
-    public const int SEARCH_DELAY_MS = 5000;
+    public const int SEARCH_DELAY_MS = 3000;
 
     /// <summary>
     /// Number of keys to process per verification batch.
