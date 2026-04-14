@@ -26,7 +26,6 @@ public class DatabaseService(DBContext dbContext)
         try 
         {
             // Apply any pending migrations automatically
-            // This is the "better way" to handle schema mismatches in production
             await dbContext.Database.MigrateAsync();
             Console.WriteLine("[DB] Migrations applied successfully.");
         }
@@ -43,6 +42,9 @@ public class DatabaseService(DBContext dbContext)
         
         // Manual column check for all tables (Full Robustness Layer)
         await EnsureAllTableColumnsExistAsync(dbContext);
+        
+        // Seed default queries if database is empty or queries are missing
+        await SeedDefaultQueriesAsync(dbContext);
 
         return dbContext;
     }
@@ -74,6 +76,36 @@ public class DatabaseService(DBContext dbContext)
                     ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""AddedByTelegramId"" BIGINT;
                     ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""LastUsedUTC"" TIMESTAMP WITH TIME ZONE;";
                 await context.Database.ExecuteSqlRawAsync(sqlTokens);
+
+                // 4. APIKeys
+                var sqlKeys = @"
+                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""Balance"" TEXT;
+                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AccountTier"" TEXT;
+                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""DiscoveredByTelegramId"" BIGINT;
+                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""Metadata"" TEXT;
+                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""ErrorCount"" INTEGER DEFAULT 0;
+                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""ValidationResponse"" TEXT;";
+                await context.Database.ExecuteSqlRawAsync(sqlKeys);
+
+                // 5. RepoReferences
+                var sqlRepo = @"
+                    ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""ApiContentUrl"" TEXT;
+                    ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""Branch"" TEXT;";
+                await context.Database.ExecuteSqlRawAsync(sqlRepo);
+                
+                // 6. Ensure DeepSearchProgress table exists
+                var sqlTable = @"
+                    CREATE TABLE IF NOT EXISTS ""DeepSearchProgress"" (
+                        ""Id"" SERIAL PRIMARY KEY,
+                        ""SearchQueryId"" BIGINT NOT NULL,
+                        ""PartitionType"" TEXT NOT NULL,
+                        ""PartitionValue"" TEXT NOT NULL,
+                        ""LastPageSearched"" INTEGER DEFAULT 0,
+                        ""TotalResultsFound"" INTEGER DEFAULT 0,
+                        ""IsCompleted"" BOOLEAN DEFAULT FALSE,
+                        ""LastSearchedUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );";
+                await context.Database.ExecuteSqlRawAsync(sqlTable);
                 
                 Console.WriteLine("[DB] Manual schema sync completed.");
             }
@@ -81,6 +113,43 @@ public class DatabaseService(DBContext dbContext)
             {
                 Console.WriteLine($"[DB] Warning: Manual schema update failed: {ex.Message}");
             }
+        }
+    }
+
+    private async Task SeedDefaultQueriesAsync(DBContext context)
+    {
+        try 
+        {
+            var count = await context.SearchQueries.CountAsync();
+            if (count > 0) return;
+
+            Console.WriteLine("[DB] Seeding default search targets...");
+            var defaults = new List<SearchQuery>
+            {
+                new() { Query = "sk- OpenAI", IsEnabled = true },
+                new() { Query = "anthropic Claude", IsEnabled = true },
+                new() { Query = "aizasy Gemini", IsEnabled = true },
+                new() { Query = "deepseek", IsEnabled = true },
+                new() { Query = "kling AI", IsEnabled = true },
+                new() { Query = "pollo AI", IsEnabled = true },
+                new() { Query = "runway ML", IsEnabled = true },
+                new() { Query = "cohere", IsEnabled = true },
+                new() { Query = "elevenlabs", IsEnabled = true },
+                new() { Query = "stability AI", IsEnabled = true },
+                new() { Query = "together AI", IsEnabled = true },
+                new() { Query = "grok XAI", IsEnabled = true },
+                new() { Query = "replicate r8_", IsEnabled = true },
+                new() { Query = "fireworks fw_", IsEnabled = true },
+                new() { Query = "hf_ HuggingFace", IsEnabled = true }
+            };
+
+            context.SearchQueries.AddRange(defaults);
+            await context.SaveChangesAsync();
+            Console.WriteLine($"[DB] Seeded {defaults.Count} default search targets.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DB] Warning: Could not seed default queries: {ex.Message}");
         }
     }
     
