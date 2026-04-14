@@ -154,9 +154,14 @@ public class TelegramBotService : BackgroundService
                         // If key is not owned by super admin, also notify super admin (optional, for monitoring)
                         if (targetChatId != _adminChatId && _adminChatId != 0)
                         {
+                            var discoverer = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetChatId }, stoppingToken);
+                            var discovererName = discoverer != null && !string.IsNullOrEmpty(discoverer.Username) 
+                                ? $"@{discoverer.Username} (<code>{targetChatId}</code>)" 
+                                : $"<code>{targetChatId}</code>";
+
                              await _botClient.SendMessage(
                                 chatId: _adminChatId,
-                                text: $"<i>[Monitor] New key found by user {targetChatId}:</i>\n{sb}",
+                                text: $"<i>[Monitor] New key found by user {discovererName}:</i>\n{sb}",
                                 parseMode: ParseMode.Html,
                                 cancellationToken: stoppingToken);
                         }
@@ -176,16 +181,19 @@ public class TelegramBotService : BackgroundService
         long chatId = 0;
         string? messageText = null;
         string? callbackData = null;
+        User? fromUser = null;
 
         if (update.Message is { Text: { } text })
         {
             chatId = update.Message.Chat.Id;
             messageText = text;
+            fromUser = update.Message.From;
         }
         else if (update.CallbackQuery is { Data: { } data, Message: { } msg })
         {
             chatId = msg.Chat.Id;
             callbackData = data;
+            fromUser = update.CallbackQuery.From;
         }
 
         if (chatId == 0) return;
@@ -195,6 +203,14 @@ public class TelegramBotService : BackgroundService
         
         // Authorization Logics
         var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { chatId }, cancellationToken);
+
+        // Sync Username
+        if (user != null && fromUser != null && fromUser.Username != null && user.Username != fromUser.Username)
+        {
+            user.Username = fromUser.Username;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
         var isSuperAdmin = _adminChatId != 0 && chatId == _adminChatId;
         var hasActiveSub = user != null && user.SubscriptionExpiryUtc > DateTime.UtcNow;
         var isAdmin = isSuperAdmin || (user != null && user.IsAdmin);
@@ -1080,7 +1096,8 @@ public class TelegramBotService : BackgroundService
         foreach (var admin in admins)
         {
             if (admin.TelegramId == _adminChatId) continue;
-            sb.AppendLine($"👤 Admin: <code>{admin.TelegramId}</code>");
+            var nameStr = !string.IsNullOrEmpty(admin.Username) ? $" (@{admin.Username})" : "";
+            sb.AppendLine($"👤 Admin: <code>{admin.TelegramId}</code>{nameStr}");
         }
         
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
