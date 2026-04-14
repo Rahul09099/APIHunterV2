@@ -93,7 +93,7 @@ public class DatabaseService(DBContext dbContext)
                     ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""Branch"" TEXT;";
                 await context.Database.ExecuteSqlRawAsync(sqlRepo);
                 
-                // 6. Ensure DeepSearchProgress table exists
+                // 6. Ensure DeepSearchProgress table and columns exist
                 var sqlTable = @"
                     CREATE TABLE IF NOT EXISTS ""DeepSearchProgress"" (
                         ""Id"" SERIAL PRIMARY KEY,
@@ -104,7 +104,11 @@ public class DatabaseService(DBContext dbContext)
                         ""TotalResultsFound"" INTEGER DEFAULT 0,
                         ""IsCompleted"" BOOLEAN DEFAULT FALSE,
                         ""LastSearchedUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                    );";
+                    );
+                    ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""LastPageSearched"" INTEGER DEFAULT 0;
+                    ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""TotalResultsFound"" INTEGER DEFAULT 0;
+                    ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""IsCompleted"" BOOLEAN DEFAULT FALSE;
+                    ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""LastSearchedUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;";
                 await context.Database.ExecuteSqlRawAsync(sqlTable);
                 
                 Console.WriteLine("[DB] Manual schema sync completed.");
