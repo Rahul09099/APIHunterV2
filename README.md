@@ -59,8 +59,14 @@ Select **1. Start Scraper** -> Choose a Provider Group -> **Deep Search**.
 
 ## 📚 Documentation
 
-*   [**Developer Guide**](DEVELOPER_GUIDE.md): How to add new providers, build from source, and understand the architecture.
-*   [**Workflow & Deployment**](WORKFLOW.md): Detailed workflows for usage, deployment, and best practices.
+### 💎 V4 Decentralized Architecture (Ghost Nodes)
+- 👑 [**Admin Ghost Management Guide**](ADMIN_GHOST_GUIDE.md): Dashboard & Keep-Alive.
+- 👻 [**Subscriber Setup Steps**](SUBSCRIBER_SETUP_STEPS.md): Deployment for users.
+- 🧠 [**Technical System Architecture**](SYSTEM_ARCH_DECENTRALIZED.md): Under-the-hood logic.
+
+### 🛠️ Legacy & Developer Docs
+*   [**Developer Guide**](DEVELOPER_GUIDE.md): How to add new providers and build from source.
+*   [**Workflow & Deployment**](WORKFLOW.md): Detailed workflows and best practices.
 
 ## ⚙️ Configuration
 
