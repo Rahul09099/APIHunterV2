@@ -77,9 +77,11 @@ public class TelegramBotService : BackgroundService
         {
             new BotCommand { Command = "status", Description = "Mission Control Dashboard" },
             new BotCommand { Command = "stats", Description = "Provider Scoreboard" },
+            new BotCommand { Command = "valid_keys", Description = "Show Valid Keys Count" },
             new BotCommand { Command = "start_scraper", Description = "Launch New Hunt" },
             new BotCommand { Command = "start_verifier", Description = "Verify Found Keys" },
             new BotCommand { Command = "export", Description = "Extract Intelligence" },
+            new BotCommand { Command = "my_sub", Description = "My Subscription Info" },
             new BotCommand { Command = "help", Description = "Show Help Menu" }
         }, cancellationToken: stoppingToken);
 
@@ -405,37 +407,50 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("<b>💎 APIHunterV2 Premium Dashboard</b>");
         help.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         help.AppendLine("📊 <b>OVERVIEW</b>");
-        help.AppendLine("├ /status - Your mission control");
-        help.AppendLine("└ /stats - Your provider scoreboard");
+        help.AppendLine("├ /status - Mission control center");
+        help.AppendLine("├ /stats - Provider scoreboard");
+        help.AppendLine("└ /valid_keys - Valid keys count");
         help.AppendLine();
         help.AppendLine("🔍 <b>SCRAPER ENGINE</b>");
         help.AppendLine("├ /start_scraper - Launch new hunt 🚀");
         help.AppendLine("├ /scraper_jobs - View active operations");
         help.AppendLine("└ /stop_scraper &lt;id&gt; - Terminate job");
         help.AppendLine();
-        help.AppendLine("✅ <b>INTELLIGENCE</b>");
-        help.AppendLine("├ /valid_keys - Your valid keys count");
-        help.AppendLine("└ /export - Extract intelligence 📂");
+        help.AppendLine("✅ <b>VERIFIER ENGINE</b>");
+        help.AppendLine("├ /start_verifier - Validate found keys");
+        help.AppendLine("├ /verifier_jobs - View active verification");
+        help.AppendLine("├ /stop_verifier &lt;id&gt; - Stop verification");
+        help.AppendLine("└ /api_types - List supported targets");
+        help.AppendLine();
+        help.AppendLine("📡 <b>GHOST NODE (Decentralized)</b>");
+        help.AppendLine("├ /node_token - Get your worker token");
+        help.AppendLine("├ /master_url - Get master API endpoint");
+        help.AppendLine("└ /node_status - Check node health");
+        help.AppendLine();
+        help.AppendLine("📂 <b>INTELLIGENCE</b>");
+        help.AppendLine("└ /export [csv/json] - Extract data");
         help.AppendLine();
         help.AppendLine("👤 <b>ACCOUNT</b>");
         help.AppendLine("├ /my_sub - Check subscription status");
         help.AppendLine("└ /id - Show your Telegram ID");
-
+ 
         if (isAdmin)
         {
             help.AppendLine();
             help.AppendLine("🛠️ <b>ADMIN MANAGEMENT</b>");
             help.AppendLine("├ /add_sub &lt;id&gt; &lt;days&gt; - Grant sub");
-            help.AppendLine("├ /list_subs - See all users");
-            help.AppendLine("├ /admins - List all admins");
-            help.AppendLine("├ /set_admin &lt;id,id...&gt; &lt;t/f&gt; - Grant admin");
-            help.AppendLine("├ /tokens - Manage GitHub tokens");
-            help.AppendLine("└ /queries - Manage discovery targets");
+            help.AppendLine("├ /list_subs - List all subscribers");
+            help.AppendLine("├ /admins - List system admins");
+            help.AppendLine("├ /tokens - View GitHub tokens");
+            help.AppendLine("├ /add_token &lt;token&gt; - Add token");
+            help.AppendLine("├ /queries - View target queries");
+            help.AppendLine("├ /add_query &lt;q&gt; - Add new target");
+            help.AppendLine("└ /reset_database - FULL WIPE ⚠️");
         }
-
+ 
         help.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         help.AppendLine("<i>Use the menu button for quick access.</i>");
-
+ 
         await _botClient.SendMessage(chatId, help.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
