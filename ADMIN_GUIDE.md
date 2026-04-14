@@ -20,14 +20,19 @@ If you need to view the API structure or test endpoints via the browser:
 
 ---
 
-### 🛰️ Ghost Node Management
-Your system uses a Master-Worker architecture. As Admin, you oversee the entire "Ghost Node" network.
+### 🛰️ Network Monitoring
+You have multiple ways to monitor the health and throughput of your Ghost Node network.
 
-#### Monitoring the Network
-- Use **`/node_status`** in the Telegram Bot.
-- **🟢 Online**: Node is active and sent a heartbeat within the last 10 minutes.
-- **🔴 Offline**: Node has lost connection or stopped running.
-- **Immediate Response**: New workers now report as "Online" within seconds of deployment.
+#### 💎 Premium Visual Dashboard
+For a high-end visual overview of the entire network:
+- **URL**: `https://your-bot.onrender.com/dashboard`
+- **Features**: Live worker counts, discovery totals, and real-time "Pulse" monitoring. 
+
+#### 📡 Health Endpoints
+- **Master Health**: `https://your-bot.onrender.com/health` (Returns JSON status)
+- **JSON Stats**: `https://your-bot.onrender.com/api/v1/nodes/stats` (Raw data for external tools)
+
+---
 
 #### Provisioning New Nodes
 1. Run **`/add_sub <telegramId> <days>`** to grant access.

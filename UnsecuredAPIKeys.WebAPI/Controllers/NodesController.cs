@@ -141,4 +141,35 @@ public class NodesController : ControllerBase
 
         return Ok(new { status = "success", addedCount = newKeys });
     }
+
+    /// <summary>
+    /// Returns aggregate statistics for the visual dashboard.
+    /// </summary>
+    [HttpGet("stats")]
+    public async Task<IActionResult> GetStats()
+    {
+        var tenMinutesAgo = DateTime.UtcNow.AddMinutes(-10);
+        
+        var activeNodesCount = await _dbContext.TelegramSubscribers
+            .CountAsync(s => s.LastNodeHeartbeatUtc > tenMinutesAgo);
+
+        var totalKeysFound = await _dbContext.APIKeys.CountAsync();
+        
+        var activeQueriesCount = await _dbContext.SearchQueries
+            .CountAsync(q => q.IsEnabled);
+
+        var lastKey = await _dbContext.APIKeys
+            .OrderByDescending(k => k.FirstFoundUTC)
+            .Select(k => (DateTime?)k.FirstFoundUTC)
+            .FirstOrDefaultAsync();
+
+        return Ok(new
+        {
+            activeNodes = activeNodesCount,
+            totalKeys = totalKeysFound,
+            activeQueries = activeQueriesCount,
+            lastDiscoveryAt = lastKey,
+            serverUtc = DateTime.UtcNow
+        });
+    }
 }
