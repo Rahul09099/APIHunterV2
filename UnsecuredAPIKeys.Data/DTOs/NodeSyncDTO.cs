@@ -17,7 +17,7 @@ public class SearchProviderTokenDTO
 
 public class SearchQueryDTO
 {
-    public int Id { get; set; }
+    public long Id { get; set; }
     public string Query { get; set; } = string.Empty;
     public bool IsEnabled { get; set; }
 }
