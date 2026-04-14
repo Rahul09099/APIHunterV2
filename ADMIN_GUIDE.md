@@ -20,8 +20,11 @@ If you need to view the API structure or test endpoints via the browser:
 
 ---
 
-### 🛰️ Network Monitoring
+### 📡 Network Monitoring
 You have multiple ways to monitor the health and throughput of your Ghost Node network.
+
+> [!TIP]
+> **Complete Management Guide**: See the new **[ADMIN_GHOST_GUIDE.md](ADMIN_GHOST_GUIDE.md)** for detailed dashboard and Keep-Alive instructions.
 
 #### 💎 Premium Visual Dashboard
 For a high-end visual overview of the entire network:

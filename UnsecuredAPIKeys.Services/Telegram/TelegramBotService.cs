@@ -967,8 +967,14 @@ public class TelegramBotService : BackgroundService
             msg.AppendLine("⚙️ <b>REQUIRED ENVIRONMENT VARIABLES:</b>");
             msg.AppendLine($"• <code>IS_WORKER_MODE</code> = <code>true</code>");
             msg.AppendLine($"• <code>MASTER_API_URL</code> = <code>{masterUrl}</code>");
-            msg.AppendLine($"• <code>NODE_TOKEN</code> = <code>{user.NodeToken}</code>");
+            msg.AppendLine($"• <code>NODE_TOKEN</code> = <code>{user.NodeToken ?? "[Click /node_token to generate]"}</code>");
             msg.AppendLine($"• <code>PORT</code> = <code>10000</code>");
+            msg.AppendLine();
+            msg.AppendLine("🔑 <b>Access Key:</b> Click /node_token to view or generate your secure key.");
+            if (string.IsNullOrEmpty(user.NodeToken))
+            {
+                msg.AppendLine("<i>(New users: you must run the command above first to create your key!)</i>");
+            }
             msg.AppendLine();
             msg.AppendLine("🏁 <b>Finish:</b> Deploy and check /node_status.");
             msg.AppendLine();
