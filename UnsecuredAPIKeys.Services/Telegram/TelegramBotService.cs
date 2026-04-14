@@ -1157,13 +1157,24 @@ public class TelegramBotService : BackgroundService
 
         foreach (var node in nodes)
         {
-            var status = node.LastNodeHeartbeatUtc.HasValue && (DateTime.UtcNow - node.LastNodeHeartbeatUtc.Value).TotalMinutes < 10
-                ? "🟢 Online"
-                : "🔴 Offline";
-                
-            var lastSeen = node.LastNodeHeartbeatUtc.HasValue 
-                ? node.LastNodeHeartbeatUtc.Value.ToString("g") 
-                : "Never";
+            string status;
+            string lastSeen;
+
+            if (node.TelegramId == _adminChatId)
+            {
+                status = "🟢 Online (Master)";
+                lastSeen = "N/A (Local)";
+            }
+            else
+            {
+                status = node.LastNodeHeartbeatUtc.HasValue && (DateTime.UtcNow - node.LastNodeHeartbeatUtc.Value).TotalMinutes < 10
+                    ? "🟢 Online"
+                    : "🔴 Offline";
+                    
+                lastSeen = node.LastNodeHeartbeatUtc.HasValue 
+                    ? node.LastNodeHeartbeatUtc.Value.ToString("g") 
+                    : "Never";
+            }
 
             sb.AppendLine($"<b>Node:</b> {node.Username ?? node.TelegramId.ToString()}");
             sb.AppendLine($"<b>Status:</b> {status}");
