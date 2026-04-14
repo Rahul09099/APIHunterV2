@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("UnsecuredAPIKeys.Data")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b78e95ea267eb5043f666e98e52c5037d64f7caa")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d4a49e9b6451356898e702902692169c4fc1af76")]
 [assembly: System.Reflection.AssemblyProductAttribute("UnsecuredAPIKeys.Data")]
 [assembly: System.Reflection.AssemblyTitleAttribute("UnsecuredAPIKeys.Data")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -717,10 +717,10 @@ public class ScraperService
         var discoveries = new System.Collections.Concurrent.ConcurrentBag<NodeReportDto>();
         var processingTasks = resultsList.Select(async repoRef =>
         {
-            await _parallelSemaphore.WaitAsync(_cancellationTokenSource.Token);
+            await _parallelSemaphore.WaitAsync(_cancellationTokenSource!.Token);
             try
             {
-                if (_cancellationTokenSource.Token.IsCancellationRequested) return;
+                if (_cancellationTokenSource!.Token.IsCancellationRequested) return;
                 
                 var found = await ProcessResultAndCollectAsync(repoRef, token, query, discoveredBy);
                 if (found != null && found.Any())
@@ -869,7 +869,6 @@ public class ScraperService
                     }
                 }
             }
-        }
         }
         catch (Exception ex)
         {
