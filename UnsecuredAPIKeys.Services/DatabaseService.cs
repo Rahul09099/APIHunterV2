@@ -41,26 +41,41 @@ public class DatabaseService(DBContext dbContext)
             }
         }
         
-        // Manual column check for TelegramSubscribers (Robustness Layer)
-        await EnsureTelegramSubColumnsExistAsync(dbContext);
+        // Manual column check for all tables (Full Robustness Layer)
+        await EnsureAllTableColumnsExistAsync(dbContext);
 
         return dbContext;
     }
 
-    private async Task EnsureTelegramSubColumnsExistAsync(DBContext context)
+    private async Task EnsureAllTableColumnsExistAsync(DBContext context)
     {
-        // This is a safety layer for the "TelegramSubscribers" table
-        // specifically to prevent the common missing column crashes
+        // This is a safety layer to prevent common missing column crashes 
+        // across all tables in PostgreSQL.
         if (context.Database.IsNpgsql())
         {
             try 
             {
-                var sql = @"
+                // 1. TelegramSubscribers
+                var sqlSub = @"
                     ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""SubscriptionExpiryUtc"" TIMESTAMP WITH TIME ZONE DEFAULT '1970-01-01 00:00:00+00';
                     ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""CreatedAtUtc"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
                     ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""NodeToken"" TEXT;
                     ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""LastNodeHeartbeatUtc"" TIMESTAMP WITH TIME ZONE;";
-                await context.Database.ExecuteSqlRawAsync(sql);
+                await context.Database.ExecuteSqlRawAsync(sqlSub);
+
+                // 2. SearchQueries
+                var sqlQueries = @"
+                    ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""LastDeepSearchDateUTC"" TIMESTAMP WITH TIME ZONE;
+                    ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""SearchResultsCount"" INTEGER DEFAULT 0;";
+                await context.Database.ExecuteSqlRawAsync(sqlQueries);
+
+                // 3. SearchProviderTokens
+                var sqlTokens = @"
+                    ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""AddedByTelegramId"" BIGINT;
+                    ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""LastUsedUTC"" TIMESTAMP WITH TIME ZONE;";
+                await context.Database.ExecuteSqlRawAsync(sqlTokens);
+                
+                Console.WriteLine("[DB] Manual schema sync completed.");
             }
             catch (Exception ex)
             {
