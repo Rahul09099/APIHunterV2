@@ -75,14 +75,13 @@ public class TelegramBotService : BackgroundService
         // Set bot commands menu
         await _botClient.SetMyCommands(new[]
         {
-            new BotCommand { Command = "status", Description = "Mission Control Dashboard" },
-            new BotCommand { Command = "stats", Description = "Provider Scoreboard" },
-            new BotCommand { Command = "valid_keys", Description = "Show Valid Keys Count" },
-            new BotCommand { Command = "start_scraper", Description = "Launch New Hunt" },
-            new BotCommand { Command = "start_verifier", Description = "Verify Found Keys" },
-            new BotCommand { Command = "export", Description = "Extract Intelligence" },
-            new BotCommand { Command = "my_sub", Description = "My Subscription Info" },
-            new BotCommand { Command = "help", Description = "Show Help Menu" }
+            new BotCommand { Command = "status", Description = "Mission Control" },
+            new BotCommand { Command = "stats", Description = "Statistics" },
+            new BotCommand { Command = "start_scraper", Description = "Start Scraper" },
+            new BotCommand { Command = "start_verifier", Description = "Start Verifier" },
+            new BotCommand { Command = "valid_keys", Description = "Valid Keys" },
+            new BotCommand { Command = "export", Description = "Export Data" },
+            new BotCommand { Command = "help", Description = "Show Commands" }
         }, cancellationToken: stoppingToken);
 
         // Notify admin that bot is online
@@ -404,49 +403,53 @@ public class TelegramBotService : BackgroundService
     private async Task HandleHelpCommand(long chatId, bool isAdmin, CancellationToken ct)
     {
         var help = new StringBuilder();
-        help.AppendLine("<b>💎 APIHunterV2 Premium Dashboard</b>");
+        help.AppendLine("<b>🤖 UnsecuredAPIKeys Bot Commands</b>");
         help.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
-        help.AppendLine("📊 <b>OVERVIEW</b>");
-        help.AppendLine("├ /status - Mission control center");
-        help.AppendLine("├ /stats - Provider scoreboard");
-        help.AppendLine("└ /valid_keys - Valid keys count");
+        help.AppendLine("📊 <b>General</b>");
+        help.AppendLine("├ /status - Overall status &amp; active jobs");
+        help.AppendLine("├ /stats - Detailed statistics");
+        help.AppendLine("└ /help - Show this message");
         help.AppendLine();
-        help.AppendLine("🔍 <b>SCRAPER ENGINE</b>");
-        help.AppendLine("├ /start_scraper - Launch new hunt 🚀");
-        help.AppendLine("├ /scraper_jobs - View active operations");
-        help.AppendLine("└ /stop_scraper &lt;id&gt; - Terminate job");
+        help.AppendLine("🔍 <b>Scraper</b>");
+        help.AppendLine("├ /start_scraper - Start interactive scraper");
+        help.AppendLine("├ /stop_scraper &lt;id&gt; - Stop a job");
+        help.AppendLine("└ /scraper_jobs - List scraper jobs");
         help.AppendLine();
-        help.AppendLine("✅ <b>VERIFIER ENGINE</b>");
-        help.AppendLine("├ /start_verifier - Validate found keys");
-        help.AppendLine("├ /verifier_jobs - View active verification");
-        help.AppendLine("├ /stop_verifier &lt;id&gt; - Stop verification");
-        help.AppendLine("└ /api_types - List supported targets");
-        help.AppendLine();
-        help.AppendLine("📡 <b>GHOST NODE (Decentralized)</b>");
-        help.AppendLine("├ /node_token - Get your worker token");
-        help.AppendLine("├ /master_url - Get master API endpoint");
-        help.AppendLine("└ /node_status - Check node health");
-        help.AppendLine();
-        help.AppendLine("📂 <b>INTELLIGENCE</b>");
-        help.AppendLine("└ /export [csv/json] - Extract data");
-        help.AppendLine();
-        help.AppendLine("👤 <b>ACCOUNT</b>");
-        help.AppendLine("├ /my_sub - Check subscription status");
-        help.AppendLine("└ /id - Show your Telegram ID");
+        help.AppendLine("✅ <b>Verifier</b>");
+        help.AppendLine("├ /start_verifier [types] - Start verifier");
+        help.AppendLine("├ /stop_verifier &lt;id&gt; - Stop a job");
+        help.AppendLine("├ /verifier_jobs - List verifier jobs");
+        help.AppendLine("└ /api_types - List supported API types");
  
         if (isAdmin)
         {
             help.AppendLine();
-            help.AppendLine("🛠️ <b>ADMIN MANAGEMENT</b>");
-            help.AppendLine("├ /add_sub &lt;id&gt; &lt;days&gt; - Grant sub");
-            help.AppendLine("├ /list_subs - List all subscribers");
-            help.AppendLine("├ /admins - List system admins");
-            help.AppendLine("├ /tokens - View GitHub tokens");
-            help.AppendLine("├ /add_token &lt;token&gt; - Add token");
-            help.AppendLine("├ /queries - View target queries");
-            help.AppendLine("├ /add_query &lt;q&gt; - Add new target");
-            help.AppendLine("└ /reset_database - FULL WIPE ⚠️");
+            help.AppendLine("⚙️ <b>Config</b>");
+            help.AppendLine("├ /tokens - List GitHub tokens");
+            help.AppendLine("├ /add_token &lt;token&gt; - Add GitHub token");
+            help.AppendLine("├ /delete_token &lt;id&gt; - Delete GitHub token");
+            help.AppendLine("├ /queries - List search queries");
+            help.AppendLine("├ /add_query &lt;query&gt; - Add search query");
+            help.AppendLine("├ /delete_query &lt;id&gt; - Delete search query");
+            help.AppendLine("└ /toggle_query &lt;id&gt; - Toggle a query");
         }
+ 
+        help.AppendLine();
+        help.AppendLine("💾 <b>Data</b>");
+        help.AppendLine("├ /valid_keys - Count of valid keys");
+        help.AppendLine("├ /export [csv|json] - Get keys file");
+        if (isAdmin) help.AppendLine("└ /reset_database CONFIRM_RESET - Wipe DB");
+ 
+        help.AppendLine();
+        help.AppendLine("📡 <b>Ghost Node</b>");
+        help.AppendLine("├ /node_token - Your worker key");
+        help.AppendLine("├ /master_url - Connection address");
+        help.AppendLine("└ /node_status - Network health");
+ 
+        help.AppendLine();
+        help.AppendLine("👤 <b>Account</b>");
+        help.AppendLine("├ /my_sub - Subscription status");
+        help.AppendLine("└ /id - Your Telegram ID");
  
         help.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         help.AppendLine("<i>Use the menu button for quick access.</i>");
