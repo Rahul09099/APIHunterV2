@@ -21,16 +21,52 @@ public class DatabaseService(DBContext dbContext)
 
     public async Task<DBContext> InitializeDatabaseAsync()
     {
-        // Ensure database is created (Bypassed for stability on Render Free tier)
-        // await dbContext.Database.EnsureCreatedAsync();
+        Console.WriteLine("[DB] Checking database migrations...");
         
-        // Skip legacy processing at startup to save memory on Render Free tier
-        // await FixLegacyKeysAsync(dbContext);
+        try 
+        {
+            // Apply any pending migrations automatically
+            // This is the "better way" to handle schema mismatches in production
+            await dbContext.Database.MigrateAsync();
+            Console.WriteLine("[DB] Migrations applied successfully.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DB] Migration check failed (Expected if using SQLite Lite version): {ex.Message}");
+            
+            // Fallback for Lite version or environments where migrations aren't initialized yet
+            if (dbContext.Database.IsSqlite())
+            {
+                await dbContext.Database.EnsureCreatedAsync();
+            }
+        }
         
-        // Skip seeding at startup to prevent timeouts on Supabase pooler
-        // await SeedDefaultDataAsync(dbContext);
- 
+        // Manual column check for TelegramSubscribers (Robustness Layer)
+        await EnsureTelegramSubColumnsExistAsync(dbContext);
+
         return dbContext;
+    }
+
+    private async Task EnsureTelegramSubColumnsExistAsync(DBContext context)
+    {
+        // This is a safety layer for the "TelegramSubscribers" table
+        // specifically to prevent the common missing column crashes
+        if (context.Database.IsNpgsql())
+        {
+            try 
+            {
+                var sql = @"
+                    ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""SubscriptionExpiryUtc"" TIMESTAMP WITH TIME ZONE DEFAULT '1970-01-01 00:00:00+00';
+                    ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""CreatedAtUtc"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+                    ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""NodeToken"" TEXT;
+                    ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""LastNodeHeartbeatUtc"" TIMESTAMP WITH TIME ZONE;";
+                await context.Database.ExecuteSqlRawAsync(sql);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DB] Warning: Manual schema update failed: {ex.Message}");
+            }
+        }
     }
     
     private async Task FixLegacyKeysAsync(DBContext dbContext)
