@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS "TelegramSubscribers" (
 );
 
 -- Ensure columns exist if table was partially created
+ALTER TABLE "TelegramSubscribers" DROP COLUMN IF EXISTS "SubscribedAtUTC";
 ALTER TABLE "TelegramSubscribers" ADD COLUMN IF NOT EXISTS "Username" TEXT;
 ALTER TABLE "TelegramSubscribers" ADD COLUMN IF NOT EXISTS "SubscriptionExpiryUtc" TIMESTAMP WITH TIME ZONE DEFAULT '1970-01-01 00:00:00+00';
 ALTER TABLE "TelegramSubscribers" ADD COLUMN IF NOT EXISTS "IsAdmin" BOOLEAN DEFAULT FALSE;
