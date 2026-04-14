@@ -147,6 +147,9 @@ public class ScraperService
             Console.WriteLine("[cyan]🚀 Starting APIHunterV2 in GHOST WORKER Mode...[/]");
             Console.WriteLine($"[dim]Master Service: {MasterApiUrl}[/]");
             
+            // Disable database tracking for workers to ensure they stay stateless
+            _dbContext.ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.NoTracking;
+
             // Start heartbeat in background
             _ = Task.Run(() => StartHeartbeatLoop(_cancellationTokenSource.Token));
 
@@ -505,8 +508,11 @@ public class ScraperService
             
             if (resumeChoice == "Start fresh (clear all progress)")
             {
-                _dbContext.DeepSearchProgress.RemoveRange(existingProgress);
-                await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+                if (!IsWorkerMode)
+                {
+                    _dbContext.DeepSearchProgress.RemoveRange(existingProgress);
+                    await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+                }
                 existingProgress.Clear();
                 Console.WriteLine("[green]Progress cleared. Starting fresh...[/]\n");
             }
@@ -587,8 +593,12 @@ public class ScraperService
                 IsCompleted = false,
                 LastSearchedUTC = DateTime.UtcNow
             };
-            _dbContext.DeepSearchProgress.Add(progress);
-            await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+
+            if (!IsWorkerMode)
+            {
+                _dbContext.DeepSearchProgress.Add(progress);
+                await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+            }
         }
         
         // Skip if already completed
@@ -622,7 +632,11 @@ public class ScraperService
         }
         
         stats.TotalResultsFound += resultCount;
-        await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+
+        if (!IsWorkerMode)
+        {
+            await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+        }
         
         // Small delay between searches
         if (resultCount > 0)
