@@ -93,12 +93,21 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Configure the HTTP request pipeline
-app.UseSwagger();
-app.UseSwaggerUI(c =>
+// Only enable Swagger if explicitly requested or in Dev (Recommended for security)
+if (app.Environment.IsDevelopment() || Environment.GetEnvironmentVariable("SWAGGER_ENABLED") == "true")
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "UnsecuredAPIKeys API V1");
-    c.RoutePrefix = string.Empty; // Swagger UI at root
-});
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "UnsecuredAPIKeys API V1");
+        c.RoutePrefix = string.Empty; // Swagger UI at root
+    });
+}
+else
+{
+    // Simple landing page for public URL
+    app.MapGet("/", () => "📡 APIHunterV2 Master Node is Online.");
+}
 
 app.UseCors("AllowAll");
 app.UseAuthorization();
