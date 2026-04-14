@@ -424,6 +424,17 @@ public class TelegramBotService : BackgroundService
         if (isAdmin)
         {
             help.AppendLine();
+            help.AppendLine("👤 <b>Admin Management</b>");
+            help.AppendLine("├ /add_sub &lt;id&gt; &lt;days&gt; - Add subscriber");
+            help.AppendLine("├ /remove_sub &lt;id&gt; - Remove access");
+            help.AppendLine("├ /list_subs - List all subscribers");
+            help.AppendLine("├ /admins - List all admins");
+            help.AppendLine("└ /set_admin &lt;id&gt; &lt;true/false&gt; - Toggle admin");
+        }
+
+        if (isAdmin)
+        {
+            help.AppendLine();
             help.AppendLine("⚙️ <b>Config</b>");
             help.AppendLine("├ /tokens - List GitHub tokens");
             help.AppendLine("├ /add_token &lt;token&gt; - Add GitHub token");
@@ -450,10 +461,10 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("👤 <b>Account</b>");
         help.AppendLine("├ /my_sub - Subscription status");
         help.AppendLine("└ /id - Your Telegram ID");
- 
+
         help.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         help.AppendLine("<i>Use the menu button for quick access.</i>");
- 
+
         await _botClient.SendMessage(chatId, help.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
@@ -475,23 +486,26 @@ public class TelegramBotService : BackgroundService
         double validPercent = stats.TotalKeys > 0 ? (double)stats.ValidKeys / stats.TotalKeys : 0;
         sb.AppendLine($"<b>Health Index:</b> {GetProgressBar(validPercent)} {validPercent:P0}");
         sb.AppendLine();
-        
-        sb.AppendLine($"<b>🟢 Valid:</b>  <code>{stats.ValidKeys}</code>");
+
+        sb.AppendLine($"<b>Total Keys:</b> <code>{stats.TotalKeys}</code>");
+        sb.AppendLine($"<b>🟢 Valid:</b> <code>{stats.ValidKeys}</code>");
         sb.AppendLine($"<b>🔴 Invalid:</b> <code>{stats.InvalidKeys}</code>");
-        sb.AppendLine($"<b>⏳ Hidden:</b>  <code>{stats.UnverifiedKeys}</code>");
+        sb.AppendLine($"<b>⏳ Hidden:</b> <code>{stats.UnverifiedKeys}</code>");
         sb.AppendLine();
-        
-        sb.AppendLine($"<b>🔑 Tokens:</b>  {stats.GitHubTokensCount} active");
-        sb.AppendLine($"<b>🏃 Jobs:</b>    {activeJobs.Count} running");
+
+        sb.AppendLine($"<b>🔑 Tokens:</b> <code>{stats.GitHubTokensCount} active</code>");
+        sb.AppendLine($"<b>🏃 Jobs:</b> <code>{activeJobs.Count} running</code>");
         
         if (activeJobs.Any())
         {
-            sb.AppendLine();
-            sb.AppendLine("<b>DEPLOYMENTS:</b>");
-            foreach (var job in activeJobs.DistinctBy(j => j.JobType))
+            foreach (var job in activeJobs)
             {
-                sb.AppendLine($"▸ {job.JobType} 📡");
+                sb.AppendLine($"- {job.JobType}: <code>{job.JobId}</code>");
             }
+        }
+        else
+        {
+            sb.AppendLine("<i>No active deployments running</i>");
         }
         
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
@@ -1037,8 +1051,29 @@ public class TelegramBotService : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         
-        var user = await dbContext.TelegramSubscribers.FindAsync(chatId);
-        if (user == null) return;
+        var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { chatId }, ct);
+        
+        // If user is missing but is the super admin, auto-register them
+        if (user == null)
+        {
+            if (chatId == _adminChatId)
+            {
+                user = new TelegramSubscriber 
+                { 
+                    TelegramId = chatId, 
+                    IsAdmin = true, 
+                    CreatedAtUtc = DateTime.UtcNow, 
+                    SubscriptionExpiryUtc = DateTime.UtcNow.AddYears(99) 
+                };
+                dbContext.TelegramSubscribers.Add(user);
+                await dbContext.SaveChangesAsync(ct);
+            }
+            else
+            {
+                await _botClient.SendMessage(chatId, "❌ User record not found. Please contact an administrator.", cancellationToken: ct);
+                return;
+            }
+        }
 
         if (string.IsNullOrEmpty(user.NodeToken))
         {

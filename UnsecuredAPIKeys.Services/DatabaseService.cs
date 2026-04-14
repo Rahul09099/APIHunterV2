@@ -51,72 +51,112 @@ public class DatabaseService(DBContext dbContext)
 
     private async Task EnsureAllTableColumnsExistAsync(DBContext context)
     {
-        // This is a safety layer to prevent common missing column crashes 
-        // across all tables in PostgreSQL.
-        if (context.Database.IsNpgsql())
+        if (!context.Database.IsNpgsql()) return;
+
+        try 
         {
-            try 
-            {
-                // 1. TelegramSubscribers
-                var sqlSub = @"
-                    ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""SubscriptionExpiryUtc"" TIMESTAMP WITH TIME ZONE DEFAULT '1970-01-01 00:00:00+00';
-                    ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""CreatedAtUtc"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-                    ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""NodeToken"" TEXT;
-                    ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""LastNodeHeartbeatUtc"" TIMESTAMP WITH TIME ZONE;";
-                await context.Database.ExecuteSqlRawAsync(sqlSub);
+            Console.WriteLine("[DB] Running exhaustive schema parity check...");
 
-                // 2. SearchQueries
-                var sqlQueries = @"
-                    ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""LastDeepSearchDateUTC"" TIMESTAMP WITH TIME ZONE;
-                    ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""SearchResultsCount"" INTEGER DEFAULT 0;";
-                await context.Database.ExecuteSqlRawAsync(sqlQueries);
+            // 1. TelegramSubscribers
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""TelegramSubscribers"" (""TelegramId"" BIGINT PRIMARY KEY);
+                ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""Username"" TEXT;
+                ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""SubscriptionExpiryUtc"" TIMESTAMP WITH TIME ZONE DEFAULT '1970-01-01 00:00:00+00';
+                ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""IsAdmin"" BOOLEAN DEFAULT FALSE;
+                ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""CreatedAtUtc"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+                ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""NodeToken"" TEXT;
+                ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""LastNodeHeartbeatUtc"" TIMESTAMP WITH TIME ZONE;
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TelegramSubscribers_NodeToken"" ON ""TelegramSubscribers"" (""NodeToken"") WHERE ""NodeToken"" IS NOT NULL;");
 
-                // 3. SearchProviderTokens
-                var sqlTokens = @"
-                    ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""AddedByTelegramId"" BIGINT;
-                    ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""LastUsedUTC"" TIMESTAMP WITH TIME ZONE;";
-                await context.Database.ExecuteSqlRawAsync(sqlTokens);
+            // 2. SearchQueries
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""SearchQueries"" (""Id"" SERIAL PRIMARY KEY);
+                ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""Query"" TEXT NOT NULL DEFAULT '';
+                ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""IsEnabled"" BOOLEAN DEFAULT TRUE;
+                ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""SearchResultsCount"" INTEGER DEFAULT 0;
+                ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""LastSearchUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+                ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""LastDeepSearchDateUTC"" TIMESTAMP WITH TIME ZONE;
+                CREATE INDEX IF NOT EXISTS ""IX_SearchQueries_IsEnabled_LastSearchUTC"" ON ""SearchQueries"" (""IsEnabled"", ""LastSearchUTC"");");
 
-                // 4. APIKeys
-                var sqlKeys = @"
-                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""Balance"" TEXT;
-                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AccountTier"" TEXT;
-                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""DiscoveredByTelegramId"" BIGINT;
-                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""Metadata"" TEXT;
-                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""ErrorCount"" INTEGER DEFAULT 0;
-                    ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""ValidationResponse"" TEXT;";
-                await context.Database.ExecuteSqlRawAsync(sqlKeys);
+            // 3. SearchProviderTokens
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""SearchProviderTokens"" (""Id"" SERIAL PRIMARY KEY);
+                ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""Token"" TEXT NOT NULL DEFAULT '';
+                ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""SearchProvider"" INTEGER DEFAULT 0;
+                ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""IsEnabled"" BOOLEAN DEFAULT TRUE;
+                ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""AddedByTelegramId"" BIGINT;
+                ALTER TABLE ""SearchProviderTokens"" ADD COLUMN IF NOT EXISTS ""LastUsedUTC"" TIMESTAMP WITH TIME ZONE;
+                CREATE INDEX IF NOT EXISTS ""IX_SearchProviderTokens_SearchProvider"" ON ""SearchProviderTokens"" (""SearchProvider"");
+                CREATE INDEX IF NOT EXISTS ""IX_SearchProviderTokens_AddedByTelegramId"" ON ""SearchProviderTokens"" (""AddedByTelegramId"");");
 
-                // 5. RepoReferences
-                var sqlRepo = @"
-                    ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""ApiContentUrl"" TEXT;
-                    ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""Branch"" TEXT;";
-                await context.Database.ExecuteSqlRawAsync(sqlRepo);
-                
-                // 6. Ensure DeepSearchProgress table and columns exist
-                var sqlTable = @"
-                    CREATE TABLE IF NOT EXISTS ""DeepSearchProgress"" (
-                        ""Id"" SERIAL PRIMARY KEY,
-                        ""SearchQueryId"" BIGINT NOT NULL,
-                        ""PartitionType"" TEXT NOT NULL,
-                        ""PartitionValue"" TEXT NOT NULL,
-                        ""LastPageSearched"" INTEGER DEFAULT 0,
-                        ""TotalResultsFound"" INTEGER DEFAULT 0,
-                        ""IsCompleted"" BOOLEAN DEFAULT FALSE,
-                        ""LastSearchedUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                    );
-                    ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""LastPageSearched"" INTEGER DEFAULT 0;
-                    ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""TotalResultsFound"" INTEGER DEFAULT 0;
-                    ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""IsCompleted"" BOOLEAN DEFAULT FALSE;
-                    ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""LastSearchedUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;";
-                await context.Database.ExecuteSqlRawAsync(sqlTable);
-                
-                Console.WriteLine("[DB] Manual schema sync completed.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[DB] Warning: Manual schema update failed: {ex.Message}");
-            }
+            // 4. APIKeys
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""APIKeys"" (""Id"" SERIAL PRIMARY KEY);
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""ApiKey"" TEXT NOT NULL DEFAULT '';
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""Status"" INTEGER DEFAULT 0;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""ApiType"" INTEGER DEFAULT 0;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""SearchProvider"" INTEGER DEFAULT 0;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""LastCheckedUTC"" TIMESTAMP WITH TIME ZONE;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""FirstFoundUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""LastFoundUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""TimesDisplayed"" INTEGER DEFAULT 0;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""ErrorCount"" INTEGER DEFAULT 0;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""ValidationResponse"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""Balance"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AccountTier"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""DiscoveredByTelegramId"" BIGINT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""Metadata"" TEXT;
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_APIKeys_ApiKey"" ON ""APIKeys"" (""ApiKey"");");
+
+            // 5. RepoReferences
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""RepoReferences"" (""Id"" SERIAL PRIMARY KEY);
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""APIKeyId"" BIGINT NOT NULL DEFAULT 0;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""RepoURL"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""RepoOwner"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""RepoName"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""RepoId"" BIGINT DEFAULT 0;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""FileURL"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""FileName"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""FilePath"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""FileSHA"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""ApiContentUrl"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""CodeContext"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""LineNumber"" INTEGER DEFAULT 0;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""SearchQueryId"" BIGINT DEFAULT 0;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""FoundUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""Provider"" TEXT;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""Branch"" TEXT DEFAULT 'main';
+                CREATE INDEX IF NOT EXISTS ""IX_RepoReferences_ApiKeyId"" ON ""RepoReferences"" (""APIKeyId"");");
+
+            // 6. DeepSearchProgress (Aggressive Reset for Stability)
+            await context.Database.ExecuteSqlRawAsync(@"
+                DROP TABLE IF EXISTS ""DeepSearchProgress"" CASCADE;
+                CREATE TABLE ""DeepSearchProgress"" (
+                    ""Id"" SERIAL PRIMARY KEY,
+                    ""SearchQueryId"" BIGINT NOT NULL,
+                    ""PartitionType"" TEXT NOT NULL,
+                    ""PartitionValue"" TEXT NOT NULL,
+                    ""LastPageSearched"" INTEGER DEFAULT 0,
+                    ""TotalResultsFound"" INTEGER DEFAULT 0,
+                    ""IsCompleted"" BOOLEAN DEFAULT FALSE,
+                    ""LastSearchedUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE UNIQUE INDEX ""IX_DeepSearchProgress_Query_Partition"" ON ""DeepSearchProgress"" (""SearchQueryId"", ""PartitionType"", ""PartitionValue"");");
+
+            // 7. ApplicationSettings
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""ApplicationSettings"" (
+                    ""Key"" TEXT PRIMARY KEY,
+                    ""Value"" TEXT NOT NULL,
+                    ""Description"" TEXT
+                );");
+
+            Console.WriteLine("[DB] Full schema stabilization completed successfully.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DB] CRITICAL: Schema stabilization failed: {ex.Message}");
         }
     }
 
@@ -128,23 +168,24 @@ public class DatabaseService(DBContext dbContext)
             if (count > 0) return;
 
             Console.WriteLine("[DB] Seeding default search targets...");
+            var now = DateTime.UtcNow;
             var defaults = new List<SearchQuery>
             {
-                new() { Query = "sk- OpenAI", IsEnabled = true },
-                new() { Query = "anthropic Claude", IsEnabled = true },
-                new() { Query = "aizasy Gemini", IsEnabled = true },
-                new() { Query = "deepseek", IsEnabled = true },
-                new() { Query = "kling AI", IsEnabled = true },
-                new() { Query = "pollo AI", IsEnabled = true },
-                new() { Query = "runway ML", IsEnabled = true },
-                new() { Query = "cohere", IsEnabled = true },
-                new() { Query = "elevenlabs", IsEnabled = true },
-                new() { Query = "stability AI", IsEnabled = true },
-                new() { Query = "together AI", IsEnabled = true },
-                new() { Query = "grok XAI", IsEnabled = true },
-                new() { Query = "replicate r8_", IsEnabled = true },
-                new() { Query = "fireworks fw_", IsEnabled = true },
-                new() { Query = "hf_ HuggingFace", IsEnabled = true }
+                new() { Query = "sk- OpenAI", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "anthropic Claude", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "aizasy Gemini", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "deepseek", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "kling AI", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "pollo AI", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "runway ML", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "cohere", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "elevenlabs", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "stability AI", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "together AI", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "grok XAI", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "replicate r8_", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "fireworks fw_", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "hf_ HuggingFace", IsEnabled = true, LastSearchUTC = now }
             };
 
             context.SearchQueries.AddRange(defaults);
