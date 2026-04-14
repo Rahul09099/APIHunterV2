@@ -17,6 +17,7 @@ namespace UnsecuredAPIKeys.Data.Models
 
         // Ghost Node tracking
         public string? NodeToken { get; set; }
+        public string? NodeUrl { get; set; }
         public DateTime? LastNodeHeartbeatUtc { get; set; }
     }
 }

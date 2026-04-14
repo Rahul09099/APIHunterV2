@@ -65,6 +65,7 @@ if (!isWorkerMode)
 {
     Console.WriteLine("🤖 Mode: Master (Telegram Bot Enabled)");
     builder.Services.AddHostedService<TelegramBotService>();
+    builder.Services.AddHostedService<NodeKeepAliveService>();
 }
 else
 {
@@ -345,8 +346,8 @@ app.MapGet("/dashboard", () => {
         setInterval(fetchStats, 30000);
     </script>
 </body>
-</html>"";
-    return Results.Content(dashboardHtml, ""text/html"");
+</html>";
+    return Results.Content(dashboardHtml, "text/html");
 });
 
 // 🛰️ AUTO-START WORKER (If in Worker Mode)
