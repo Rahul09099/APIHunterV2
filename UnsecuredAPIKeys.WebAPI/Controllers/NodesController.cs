@@ -24,7 +24,7 @@ public class NodesController : ControllerBase
     /// Worker heartbeat to report status and availability.
     /// </summary>
     [HttpPost("heartbeat")]
-    public async Task<IActionResult> Heartbeat([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> Heartbeat([FromHeader(Name = "X-Node-Token")] string nodeToken, [FromQuery] string? nodeUrl = null)
     {
         if (string.IsNullOrEmpty(nodeToken)) return Unauthorized("Missing Node Token");
 
@@ -34,6 +34,13 @@ public class NodesController : ControllerBase
         if (node == null) return Unauthorized("Invalid Node Token");
 
         node.LastNodeHeartbeatUtc = DateTime.UtcNow;
+        
+        // Update NodeUrl if provided (helps Master know where to ping)
+        if (!string.IsNullOrEmpty(nodeUrl))
+        {
+            node.NodeUrl = nodeUrl;
+        }
+
         await _dbContext.SaveChangesAsync();
 
         return Ok(new { status = "success", timestamp = DateTime.UtcNow });

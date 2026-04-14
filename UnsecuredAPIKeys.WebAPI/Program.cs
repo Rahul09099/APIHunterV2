@@ -65,6 +65,7 @@ if (!isWorkerMode)
 {
     Console.WriteLine("🤖 Mode: Master (Telegram Bot Enabled)");
     builder.Services.AddHostedService<TelegramBotService>();
+    builder.Services.AddHostedService<NodeKeepAliveService>();
 }
 else
 {

@@ -274,7 +274,16 @@ public class ScraperService
                 {
                     using var client = _httpClientFactory.CreateClient();
                     client.DefaultRequestHeaders.Add("X-Node-Token", NodeToken);
-                    var response = await client.PostAsync($"{MasterApiUrl.TrimEnd('/')}/api/v1/nodes/heartbeat", null, ct);
+                    
+                    // Attach NodeUrl to keep the worker alive on Render
+                    var myUrl = Environment.GetEnvironmentVariable("RENDER_EXTERNAL_URL");
+                    var heartbeatUrl = $"{MasterApiUrl.TrimEnd('/')}/api/v1/nodes/heartbeat";
+                    if (!string.IsNullOrEmpty(myUrl))
+                    {
+                        heartbeatUrl += $"?nodeUrl={System.Net.WebUtility.UrlEncode(myUrl)}";
+                    }
+
+                    var response = await client.PostAsync(heartbeatUrl, null, ct);
                     
                     if (response.IsSuccessStatusCode)
                     {
