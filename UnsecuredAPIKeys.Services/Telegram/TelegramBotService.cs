@@ -420,7 +420,14 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("├ /stop_verifier &lt;id&gt; - Stop a job");
         help.AppendLine("├ /verifier_jobs - List verifier jobs");
         help.AppendLine("└ /api_types - List supported API types");
- 
+        help.AppendLine();
+        help.AppendLine("👻 <b>Ghost Node (Worker)</b>");
+        help.AppendLine("├ /master_url - Master connection URL");
+        help.AppendLine("├ /node_token - Your personal access token");
+        help.AppendLine("├ /tokens - List your GitHub tokens");
+        help.AppendLine("├ /add_token &lt;token&gt; - Add GitHub token");
+        help.AppendLine("└ /delete_token &lt;id&gt; - Delete your token");
+
         if (isAdmin)
         {
             help.AppendLine();
@@ -435,14 +442,12 @@ public class TelegramBotService : BackgroundService
         if (isAdmin)
         {
             help.AppendLine();
-            help.AppendLine("⚙️ <b>Config</b>");
-            help.AppendLine("├ /tokens - List GitHub tokens");
-            help.AppendLine("├ /add_token &lt;token&gt; - Add GitHub token");
-            help.AppendLine("├ /delete_token &lt;id&gt; - Delete GitHub token");
+            help.AppendLine("⚙️ <b>Global Config</b>");
             help.AppendLine("├ /queries - List search queries");
             help.AppendLine("├ /add_query &lt;query&gt; - Add search query");
             help.AppendLine("├ /delete_query &lt;id&gt; - Delete search query");
             help.AppendLine("└ /toggle_query &lt;id&gt; - Toggle a query");
+            help.AppendLine("└ /node_status - View network topology");
         }
  
         help.AppendLine();
@@ -729,9 +734,23 @@ public class TelegramBotService : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
-        await dbService.DeleteGitHubTokenAsync(dbContext, id);
+        
+        // Security check: Only owner or admin can delete
+        var token = await dbContext.SearchProviderTokens.FindAsync(id);
+        if (token == null)
+        {
+            await _botClient.SendMessage(chatId, $"❌ Token ID {id} not found.", cancellationToken: ct);
+            return;
+        }
 
-        await _botClient.SendMessage(chatId, $"✅ Token {id} deleted.", cancellationToken: ct);
+        if (!isAdmin && token.AddedByTelegramId != chatId)
+        {
+            await _botClient.SendMessage(chatId, "⛔ You can only delete tokens that you added yourself.", cancellationToken: ct);
+            return;
+        }
+
+        await dbService.DeleteGitHubTokenAsync(dbContext, id);
+        await _botClient.SendMessage(chatId, $"✅ Token ID {id} deleted successfully.", cancellationToken: ct);
     }
 
     private async Task HandleListQueriesCommand(long chatId, CancellationToken ct)

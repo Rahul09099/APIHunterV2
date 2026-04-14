@@ -264,6 +264,8 @@ public class ScraperService
 
     private async Task StartHeartbeatLoop(CancellationToken ct)
     {
+        Console.WriteLine("[📡] Heartbeat loop started.");
+
         while (!ct.IsCancellationRequested)
         {
             try
@@ -275,14 +277,23 @@ public class ScraperService
                     var response = await client.PostAsync($"{MasterApiUrl.TrimEnd('/')}/api/v1/nodes/heartbeat", null, ct);
                     
                     if (response.IsSuccessStatusCode)
+                    {
                         _logger?.LogDebug("Heartbeat sent successfully");
+                        Console.WriteLine($"[📡] {DateTime.UtcNow:HH:mm:ss} Heartbeat reported to Master: [green]Success[/]");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[📡] {DateTime.UtcNow:HH:mm:ss} Heartbeat reported to Master: [red]Failed ({response.StatusCode})[/]");
+                    }
                 }
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning("Heartbeat failed: {Msg}", ex.Message);
+                Console.WriteLine($"[📡] {DateTime.UtcNow:HH:mm:ss} Heartbeat error: [red]{ex.Message}[/]");
             }
 
+            // Wait 5 minutes before next heartbeat
             await Task.Delay(TimeSpan.FromMinutes(5), ct);
         }
     }
