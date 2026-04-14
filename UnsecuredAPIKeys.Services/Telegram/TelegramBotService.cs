@@ -949,17 +949,30 @@ public class TelegramBotService : BackgroundService
         // Notify the user with full Ghost Node instructions
         try 
         { 
-            var image = "rahul09099/apihunter-worker:latest"; // Hardcoded for convenience
+            var image = "rahul09099/apihunter-worker:latest";
+            var masterUrl = Environment.GetEnvironmentVariable("RENDER_EXTERNAL_URL") 
+                           ?? Environment.GetEnvironmentVariable("MASTER_API_URL")
+                           ?? "https://your-bot.onrender.com";
+
             var msg = new StringBuilder();
-            msg.AppendLine("🎉 <b>Subscription Granted!</b>");
-            msg.AppendLine($"Your access is active until <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd}</code>.");
+            msg.AppendLine("🎊 <b>WELCOME TO THE NETWORK!</b>");
+            msg.AppendLine($"Your subscription is active until: <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd}</code>");
+            msg.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+            msg.AppendLine("🚀 <b>PROPER RENDER SETUP GUIDE:</b>");
             msg.AppendLine();
-            msg.AppendLine("🚀 <b>How to set up your Ghost Node:</b>");
-            msg.AppendLine("1. Run /node_token to get your secret key.");
-            msg.AppendLine("2. Run /master_url to get the connection address.");
-            msg.AppendLine($"3. Deploy image: <code>{image}</code> to your Render account.");
+            msg.AppendLine("1️⃣ <b>Create a Web Service</b> on Render.");
+            msg.AppendLine($"2️⃣ <b>Image URL:</b> <code>{image}</code>");
+            msg.AppendLine("3️⃣ <b>Runtime:</b> Docker");
             msg.AppendLine();
-            msg.AppendLine("<i>Check the Subscriber Guide for full step-by-step instructions!</i>");
+            msg.AppendLine("⚙️ <b>REQUIRED ENVIRONMENT VARIABLES:</b>");
+            msg.AppendLine($"• <code>IS_WORKER_MODE</code> = <code>true</code>");
+            msg.AppendLine($"• <code>MASTER_API_URL</code> = <code>{masterUrl}</code>");
+            msg.AppendLine($"• <code>NODE_TOKEN</code> = <code>{user.NodeToken}</code>");
+            msg.AppendLine($"• <code>PORT</code> = <code>10000</code>");
+            msg.AppendLine();
+            msg.AppendLine("🏁 <b>Finish:</b> Deploy and check /node_status.");
+            msg.AppendLine();
+            msg.AppendLine("<i>Need help? Check the detailed Subscriber Guide in the repository!</i>");
 
             await _botClient.SendMessage(targetId, msg.ToString(), parseMode: ParseMode.Html, cancellationToken: ct); 
         } 
