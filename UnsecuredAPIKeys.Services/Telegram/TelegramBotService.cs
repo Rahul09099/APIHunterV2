@@ -321,7 +321,7 @@ public class TelegramBotService : BackgroundService
                     await HandleMasterUrlCommand(chatId, cancellationToken);
                     break;
                 case "/node_status":
-                    if (isAdmin) await HandleNodeStatusByAdminCommand(chatId, cancellationToken);
+                    await HandleNodeStatusCommand(chatId, isAdmin, cancellationToken);
                     break;
                 default:
                     if (messageText.StartsWith("/"))
@@ -426,6 +426,7 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("├ /node_token - Your personal access token");
         help.AppendLine("├ /tokens - List your GitHub tokens");
         help.AppendLine("├ /add_token &lt;token&gt; - Add GitHub token");
+        help.AppendLine("├ /node_status - View your node status");
         help.AppendLine("└ /delete_token &lt;id&gt; - Delete your token");
 
         if (isAdmin)
@@ -447,7 +448,6 @@ public class TelegramBotService : BackgroundService
             help.AppendLine("├ /add_query &lt;query&gt; - Add search query");
             help.AppendLine("├ /delete_query &lt;id&gt; - Delete search query");
             help.AppendLine("└ /toggle_query &lt;id&gt; - Toggle a query");
-            help.AppendLine("└ /node_status - View network topology");
         }
  
         help.AppendLine();
@@ -1128,24 +1128,31 @@ public class TelegramBotService : BackgroundService
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
-    private async Task HandleNodeStatusByAdminCommand(long chatId, CancellationToken ct)
+    private async Task HandleNodeStatusCommand(long chatId, bool isAdmin, CancellationToken ct)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         
-        var nodes = await dbContext.TelegramSubscribers
-            .Where(s => s.NodeToken != null)
+        var query = dbContext.TelegramSubscribers.Where(s => s.NodeToken != null);
+
+        // Filter by user if not admin
+        if (!isAdmin)
+        {
+            query = query.Where(s => s.TelegramId == chatId);
+        }
+
+        var nodes = await query
             .OrderByDescending(s => s.LastNodeHeartbeatUtc)
             .ToListAsync(ct);
 
         if (!nodes.Any())
         {
-            await _botClient.SendMessage(chatId, "No active worker nodes found in the system.", cancellationToken: ct);
+            await _botClient.SendMessage(chatId, isAdmin ? "No active worker nodes found in the system." : "You don't have an active worker node yet.", cancellationToken: ct);
             return;
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine("<b>🛰️ NETWORK TOPOLOGY</b>");
+        sb.AppendLine(isAdmin ? "<b>🛰️ NETWORK TOPOLOGY</b>" : "<b>🛰️ YOUR NODE STATUS</b>");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
 
         foreach (var node in nodes)
