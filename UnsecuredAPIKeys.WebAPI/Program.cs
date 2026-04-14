@@ -107,4 +107,7 @@ app.MapControllers();
 // Health check endpoint
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
 
-app.Run();
+// Ensure the app listens on the port provided by Render (Fixes Port Scan Timeout)
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+Console.WriteLine($"🚀 Server: Starting on port {port}");
+app.Run($"http://0.0.0.0:{port}");

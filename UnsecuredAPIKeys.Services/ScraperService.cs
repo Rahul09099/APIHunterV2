@@ -139,7 +139,152 @@ public class ScraperService
     // Default RunAsync for CLI (no discovery tagging)
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        await RunAsync(null, cancellationToken);
+        if (IsWorkerMode)
+        {
+            // Worker mode startup
+            _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            
+            Console.WriteLine("[cyan]🚀 Starting APIHunterV2 in GHOST WORKER Mode...[/]");
+            Console.WriteLine($"[dim]Master Service: {MasterApiUrl}[/]");
+            
+            // Start heartbeat in background
+            _ = Task.Run(() => StartHeartbeatLoop(_cancellationTokenSource.Token));
+
+            // Main worker loop
+            while (!_cancellationTokenSource.Token.IsCancellationRequested)
+            {
+                try 
+                {
+                    await RunWorkerCycleAsync(_cancellationTokenSource.Token);
+                    
+                    // Wait before next cycle
+                    Console.WriteLine("[dim]Waiting 5 minutes before next worker sync...[/]");
+                    await Task.Delay(TimeSpan.FromMinutes(5), _cancellationTokenSource.Token);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Worker cycle error");
+                    await Task.Delay(10000, _cancellationTokenSource.Token);
+                }
+            }
+        }
+        else
+        {
+            await RunAsync(null, cancellationToken);
+        }
+    }
+
+    private async Task RunWorkerCycleAsync(CancellationToken ct)
+    {
+        // 1. Sync tokens and queries from Master
+        var syncData = await SyncWithMasterAsync(ct);
+        
+        // 2. Identify tokens to use
+        var tokensToUse = new List<SearchProviderToken>();
+        
+        // Add Local Tokens (from Env Var)
+        var localTokensRaw = Environment.GetEnvironmentVariable("WORKER_GITHUB_TOKENS");
+        if (!string.IsNullOrEmpty(localTokensRaw))
+        {
+            var localTokens = localTokensRaw.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var t in localTokens)
+            {
+                tokensToUse.Add(new SearchProviderToken { Token = t.Trim(), SearchProvider = SearchProviderEnum.GitHub, IsEnabled = true });
+            }
+            Console.WriteLine($"[green]Loaded {localTokens.Length} LOCAL tokens from environment.[/]");
+        }
+
+        // Add Master Tokens (assigned by admin)
+        if (syncData?.Tokens != null)
+        {
+            foreach (var t in syncData.Tokens)
+            {
+                if (!tokensToUse.Any(existing => existing.Token == t.Token))
+                {
+                    tokensToUse.Add(new SearchProviderToken { Token = t.Token, SearchProvider = t.SearchProvider, IsEnabled = true });
+                }
+            }
+            Console.WriteLine($"[green]Loaded {syncData.Tokens.Count} tokens from MASTER API.[/]");
+        }
+
+        if (tokensToUse.Count == 0)
+        {
+            _logger?.LogWarning("No GitHub tokens available. Worker is idle.");
+            return;
+        }
+
+        // 3. Identify queries to use
+        var queriesToRun = syncData?.Queries?.Where(q => q.IsEnabled).ToList() ?? new List<SearchQueryDTO>();
+        if (queriesToRun.Count == 0)
+        {
+            _logger?.LogWarning("No enabled search queries found on master. Worker is idling.");
+            return;
+        }
+
+        Console.WriteLine($"[yellow]Starting scrape of {queriesToRun.Count} queries...[/]");
+        var tokenCursor = new TokenCursor { Index = 0 };
+
+        foreach (var qDto in queriesToRun)
+        {
+            if (ct.IsCancellationRequested) break;
+
+            var queryModel = new SearchQuery { Id = qDto.Id, Query = qDto.Query, IsEnabled = qDto.IsEnabled };
+            await RunScrapingCycleUtilsAsync(tokensToUse, queryModel, tokenCursor, null, null);
+            
+            // Short delay between queries
+            await Task.Delay(LiteLimits.SEARCH_DELAY_MS, ct);
+        }
+    }
+
+    private async Task<NodeSyncDTO?> SyncWithMasterAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(MasterApiUrl) || string.IsNullOrEmpty(NodeToken)) return null;
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Node-Token", NodeToken);
+            var response = await client.GetAsync($"{MasterApiUrl.TrimEnd('/')}/api/v1/nodes/sync", ct);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                return await response.Content.ReadFromJsonAsync<NodeSyncDTO>(cancellationToken: ct);
+            }
+            else
+            {
+                _logger?.LogWarning("Failed to sync with master: {Status}", response.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error syncing with master");
+        }
+        return null;
+    }
+
+    private async Task StartHeartbeatLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(MasterApiUrl) && !string.IsNullOrEmpty(NodeToken))
+                {
+                    using var client = _httpClientFactory.CreateClient();
+                    client.DefaultRequestHeaders.Add("X-Node-Token", NodeToken);
+                    var response = await client.PostAsync($"{MasterApiUrl.TrimEnd('/')}/api/v1/nodes/heartbeat", null, ct);
+                    
+                    if (response.IsSuccessStatusCode)
+                        _logger?.LogDebug("Heartbeat sent successfully");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("Heartbeat failed: {Msg}", ex.Message);
+            }
+
+            await Task.Delay(TimeSpan.FromMinutes(5), ct);
+        }
     }
 
     public async Task RunAsync(long? discoveredBy, CancellationToken cancellationToken)
