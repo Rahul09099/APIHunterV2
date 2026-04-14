@@ -62,6 +62,9 @@ builder.Services.AddScoped<ScraperService>(sp => {
 
 // Only start the Telegram Bot if NOT in worker mode
 if (!isWorkerMode)
+
+
+
 {
     Console.WriteLine("🤖 Mode: Master (Telegram Bot Enabled)");
     builder.Services.AddHostedService<TelegramBotService>();
