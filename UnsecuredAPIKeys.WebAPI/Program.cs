@@ -85,11 +85,14 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Initialize database
-using (var scope = app.Services.CreateScope())
+// Initialize database (Only for Master Node)
+if (!isWorkerMode)
 {
-    var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
-    await dbService.InitializeDatabaseAsync();
+    using (var scope = app.Services.CreateScope())
+    {
+        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+        await dbService.InitializeDatabaseAsync();
+    }
 }
 
 // Configure the HTTP request pipeline

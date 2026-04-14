@@ -647,9 +647,12 @@ public class ScraperService
         string displayQuery = query.Query + (extraParams != null ? $" {extraParams}" : "");
         Console.WriteLine($"[cyan]Searching: {Markup.Escape(displayQuery)}[/]");
 
-        // Update last search time
-        query.LastSearchUTC = DateTime.UtcNow;
-        await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
+        // Update last search time (Only for Master)
+        if (!IsWorkerMode)
+        {
+            query.LastSearchUTC = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
+        }
 
         // Search GitHub
         var searchProvider = new GitHubSearchProvider(_dbContext);

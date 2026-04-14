@@ -28,14 +28,16 @@ Open the Telegram bot and run these two commands to get your secret connection i
 ### Step 3: Configure Environment Variables
 In the "Environment" tab of your Render service, add the following variables:
 
-| Key | Value |
-| :--- | :--- |
-| `IS_WORKER_MODE` | `true` |
-| `MASTER_API_URL` | (Paste the URL from `/master_url`) |
-| `NODE_TOKEN` | (Paste the token from `/node_token`) |
-| `PORT` | `10000` |
+| Key | Value | Description |
+| :--- | :--- | :--- |
+| `IS_WORKER_MODE` | `true` | Required. |
+| `MASTER_API_URL` | (Your Master URL) | From `/master_url` command. |
+| `NODE_TOKEN` | (Your Node Token) | From `/node_token` command. |
+| `PORT` | `10000` | **Required.** Fixes port scan timeouts. |
+| **`WORKER_GITHUB_TOKENS`** | `ghp_xxx,ghp_yyy` | **Optional.** Paste your own GitHub tokens here (comma-separated) for 10x faster scraping! |
 
-*Note: You do NOT need to set a Database path or Telegram Token. The worker node handles everything automatically.*
+> [!TIP]
+> Using your own tokens in `WORKER_GITHUB_TOKENS` ensures your node is never rate-limited and runs at maximum speed.
 
 ---
 
