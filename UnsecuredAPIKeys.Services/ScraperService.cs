@@ -292,18 +292,18 @@ public class ScraperService
                     if (response.IsSuccessStatusCode)
                     {
                         _logger?.LogDebug("Heartbeat sent successfully");
-                        Console.WriteLine($"[📡] {DateTime.UtcNow:HH:mm:ss} Heartbeat reported to Master: [green]Success[/]");
+                        Console.WriteLine($"[📡] {DateTime.UtcNow.ToIst():HH:mm:ss} IST Heartbeat reported to Master: [green]Success[/]");
                     }
                     else
                     {
-                        Console.WriteLine($"[📡] {DateTime.UtcNow:HH:mm:ss} Heartbeat reported to Master: [red]Failed ({response.StatusCode})[/]");
+                        Console.WriteLine($"[📡] {DateTime.UtcNow.ToIst():HH:mm:ss} IST Heartbeat reported to Master: [red]Failed ({response.StatusCode})[/]");
                     }
                 }
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning("Heartbeat failed: {Msg}", ex.Message);
-                Console.WriteLine($"[📡] {DateTime.UtcNow:HH:mm:ss} Heartbeat error: [red]{ex.Message}[/]");
+                Console.WriteLine($"[📡] {DateTime.UtcNow.ToIst():HH:mm:ss} IST Heartbeat error: [red]{ex.Message}[/]");
             }
 
             // Wait 5 minutes before next heartbeat

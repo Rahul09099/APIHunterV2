@@ -12,6 +12,7 @@ using System.Text;
 using System.Net.Http;
 using Microsoft.EntityFrameworkCore;
 using Telegram.Bot.Types.ReplyMarkups;
+using UnsecuredAPIKeys.Services;
 
 namespace UnsecuredAPIKeys.Services.Telegram;
 
@@ -514,7 +515,7 @@ public class TelegramBotService : BackgroundService
         }
         
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
-        sb.AppendLine($"<i>System time: {DateTime.UtcNow:HH:mm} UTC</i>");
+        sb.AppendLine($"<i>System time: {DateTime.UtcNow.ToIst():HH:mm} IST</i>");
 
         var keyboard = new InlineKeyboardMarkup(new[]
         {
@@ -659,7 +660,7 @@ public class TelegramBotService : BackgroundService
         foreach (var job in jobs.TakeLast(5))
         {
             var jobId = System.Net.WebUtility.HtmlEncode(job.JobId);
-            sb.AppendLine($"- <code>{jobId}</code>: {job.Status} (Started: {job.StartedAt})");
+            sb.AppendLine($"- <code>{jobId}</code>: {job.Status} (Started: {job.StartedAt.ToIst():g} IST)");
         }
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
@@ -913,7 +914,7 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         sb.AppendLine($"<b>ID:</b> <code>{chatId}</code>");
         sb.AppendLine($"<b>Status:</b> {(user.SubscriptionExpiryUtc > DateTime.UtcNow ? "🟢 Active" : "🔴 Expired")}");
-        sb.AppendLine($"<b>Expiry:</b> <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd HH:mm} UTC</code>");
+        sb.AppendLine($"<b>Expiry:</b> <code>{user.SubscriptionExpiryUtc.ToIst():yyyy-MM-dd HH:mm} IST</code>");
         sb.AppendLine($"<b>Role:</b> {(user.IsAdmin ? "Admin" : "Subscriber")}");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         
@@ -944,7 +945,7 @@ public class TelegramBotService : BackgroundService
         }
 
         await dbContext.SaveChangesAsync(ct);
-        await _botClient.SendMessage(chatId, $"✅ <b>Subscription Updated</b>\nUser: <code>{targetId}</code>\nNew Expiry: <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd}</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, $"✅ <b>Subscription Updated</b>\nUser: <code>{targetId}</code>\nNew Expiry: <code>{user.SubscriptionExpiryUtc.ToIst():yyyy-MM-dd} IST</code>", parseMode: ParseMode.Html, cancellationToken: ct);
         
         // Notify the user with full Ghost Node instructions
         try 
@@ -956,7 +957,7 @@ public class TelegramBotService : BackgroundService
 
             var msg = new StringBuilder();
             msg.AppendLine("🎊 <b>WELCOME TO THE NETWORK!</b>");
-            msg.AppendLine($"Your subscription is active until: <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd}</code>");
+            msg.AppendLine($"Your subscription is active until: <code>{user.SubscriptionExpiryUtc.ToIst():yyyy-MM-dd} IST</code>");
             msg.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
             msg.AppendLine("🚀 <b>PROPER RENDER SETUP GUIDE:</b>");
             msg.AppendLine();
@@ -1023,7 +1024,7 @@ public class TelegramBotService : BackgroundService
         {
             var status = s.SubscriptionExpiryUtc > DateTime.UtcNow ? "🟢" : "🔴";
             var nameStr = !string.IsNullOrEmpty(s.Username) ? $" (@{s.Username})" : "";
-            sb.AppendLine($"{status} <code>{s.TelegramId}</code>{nameStr} - {(s.IsAdmin ? "Admin" : "Sub")} (Ends: {s.SubscriptionExpiryUtc:MM/dd})");
+            sb.AppendLine($"{status} <code>{s.TelegramId}</code>{nameStr} - {(s.IsAdmin ? "Admin" : "Sub")} (Ends: {s.SubscriptionExpiryUtc.ToIst():MM/dd})");
         }
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
@@ -1192,7 +1193,7 @@ public class TelegramBotService : BackgroundService
                     : "🔴 Offline";
                     
                 lastSeen = node.LastNodeHeartbeatUtc.HasValue 
-                    ? node.LastNodeHeartbeatUtc.Value.ToString("g") 
+                    ? node.LastNodeHeartbeatUtc.ToIst()!.Value.ToString("g") + " IST"
                     : "Never";
             }
 
