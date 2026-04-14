@@ -1022,7 +1022,8 @@ public class TelegramBotService : BackgroundService
         foreach (var s in subs)
         {
             var status = s.SubscriptionExpiryUtc > DateTime.UtcNow ? "🟢" : "🔴";
-            sb.AppendLine($"{status} <code>{s.TelegramId}</code> - {(s.IsAdmin ? "Admin" : "Sub")} (Ends: {s.SubscriptionExpiryUtc:MM/dd})");
+            var nameStr = !string.IsNullOrEmpty(s.Username) ? $" (@{s.Username})" : "";
+            sb.AppendLine($"{status} <code>{s.TelegramId}</code>{nameStr} - {(s.IsAdmin ? "Admin" : "Sub")} (Ends: {s.SubscriptionExpiryUtc:MM/dd})");
         }
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
@@ -1195,7 +1196,8 @@ public class TelegramBotService : BackgroundService
                     : "Never";
             }
 
-            sb.AppendLine($"<b>Node:</b> {node.Username ?? node.TelegramId.ToString()}");
+            var displayName = !string.IsNullOrEmpty(node.Username) ? $"@{node.Username} (<code>{node.TelegramId}</code>)" : $"<code>{node.TelegramId}</code>";
+            sb.AppendLine($"<b>Node:</b> {displayName}");
             sb.AppendLine($"<b>Status:</b> {status}");
             sb.AppendLine($"<b>Last Heartbeat:</b> {lastSeen}");
             sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
