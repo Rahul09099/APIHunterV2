@@ -119,6 +119,17 @@ app.MapControllers();
 // Health check endpoint
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
 
+// 🛰️ AUTO-START WORKER (If in Worker Mode)
+if (isWorkerMode)
+{
+    _ = Task.Run(async () =>
+    {
+        using var scope = app.Services.CreateScope();
+        var scraper = scope.ServiceProvider.GetRequiredService<ScraperService>();
+        await scraper.RunAsync(CancellationToken.None);
+    });
+}
+
 // Ensure the app listens on the port provided by Render (Fixes Port Scan Timeout)
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 Console.WriteLine($"🚀 Server: Starting on port {port}");
