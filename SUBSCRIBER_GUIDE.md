@@ -41,11 +41,27 @@ In the "Environment" tab of your Render service, add the following variables:
 
 ---
 
-### Step 4: Verify Your Connection
+---
+
+### Step 4: Manage Your Dashboard (Subscriber Section)
+As a subscriber, you have your own private dashboard via the bot! Use these commands to optimize your own Ghost Node.
+
+#### 🔑 Personal Token Management
+Your node uses tokens to bypass scraping limits. You can add your own private GitHub tokens to make your specific node run **10x faster**:
+1. **`/add_token <your_github_token>`** - Add your own token to your node.
+2. **`/tokens`** - List all tokens you have added.
+3. **`/delete_token <id>`** - Delete your own token if it expires.
+
+> [!NOTE]
+> Tokens you add are private. Other subscribers cannot see or use them.
+
+---
+
+### Step 5: Verify Your Connection
 Once Render shows "Live", go back to the Telegram Bot:
-- Run `/status`.
-- You should see your Node ID appearing as **🟢 Online**.
-- Any keys found by this node will automatically be saved to your private dashboard.
+- Run **`/node_status`** (if enabled) or **`/status`**.
+- You should see your Node showing as **🟢 Online** instantly!
+- Any keys found by your node are automatically credited to you.
 
 ---
 
