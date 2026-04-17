@@ -44,6 +44,8 @@ public class ScraperService
     {
         public int TotalRangesSearched { get; set; }
         public int TotalResultsFound { get; set; }
+        public int NewKeysFound { get; set; }
+        public int DuplicateKeysFound { get; set; }
         public DateTime SearchStartDate { get; set; }
         public DateTime SearchEndDate { get; set; }
     }
@@ -566,7 +568,8 @@ public class ScraperService
         summaryTable.AddRow("Search Partitions", $"{languages.Length} languages + {extensions.Length} extensions");
         summaryTable.AddRow("Total Searches", stats.TotalRangesSearched.ToString());
         summaryTable.AddRow("Total Results Found", $"[green]{stats.TotalResultsFound}[/]");
-        summaryTable.AddRow("New Keys Discovered", $"[green]{_newKeysFound}[/]");
+        summaryTable.AddRow("New Keys Discovered", $"[green]{stats.NewKeysFound}[/]");
+        summaryTable.AddRow("Duplicates Found", $"[dim]{stats.DuplicateKeysFound}[/]");
         
         AnsiConsole.Write(summaryTable);
         AnsiConsole.WriteLine();
@@ -621,27 +624,29 @@ public class ScraperService
         progress.TotalResultsFound += resultCount;
         progress.LastSearchedUTC = DateTime.UtcNow;
         
-        // Mark as completed if we got less than 1000 results (hit the end)
-        if (resultCount < 1000)
-        {
-            progress.IsCompleted = true;
-            progress.LastPageSearched = startPage + (resultCount / 100); // Approximate last page
-        }
-        else
-        {
-            progress.LastPageSearched = startPage + 9; // Searched 10 pages (1000 results)
-        }
-        
         stats.TotalResultsFound += resultCount;
+        stats.NewKeysFound += _newKeysFound;
+        stats.DuplicateKeysFound += _duplicateKeysFound;
 
         if (!IsWorkerMode)
         {
             await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
         }
         
-        // Small delay between searches
-        if (resultCount > 0)
-            await Task.Delay(1000, _cancellationTokenSource.Token);
+        // Mark as completed if we got less than 1000 results (hit the real end)
+        // Note: GitHub Search API is limited to 1000 results total.
+        if (resultCount < 1000)
+        {
+            progress.IsCompleted = true;
+        }
+        
+        // Small delay between searches to be polite
+        await Task.Delay(1000, _cancellationTokenSource.Token);
+
+        // MEMORY OPTIMIZATION: Trigger GC to ensure memory is reclaimed on 
+        // constrained environments (like Render Free Tier 512MB)
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
     }
 
     private async Task<int> RunScrapingCycleUtilsAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string? extraParams, long? discoveredBy, int startPage = 1)
@@ -649,24 +654,62 @@ public class ScraperService
         int retryCount = 0;
         bool querySuccess = false;
         int totalResults = 0;
+        var depletedTokens = new Dictionary<int, DateTime>();
 
-        while (!querySuccess && retryCount < tokens.Count)
+        while (!querySuccess && retryCount < (tokens.Count * 2)) // Allow orbiting tokens once
         {
+            if (depletedTokens.ContainsKey(cursor.Index))
+            {
+                if (DateTime.UtcNow < depletedTokens[cursor.Index])
+                {
+                    // Still depleted, move to next
+                    cursor.Index = (cursor.Index + 1) % tokens.Count;
+                    retryCount++;
+                    
+                    if (depletedTokens.Count == tokens.Count)
+                    {
+                        // ALL tokens are rate limited
+                        var nextReset = depletedTokens.Values.Min();
+                        var waitTime = nextReset - DateTime.UtcNow;
+                        if (waitTime > TimeSpan.Zero)
+                        {
+                            Console.WriteLine($"[yellow]All {tokens.Count} tokens are currently rate-limited.[/]");
+                            Console.WriteLine($"[yellow]Waiting {Math.Ceiling(waitTime.TotalMinutes)} minutes for first token to reset (at {nextReset.ToIst():HH:mm:ss} IST)...[/]");
+                            await Task.Delay(waitTime, _cancellationTokenSource!.Token);
+                            depletedTokens.Remove(depletedTokens.First(x => x.Value == nextReset).Key);
+                        }
+                    }
+                    continue;
+                }
+                else
+                {
+                    depletedTokens.Remove(cursor.Index);
+                }
+            }
+
             var currentToken = tokens[cursor.Index];
             try
             {
                totalResults = await RunScrapingCycleAsync(currentToken, query, extraParams, discoveredBy, startPage);
                querySuccess = true;
             }
+            catch (Octokit.RateLimitExceededException ex)
+            {
+                Console.WriteLine($"[yellow]Token {cursor.Index + 1} hit GitHub rate limit. Reset at {ex.Reset.LocalDateTime.ToIst():HH:mm:ss} IST.[/]");
+                depletedTokens[cursor.Index] = ex.Reset.UtcDateTime.AddSeconds(5); // Add buffer
+                cursor.Index = (cursor.Index + 1) % tokens.Count;
+                retryCount++;
+            }
             catch (Exception ex)
             {
-                Console.WriteLine($"[yellow]Error with current token: {Markup.Escape(ex.Message)}. Switching token...[/]");
+                Console.WriteLine($"[red]Error with token {cursor.Index + 1}: {Markup.Escape(ex.Message)}. Switching token...[/]");
                 cursor.Index = (cursor.Index + 1) % tokens.Count;
                 retryCount++;
 
-                if (retryCount >= tokens.Count)
+                if (retryCount >= tokens.Count && !querySuccess)
                 {
-                    Console.WriteLine("[red]All tokens exhausted or failed for this query.[/]");
+                    Console.WriteLine("[red]Many tokens failed for this query. Moving on...[/]");
+                    break;
                 }
             }
         }
@@ -858,13 +901,21 @@ public class ScraperService
                         };
                         newKey.References.Add(newRepoRef);
 
-                        _dbContext.APIKeys.Add(newKey);
-                        await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
+                            try
+                            {
+                                _dbContext.APIKeys.Add(newKey);
+                                await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
 
-                        Interlocked.Increment(ref _newKeysFound);
-                        Console.WriteLine($"[green]+ New {Markup.Escape(provider.ProviderName)} key found![/]");
-                        Console.WriteLine($"  [dim]Source: {Markup.Escape(repoRef.FileURL ?? "Unknown")}[/]");
-                        Console.WriteLine($"  [dim]Repo: {Markup.Escape(repoRef.RepoURL ?? "Unknown")}[/]");
+                                Interlocked.Increment(ref _newKeysFound);
+                                Console.WriteLine($"[green]+ New {Markup.Escape(provider.ProviderName)} key found![/]");
+                                Console.WriteLine($"  [dim]Source: {Markup.Escape(repoRef.FileURL ?? "Unknown")}[/]");
+                                Console.WriteLine($"  [dim]Repo: {Markup.Escape(repoRef.RepoURL ?? "Unknown")}[/]");
+                            }
+                            catch (DbUpdateException) // Likely a unique constraint violation
+                            {
+                                _dbContext.Entry(newKey).State = EntityState.Detached; // Remove from tracker
+                                Interlocked.Increment(ref _duplicateKeysFound);
+                            }
                         }
                     }
                 }

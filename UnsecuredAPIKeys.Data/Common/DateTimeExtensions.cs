@@ -1,6 +1,6 @@
 using System;
 
-namespace UnsecuredAPIKeys.Services
+namespace UnsecuredAPIKeys.Data.Common
 {
     public static class DateTimeExtensions
     {
