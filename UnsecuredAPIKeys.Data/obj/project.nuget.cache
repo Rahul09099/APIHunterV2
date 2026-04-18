@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "13W3UNIuy60=",
+  "dgSpecHash": "/KvBHLGpe2U=",
   "success": true,
   "projectFilePath": "C:\\Users\\rk170\\Desktop\\unsecureAPI project\\APIHunterV2\\UnsecuredAPIKeys.Data\\UnsecuredAPIKeys.Data.csproj",
   "expectedPackageFiles": [
@@ -54,8 +54,12 @@
     "C:\\Users\\rk170\\.nuget\\packages\\system.text.json\\9.0.2\\system.text.json.9.0.2.nupkg.sha512",
     "C:\\Users\\rk170\\.nuget\\packages\\system.threading.channels\\7.0.0\\system.threading.channels.7.0.0.nupkg.sha512",
     "C:\\Users\\rk170\\.nuget\\packages\\microsoft.netcore.app.ref\\9.0.12\\microsoft.netcore.app.ref.9.0.12.nupkg.sha512",
+    "C:\\Users\\rk170\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\9.0.12\\microsoft.netcore.app.runtime.win-x64.9.0.12.nupkg.sha512",
     "C:\\Users\\rk170\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\9.0.12\\microsoft.windowsdesktop.app.ref.9.0.12.nupkg.sha512",
-    "C:\\Users\\rk170\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\9.0.12\\microsoft.aspnetcore.app.ref.9.0.12.nupkg.sha512"
+    "C:\\Users\\rk170\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\9.0.12\\microsoft.windowsdesktop.app.runtime.win-x64.9.0.12.nupkg.sha512",
+    "C:\\Users\\rk170\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\9.0.12\\microsoft.aspnetcore.app.ref.9.0.12.nupkg.sha512",
+    "C:\\Users\\rk170\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\9.0.12\\microsoft.aspnetcore.app.runtime.win-x64.9.0.12.nupkg.sha512",
+    "C:\\Users\\rk170\\.nuget\\packages\\microsoft.netcore.app.crossgen2.win-x64\\9.0.12\\microsoft.netcore.app.crossgen2.win-x64.9.0.12.nupkg.sha512"
   ],
   "logs": []
 }

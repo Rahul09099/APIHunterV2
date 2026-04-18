@@ -51,8 +51,132 @@ public class DatabaseService(DBContext dbContext)
 
     private async Task EnsureAllTableColumnsExistAsync(DBContext context)
     {
-        if (!context.Database.IsNpgsql()) return;
+        if (context.Database.IsNpgsql())
+        {
+            await EnsurePostgresSchemaAsync(context);
+        }
+        else if (context.Database.IsSqlite())
+        {
+            await EnsureSQLiteSchemaAsync(context);
+        }
+    }
 
+    private async Task EnsureSQLiteSchemaAsync(DBContext context)
+    {
+        try
+        {
+            Console.WriteLine("[DB] Running SQLite schema health check...");
+
+            // 1. TelegramSubscribers
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""TelegramSubscribers"" (
+                    ""TelegramId"" INTEGER PRIMARY KEY,
+                    ""Username"" TEXT,
+                    ""SubscriptionExpiryUtc"" DATETIME DEFAULT '1970-01-01 00:00:00',
+                    ""IsAdmin"" BOOLEAN DEFAULT 0,
+                    ""CreatedAtUtc"" DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    ""NodeToken"" TEXT,
+                    ""NodeUrl"" TEXT,
+                    ""LastNodeHeartbeatUtc"" DATETIME
+                );");
+
+            // 2. SearchQueries
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""SearchQueries"" (
+                    ""Id"" INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ""Query"" TEXT NOT NULL DEFAULT '',
+                    ""IsEnabled"" BOOLEAN DEFAULT 1,
+                    ""SearchResultsCount"" INTEGER DEFAULT 0,
+                    ""LastSearchUTC"" DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    ""LastDeepSearchDateUTC"" DATETIME
+                );");
+
+            // 3. SearchProviderTokens
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""SearchProviderTokens"" (
+                    ""Id"" INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ""Token"" TEXT NOT NULL DEFAULT '',
+                    ""SearchProvider"" INTEGER DEFAULT 0,
+                    ""IsEnabled"" BOOLEAN DEFAULT 1,
+                    ""AddedByTelegramId"" INTEGER,
+                    ""LastUsedUTC"" DATETIME
+                );");
+
+            // 4. APIKeys
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""APIKeys"" (
+                    ""Id"" INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ""ApiKey"" TEXT NOT NULL DEFAULT '',
+                    ""Status"" INTEGER DEFAULT 0,
+                    ""ApiType"" INTEGER DEFAULT 0,
+                    ""SearchProvider"" INTEGER DEFAULT 0,
+                    ""LastCheckedUTC"" DATETIME,
+                    ""FirstFoundUTC"" DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    ""LastFoundUTC"" DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    ""TimesDisplayed"" INTEGER DEFAULT 0,
+                    ""ErrorCount"" INTEGER DEFAULT 0,
+                    ""ValidationResponse"" TEXT,
+                    ""Balance"" TEXT,
+                    ""AccountTier"" TEXT,
+                    ""DiscoveredByTelegramId"" INTEGER,
+                    ""Metadata"" TEXT
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_APIKeys_ApiKey"" ON ""APIKeys"" (""ApiKey"");");
+
+            // 5. RepoReferences
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""RepoReferences"" (
+                    ""Id"" INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ""APIKeyId"" INTEGER NOT NULL DEFAULT 0,
+                    ""RepoURL"" TEXT,
+                    ""RepoOwner"" TEXT,
+                    ""RepoName"" TEXT,
+                    ""RepoId"" INTEGER DEFAULT 0,
+                    ""FileURL"" TEXT,
+                    ""FileName"" TEXT,
+                    ""FilePath"" TEXT,
+                    ""FileSHA"" TEXT,
+                    ""ApiContentUrl"" TEXT,
+                    ""CodeContext"" TEXT,
+                    ""LineNumber"" INTEGER DEFAULT 0,
+                    ""SearchQueryId"" INTEGER DEFAULT 0,
+                    ""FoundUTC"" DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    ""Provider"" TEXT,
+                    ""Branch"" TEXT DEFAULT 'main'
+                );");
+
+            // 6. DeepSearchProgress
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""DeepSearchProgress"" (
+                    ""Id"" INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ""SearchQueryId"" INTEGER NOT NULL,
+                    ""PartitionType"" TEXT NOT NULL,
+                    ""PartitionValue"" TEXT NOT NULL,
+                    ""LastPageSearched"" INTEGER DEFAULT 0,
+                    ""TotalResultsFound"" INTEGER DEFAULT 0,
+                    ""IsCompleted"" BOOLEAN DEFAULT 0,
+                    ""LastSearchedUTC"" DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_DeepSearchProgress_Query_Partition"" ON ""DeepSearchProgress"" (""SearchQueryId"", ""PartitionType"", ""PartitionValue"");");
+
+            // 7. ApplicationSettings
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""ApplicationSettings"" (
+                    ""Key"" TEXT PRIMARY KEY,
+                    ""Value"" TEXT NOT NULL,
+                    ""Description"" TEXT
+                );");
+
+            Console.WriteLine("[DB] SQLite schema stabilization completed successfully.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DB] ERROR: SQLite schema stabilization failed: {ex.Message}");
+        }
+    }
+
+    private async Task EnsurePostgresSchemaAsync(DBContext context)
+    {
         try 
         {
             Console.WriteLine("[DB] Running exhaustive schema parity check...");
@@ -154,11 +278,11 @@ public class DatabaseService(DBContext dbContext)
                     ""Description"" TEXT
                 );");
 
-            Console.WriteLine("[DB] Full schema stabilization completed successfully.");
+            Console.WriteLine("[DB] Full PostgreSQL schema stabilization completed successfully.");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DB] CRITICAL: Schema stabilization failed: {ex.Message}");
+            Console.WriteLine($"[DB] CRITICAL: PostgreSQL schema stabilization failed: {ex.Message}");
         }
     }
 

@@ -618,10 +618,12 @@ public class ScraperService
         Console.WriteLine($"[dim]→ Searching {partitionValue} ({partitionType}) from page {startPage}...[/]");
         
         stats.TotalRangesSearched++;
-        int resultCount = await RunScrapingCycleUtilsAsync(tokens, query, cursor, filter, discoveredBy, startPage);
+        var response = await RunScrapingCycleUtilsAsync(tokens, query, cursor, filter, discoveredBy, startPage);
+        int resultCount = response?.Results?.Count() ?? 0;
         
         // Update progress
         progress.TotalResultsFound += resultCount;
+        progress.LastPageSearched = response?.LastPageReached ?? progress.LastPageSearched;
         progress.LastSearchedUTC = DateTime.UtcNow;
         
         stats.TotalResultsFound += resultCount;
@@ -633,27 +635,54 @@ public class ScraperService
             await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
         }
         
-        // Mark as completed if we got less than 1000 results (hit the real end)
-        // Note: GitHub Search API is limited to 1000 results total.
-        if (resultCount < 1000)
+        // Handle "Hit Wall" logic
+        if (response != null && response.HitLimit)
+        {
+            Console.WriteLine($"[yellow]⚠ Partition '{partitionValue}' hit the 1,000 result limit. Triggering sub-partitions...[/]");
+            
+            // Subdivision Strategy 1: File Sizes
+            var sizeBuckets = new[] { "0..500", "501..2000", "2001..5000", "5001..15000", ">15000" };
+            foreach (var bucket in sizeBuckets)
+            {
+                if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                string subFilter = $"{filter} size:{bucket}";
+                await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy);
+            }
+
+            // Subdivision Strategy 2: Common Paths (as requested by user)
+            var paths = new[] { "config", "src", ".env", "keys", "deploy", "setup" };
+            foreach (var path in paths)
+            {
+                if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                string subFilter = $"{filter} path:{path}";
+                await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy);
+            }
+
+            progress.IsCompleted = true; // The parent partition is effectively "managed" by sub-partitions now
+        }
+        else if (resultCount < 1000)
         {
             progress.IsCompleted = true;
         }
         
+        if (!IsWorkerMode)
+        {
+            await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+        }
+
         // Small delay between searches to be polite
         await Task.Delay(1000, _cancellationTokenSource.Token);
 
-        // MEMORY OPTIMIZATION: Trigger GC to ensure memory is reclaimed on 
-        // constrained environments (like Render Free Tier 512MB)
+        // MEMORY OPTIMIZATION
         GC.Collect();
         GC.WaitForPendingFinalizers();
     }
 
-    private async Task<int> RunScrapingCycleUtilsAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string? extraParams, long? discoveredBy, int startPage = 1)
+    private async Task<SearchResponse?> RunScrapingCycleUtilsAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string? extraParams, long? discoveredBy, int startPage = 1)
     {
         int retryCount = 0;
         bool querySuccess = false;
-        int totalResults = 0;
+        SearchResponse? finalResponse = null;
         var depletedTokens = new Dictionary<int, DateTime>();
 
         while (!querySuccess && retryCount < (tokens.Count * 2)) // Allow orbiting tokens once
@@ -690,7 +719,7 @@ public class ScraperService
             var currentToken = tokens[cursor.Index];
             try
             {
-               totalResults = await RunScrapingCycleAsync(currentToken, query, extraParams, discoveredBy, startPage);
+               finalResponse = await RunScrapingCycleAsync(currentToken, query, extraParams, discoveredBy, startPage);
                querySuccess = true;
             }
             catch (Octokit.RateLimitExceededException ex)
@@ -713,10 +742,10 @@ public class ScraperService
                 }
             }
         }
-        return totalResults;
+        return finalResponse;
     }
 
-    private async Task<int> RunScrapingCycleAsync(SearchProviderToken token, SearchQuery query, string? extraParams, long? discoveredBy, int startPage = 1)
+    private async Task<SearchResponse?> RunScrapingCycleAsync(SearchProviderToken token, SearchQuery query, string? extraParams, long? discoveredBy, int startPage = 1)
     {
         // Reset counters for this cycle
         _newKeysFound = 0;
@@ -734,11 +763,11 @@ public class ScraperService
 
         // Search GitHub
         var searchProvider = new GitHubSearchProvider(_dbContext);
-        IEnumerable<RepoReference>? results;
+        SearchResponse? response;
 
         try
         {
-            results = await searchProvider.SearchAsync(query, token, extraParams, startPage);
+            response = await searchProvider.SearchAsync(query, token, extraParams, startPage);
         }
         catch (Exception)
         {
@@ -746,13 +775,13 @@ public class ScraperService
             throw;
         }
 
-        if (results == null)
+        if (response?.Results == null)
         {
             Console.WriteLine("[yellow]No results from search.[/]");
-            return 0;
+            return response;
         }
 
-        var resultsList = results.ToList();
+        var resultsList = response.Results.ToList();
         
         Console.WriteLine($"[dim]Fetched {resultsList.Count} matches[/]");
 
@@ -799,8 +828,6 @@ public class ScraperService
         }
 
         // Summary
-
-        // Summary
         var table = new Table()
             .Border(TableBorder.Rounded)
             .AddColumn("[bold]Metric[/]")
@@ -813,11 +840,10 @@ public class ScraperService
 
         AnsiConsole.Write(table);
 
-        // MEMORY OPTIMIZATION: Clear the change tracker to free up memory 
-        // from all the RepoReference and APIKey objects we just processed.
+        // MEMORY OPTIMIZATION: Clear the change tracker
         _dbContext.ChangeTracker.Clear();
 
-        return resultsList.Count;
+        return response;
     }
 
     private async Task<List<NodeReportDto>> ProcessResultAndCollectAsync(RepoReference repoRef, SearchProviderToken token, SearchQuery query, long? discoveredBy)

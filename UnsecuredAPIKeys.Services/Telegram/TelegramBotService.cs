@@ -73,26 +73,33 @@ public class TelegramBotService : BackgroundService
             cancellationToken: stoppingToken
         );
 
-        // Set bot commands menu
-        await _botClient.SetMyCommands(new[]
+        // Set bot commands menu and notify admin with resilience
+        try
         {
-            new BotCommand { Command = "status", Description = "Mission Control" },
-            new BotCommand { Command = "stats", Description = "Statistics" },
-            new BotCommand { Command = "start_scraper", Description = "Start Scraper" },
-            new BotCommand { Command = "start_verifier", Description = "Start Verifier" },
-            new BotCommand { Command = "valid_keys", Description = "Valid Keys" },
-            new BotCommand { Command = "export", Description = "Export Data" },
-            new BotCommand { Command = "help", Description = "Show Commands" }
-        }, cancellationToken: stoppingToken);
+            await _botClient.SetMyCommands(new[]
+            {
+                new BotCommand { Command = "status", Description = "Mission Control" },
+                new BotCommand { Command = "stats", Description = "Statistics" },
+                new BotCommand { Command = "start_scraper", Description = "Start Scraper" },
+                new BotCommand { Command = "start_verifier", Description = "Start Verifier" },
+                new BotCommand { Command = "valid_keys", Description = "Valid Keys" },
+                new BotCommand { Command = "export", Description = "Export Data" },
+                new BotCommand { Command = "help", Description = "Show Commands" }
+            }, cancellationToken: stoppingToken);
 
-        // Notify admin that bot is online
-        if (_adminChatId != 0)
+            // Notify admin that bot is online
+            if (_adminChatId != 0)
+            {
+                await _botClient.SendMessage(
+                    chatId: _adminChatId,
+                    text: "<b>💎 APIHunterV2 Dashboard Online</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n<i>Satellite connection established.</i>",
+                    parseMode: ParseMode.Html,
+                    cancellationToken: stoppingToken);
+            }
+        }
+        catch (Exception ex)
         {
-            await _botClient.SendMessage(
-                chatId: _adminChatId,
-                text: "<b>💎 APIHunterV2 Dashboard Online</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n<i>Satellite connection established.</i>",
-                parseMode: ParseMode.Html,
-                cancellationToken: stoppingToken);
+            _logger.LogError(ex, "Failed to initialize Telegram Bot commands or notify admin. The bot will still attempt to receive updates.");
         }
 
         // Keep the service alive without notifications

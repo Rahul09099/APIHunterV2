@@ -17,7 +17,9 @@ namespace UnsecuredAPIKeys.Providers._Interfaces
         /// </summary>
         /// <param name="query">The search query details.</param>
         /// <param name="token">The API token to use for the search.</param>
-        /// <returns>A collection of RepoReference objects representing potential findings.</returns>
-        Task<IEnumerable<RepoReference>> SearchAsync(SearchQuery query, SearchProviderToken? token);
+        /// <returns>A SearchResponse containing findings and metadata.</returns>
+        Task<SearchResponse> SearchAsync(SearchQuery query, SearchProviderToken? token);
     }
+
+    public record SearchResponse(IEnumerable<RepoReference> Results, int LastPageReached, int TotalCount, bool HitLimit);
 }

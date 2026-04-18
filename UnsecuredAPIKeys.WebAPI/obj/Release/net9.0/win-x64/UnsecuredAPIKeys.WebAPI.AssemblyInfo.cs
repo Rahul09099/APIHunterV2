@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("UnsecuredAPIKeys.WebAPI")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f7ccd29a982c9e9ab9507143c068a14f646554d1")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c79ce1272125598ecf61c0b43d9b0ec80889ff50")]
 [assembly: System.Reflection.AssemblyProductAttribute("UnsecuredAPIKeys.WebAPI")]
 [assembly: System.Reflection.AssemblyTitleAttribute("UnsecuredAPIKeys.WebAPI")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
