@@ -803,7 +803,9 @@ public class ScraperService
                 {
                     if (_cancellationTokenSource!.Token.IsCancellationRequested) return;
                     
-                    var found = await ProcessResultAndCollectAsync(repoRef, token, query, discoveredBy);
+                    // Use a fresh context per result to avoid thread-safety issues
+                    using var localDb = new DBContext();
+                    var found = await ProcessResultAndCollectAsync(localDb, repoRef, token, query, discoveredBy);
                     if (found != null && found.Any())
                     {
                         foreach (var discovery in found) discoveries.Add(discovery);
@@ -846,7 +848,7 @@ public class ScraperService
         return response;
     }
 
-    private async Task<List<NodeReportDto>> ProcessResultAndCollectAsync(RepoReference repoRef, SearchProviderToken token, SearchQuery query, long? discoveredBy)
+    private async Task<List<NodeReportDto>> ProcessResultAndCollectAsync(DBContext db, RepoReference repoRef, SearchProviderToken token, SearchQuery query, long? discoveredBy)
     {
         var discoveredKeys = new List<NodeReportDto>();
         try
@@ -897,7 +899,7 @@ public class ScraperService
                         }
                         else
                         {
-                            var exists = await _dbContext.APIKeys
+                            var exists = await db.APIKeys
                                 .AnyAsync(k => k.ApiKey == apiKey, _cancellationTokenSource!.Token);
 
                             if (exists)
@@ -942,8 +944,8 @@ public class ScraperService
 
                             try
                             {
-                                _dbContext.APIKeys.Add(newKey);
-                                await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
+                                db.APIKeys.Add(newKey);
+                                await db.SaveChangesAsync(_cancellationTokenSource!.Token);
 
                                 Interlocked.Increment(ref _newKeysFound);
                                 Console.WriteLine($"[green]+ New {Markup.Escape(provider.ProviderName)} key found![/]");
@@ -952,7 +954,7 @@ public class ScraperService
                             }
                             catch (DbUpdateException) // Likely a unique constraint violation
                             {
-                                _dbContext.Entry(newKey).State = EntityState.Detached; // Remove from tracker
+                                db.Entry(newKey).State = EntityState.Detached; // Remove from tracker
                                 Interlocked.Increment(ref _duplicateKeysFound);
                             }
                         }
