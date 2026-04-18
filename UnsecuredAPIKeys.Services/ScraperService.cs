@@ -758,26 +758,39 @@ public class ScraperService
 
         // Process results in parallel with a concurrency limit
         var discoveries = new System.Collections.Concurrent.ConcurrentBag<NodeReportDto>();
-        var processingTasks = resultsList.Select(async repoRef =>
+        
+        // Use a more memory-efficient approach by processing in chunks
+        const int chunkSize = 50;
+        var chunks = resultsList.Chunk(chunkSize);
+        
+        foreach (var chunk in chunks)
         {
-            await _parallelSemaphore.WaitAsync(_cancellationTokenSource!.Token);
-            try
-            {
-                if (_cancellationTokenSource!.Token.IsCancellationRequested) return;
-                
-                var found = await ProcessResultAndCollectAsync(repoRef, token, query, discoveredBy);
-                if (found != null && found.Any())
-                {
-                    foreach (var discovery in found) discoveries.Add(discovery);
-                }
-            }
-            finally
-            {
-                _parallelSemaphore.Release();
-            }
-        });
+            if (_cancellationTokenSource!.Token.IsCancellationRequested) break;
 
-        await Task.WhenAll(processingTasks);
+            var processingTasks = chunk.Select(async repoRef =>
+            {
+                await _parallelSemaphore.WaitAsync(_cancellationTokenSource!.Token);
+                try
+                {
+                    if (_cancellationTokenSource!.Token.IsCancellationRequested) return;
+                    
+                    var found = await ProcessResultAndCollectAsync(repoRef, token, query, discoveredBy);
+                    if (found != null && found.Any())
+                    {
+                        foreach (var discovery in found) discoveries.Add(discovery);
+                    }
+                }
+                finally
+                {
+                    _parallelSemaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(processingTasks);
+            
+            // Memory conservation: yield control and check for cancellation
+            await Task.Yield();
+        }
 
         // Bulk Report Findings (Worker Mode)
         if (IsWorkerMode && discoveries.Any())

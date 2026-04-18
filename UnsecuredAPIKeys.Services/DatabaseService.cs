@@ -367,49 +367,46 @@ public class DatabaseService(DBContext dbContext)
             query = query.Where(k => k.DiscoveredByTelegramId == filterByTelegramId.Value);
         }
 
-        var allKeys = await query.ToListAsync();
-        
+        // Get status counts directly from DB
+        var statusCounts = await query.GroupBy(k => k.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        // Get type counts directly from DB
+        var typeCounts = await query.GroupBy(k => k.ApiType)
+            .Select(g => new { Type = g.Key, Count = g.Count() })
+            .ToListAsync();
+
         var categorized = new CategorizedStatistics
         {
-            TotalKeys = allKeys.Count,
-            ValidKeys = allKeys.Count(k => k.Status == ApiStatusEnum.Valid),
-            InvalidKeys = allKeys.Count(k => k.Status == ApiStatusEnum.Invalid),
-            UnverifiedKeys = allKeys.Count(k => k.Status == ApiStatusEnum.Unverified),
-            ValidNoCreditsKeys = allKeys.Count(k => k.Status == ApiStatusEnum.ValidNoCredits),
+            TotalKeys = statusCounts.Sum(c => c.Count),
+            ValidKeys = statusCounts.FirstOrDefault(c => c.Status == ApiStatusEnum.Valid)?.Count ?? 0,
+            InvalidKeys = statusCounts.FirstOrDefault(c => c.Status == ApiStatusEnum.Invalid)?.Count ?? 0,
+            UnverifiedKeys = statusCounts.FirstOrDefault(c => c.Status == ApiStatusEnum.Unverified)?.Count ?? 0,
+            ValidNoCreditsKeys = statusCounts.FirstOrDefault(c => c.Status == ApiStatusEnum.ValidNoCredits)?.Count ?? 0,
             GitHubTokensCount = await dbContext.SearchProviderTokens
                 .CountAsync(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub),
             Categories = new Dictionary<ApiCategoryEnum, CategoryStats>()
         };
 
-        // Group by category
-        var categoryGroups = allKeys.GroupBy(k => GetCategoryForApiType(k.ApiType));
+        // Group by category in memory from the summary results
+        var typeGroups = typeCounts.GroupBy(t => GetCategoryForApiType(t.Type));
 
-        foreach (var categoryGroup in categoryGroups)
+        foreach (var typeGroup in typeGroups)
         {
-            var category = categoryGroup.Key;
-            var categoryKeys = categoryGroup.ToList();
-
+            var category = typeGroup.Key;
             var categoryStats = new CategoryStats
             {
                 CategoryName = GetCategoryName(category),
-                TotalKeys = categoryKeys.Count,
-                ApiTypes = new List<ApiTypeStats>()
+                TotalKeys = typeGroup.Sum(t => t.Count),
+                ApiTypes = typeGroup.Select(t => new ApiTypeStats
+                {
+                    ApiType = t.Type,
+                    ApiTypeName = t.Type.ToString(),
+                    KeyCount = t.Count
+                }).OrderByDescending(t => t.KeyCount).ToList()
             };
 
-            // Group by API type within category
-            var typeGroups = categoryKeys.GroupBy(k => k.ApiType);
-            foreach (var typeGroup in typeGroups)
-            {
-                categoryStats.ApiTypes.Add(new ApiTypeStats
-                {
-                    ApiType = typeGroup.Key,
-                    ApiTypeName = typeGroup.Key.ToString(),
-                    KeyCount = typeGroup.Count()
-                });
-            }
-
-            // Sort by key count descending
-            categoryStats.ApiTypes = categoryStats.ApiTypes.OrderByDescending(t => t.KeyCount).ToList();
             categorized.Categories[category] = categoryStats;
         }
 

@@ -95,83 +95,34 @@ public class TelegramBotService : BackgroundService
                 cancellationToken: stoppingToken);
         }
 
-        // Live Notification Loop
-        var lastCheck = DateTime.UtcNow;
-        while (!stoppingToken.IsCancellationRequested)
+        // Keep the service alive without notifications
+        try
         {
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
-
-                if (_adminChatId == 0) continue;
-
-                using var scope = _serviceProvider.CreateScope();
-                var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
-
-                var newValidKeys = await dbContext.APIKeys
-                    .Where(k => (k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits) && k.LastCheckedUTC > lastCheck)
-                    .OrderBy(k => k.LastCheckedUTC)
-                    .ToListAsync(stoppingToken);
-
-                if (newValidKeys.Any())
-                {
-                    foreach (var key in newValidKeys)
-                    {
-                        var statusStr = key.Status == ApiStatusEnum.Valid ? "✅ VALID" : "⚠️ QUOTA EXCEEDED";
-                        var colorIcon = key.Status == ApiStatusEnum.Valid ? "🟢" : "🟡";
-                        
-                        var sb = new StringBuilder();
-                        sb.AppendLine($"{colorIcon} <b>NEW {key.ApiType.ToString().ToUpper()} KEY FOUND</b>");
-                        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
-                        sb.AppendLine($"<b>Status:</b> <code>{statusStr}</code>");
-                        
-                        if (!string.IsNullOrEmpty(key.AccountTier))
-                            sb.AppendLine($"<b>Tier:</b>   <code>{key.AccountTier}</code>");
-                            
-                        if (!string.IsNullOrEmpty(key.Balance))
-                            sb.AppendLine($"<b>Value:</b>  <code>{key.Balance}</code>");
-
-                        sb.AppendLine($"<b>Key:</b>    <code>{key.ApiKey.Substring(0, Math.Min(12, key.ApiKey.Length))}...</code>");
-                        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
-                        
-                        var keyboard = new InlineKeyboardMarkup(new[]
-                        {
-                            new [] { InlineKeyboardButton.WithCallbackData("📂 Export Intelligence", $"export_key:{key.Id}") }
-                        });
-
-                        // Notify ONLY the super admin (Silent operation for all other users)
-                        if (_adminChatId != 0)
-                        {
-                            var discoverer = await dbContext.TelegramSubscribers.FindAsync(new object[] { key.DiscoveredByTelegramId ?? 0 }, stoppingToken);
-                            var discovererName = discoverer != null && !string.IsNullOrEmpty(discoverer.Username) 
-                                ? $"@{discoverer.Username} (<code>{key.DiscoveredByTelegramId}</code>)" 
-                                : $"<code>{key.DiscoveredByTelegramId}</code>";
-
-                            var adminMsg = new StringBuilder();
-                            adminMsg.AppendLine($"🔔 <b>NEW KEY DISCOVERED</b>");
-                            adminMsg.AppendLine($"<i>Found by: {discovererName}</i>");
-                            adminMsg.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
-                            adminMsg.Append(sb); // Append the pre-built key info (status, tier, balance, preview)
-
-                            await _botClient.SendMessage(
-                                chatId: _adminChatId,
-                                text: adminMsg.ToString(),
-                                parseMode: ParseMode.Html,
-                                replyMarkup: keyboard,
-                                cancellationToken: stoppingToken);
-                        }
-                    }
-                    lastCheck = newValidKeys.Max(k => k.LastCheckedUTC) ?? lastCheck;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in Telegram notification loop");
-            }
+            await Task.Delay(Timeout.Infinite, stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown
         }
     }
 
     private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
+    {
+        // Offload processing to a background task to keep the polling loop responsive and prevent callback timeouts
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ProcessUpdateAsync(botClient, update, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing Telegram update {UpdateId}", update.Id);
+            }
+        }, cancellationToken);
+    }
+
+    private async Task ProcessUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
     {
         long chatId = 0;
         string? messageText = null;
@@ -192,7 +143,7 @@ public class TelegramBotService : BackgroundService
         }
 
         if (chatId == 0) return;
- 
+
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         
