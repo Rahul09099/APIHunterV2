@@ -488,10 +488,21 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine("<b>📡 SATELLITE STATUS</b>");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         
-        double validPercent = stats.TotalKeys > 0 ? (double)stats.ValidKeys / stats.TotalKeys : 0;
-        sb.AppendLine($"<b>Health Index:</b> {GetProgressBar(validPercent)} {validPercent:P0}");
+        // 1. Database Health Section (Top)
+        sb.AppendLine();
+        sb.AppendLine("<b>💾 DATABASE HEALTH (Supabase)</b>");
+        double dbSizeMb = stats.DatabaseSizeBytes / (1024.0 * 1024.0);
+        const double dbLimitMb = 500.0; // Supabase Free Tier Limit
+        double dbUsagePercent = Math.Min(dbSizeMb / dbLimitMb, 1.0);
+        
+        string dbSizeStr = dbSizeMb > 1024 ? $"{(dbSizeMb / 1024.0):F2} GB" : $"{dbSizeMb:F2} MB";
+        sb.AppendLine($"<b>Storage:</b> {GetProgressBar(dbUsagePercent)} {dbUsagePercent:P1}");
+        sb.AppendLine($"<b>Used:</b> <code>{dbSizeStr} / {dbLimitMb} MB</code>");
         sb.AppendLine();
 
+        // 2. Key Statistics (Bottom)
+        double validPercent = stats.TotalKeys > 0 ? (double)stats.ValidKeys / stats.TotalKeys : 0;
+        sb.AppendLine($"<b>Health Index:</b> {GetProgressBar(validPercent)} {validPercent:P0}");
         sb.AppendLine($"<b>Total Keys:</b> <code>{stats.TotalKeys}</code>");
         sb.AppendLine($"<b>🟢 Valid:</b> <code>{stats.ValidKeys}</code>");
         sb.AppendLine($"<b>🔴 Invalid:</b> <code>{stats.InvalidKeys}</code>");
@@ -500,7 +511,7 @@ public class TelegramBotService : BackgroundService
 
         sb.AppendLine($"<b>🔑 Tokens:</b> <code>{stats.GitHubTokensCount} active</code>");
         sb.AppendLine($"<b>🏃 Jobs:</b> <code>{activeJobs.Count} running</code>");
-        
+
         if (activeJobs.Any())
         {
             foreach (var job in activeJobs)
@@ -516,10 +527,22 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         sb.AppendLine($"<i>System time: {DateTime.UtcNow:HH:mm} UTC</i>");
 
-        var keyboard = new InlineKeyboardMarkup(new[]
+        var keyboardButtons = new List<InlineKeyboardButton[]>
         {
-            new [] { InlineKeyboardButton.WithCallbackData("🔄 Refresh", "status_refresh"), InlineKeyboardButton.WithCallbackData("📋 Active Jobs", "jobs_list") }
-        });
+            new [] { 
+                InlineKeyboardButton.WithCallbackData("🔄 Refresh", "status_refresh"), 
+                InlineKeyboardButton.WithCallbackData("📋 Active Jobs", "jobs_list") 
+            }
+        };
+
+        if (isAdmin)
+        {
+            keyboardButtons.Add(new [] {
+                InlineKeyboardButton.WithCallbackData("🧹 Purge Junk Sources", "purge_junk")
+            });
+        }
+
+        var keyboard = new InlineKeyboardMarkup(keyboardButtons);
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
     }

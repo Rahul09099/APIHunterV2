@@ -20,11 +20,19 @@ public class ConfigController : ControllerBase
         _dbService = dbService;
     }
 
+    private async Task<TelegramSubscriber?> GetAuthenticatedUser(string nodeToken)
+    {
+        if (string.IsNullOrEmpty(nodeToken)) return null;
+        return await _dbContext.TelegramSubscribers.FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
+    }
+
     /// <summary>
     /// Add a GitHub token
     /// </summary>
     [HttpPost("github-token")]
-    public async Task<IActionResult> AddGitHubToken([FromBody] AddTokenRequest request)
+    public async Task<IActionResult> AddGitHubToken(
+        [FromBody] AddTokenRequest request,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken = null)
     {
         if (string.IsNullOrWhiteSpace(request.Token))
         {
@@ -40,11 +48,20 @@ public class ConfigController : ControllerBase
             return Conflict(new { message = "Token already exists" });
         }
 
+        // Optionally associate with a user if token provided
+        long? addedBy = null;
+        if (!string.IsNullOrEmpty(nodeToken))
+        {
+            var user = await GetAuthenticatedUser(nodeToken);
+            addedBy = user?.TelegramId;
+        }
+
         var token = new SearchProviderToken
         {
             Token = request.Token,
             SearchProvider = SearchProviderEnum.GitHub,
-            IsEnabled = true
+            IsEnabled = true,
+            AddedByTelegramId = addedBy
         };
 
         _dbContext.SearchProviderTokens.Add(token);
@@ -57,8 +74,13 @@ public class ConfigController : ControllerBase
     /// Delete a GitHub token
     /// </summary>
     [HttpDelete("github-token/{id}")]
-    public async Task<IActionResult> DeleteGitHubToken(int id)
+    public async Task<IActionResult> DeleteGitHubToken(
+        int id,
+        [FromHeader(Name = "X-Node-Token")] string nodeToken)
     {
+        var user = await GetAuthenticatedUser(nodeToken);
+        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+
         var token = await _dbContext.SearchProviderTokens.FindAsync(id);
         
         if (token == null)
@@ -76,8 +98,13 @@ public class ConfigController : ControllerBase
     /// Add a search query
     /// </summary>
     [HttpPost("search-query")]
-    public async Task<IActionResult> AddSearchQuery([FromBody] AddQueryRequest request)
+    public async Task<IActionResult> AddSearchQuery(
+        [FromBody] AddQueryRequest request,
+        [FromHeader(Name = "X-Node-Token")] string nodeToken)
     {
+        var user = await GetAuthenticatedUser(nodeToken);
+        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+
         if (string.IsNullOrWhiteSpace(request.Query))
         {
             return BadRequest(new { message = "Query is required" });
@@ -100,8 +127,13 @@ public class ConfigController : ControllerBase
     /// Delete a search query
     /// </summary>
     [HttpDelete("search-query/{id}")]
-    public async Task<IActionResult> DeleteSearchQuery(int id)
+    public async Task<IActionResult> DeleteSearchQuery(
+        int id,
+        [FromHeader(Name = "X-Node-Token")] string nodeToken)
     {
+        var user = await GetAuthenticatedUser(nodeToken);
+        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+
         var query = await _dbContext.SearchQueries.FindAsync(id);
         
         if (query == null)
@@ -119,8 +151,13 @@ public class ConfigController : ControllerBase
     /// Toggle search query enabled status
     /// </summary>
     [HttpPatch("search-query/{id}/toggle")]
-    public async Task<IActionResult> ToggleSearchQuery(int id)
+    public async Task<IActionResult> ToggleSearchQuery(
+        int id,
+        [FromHeader(Name = "X-Node-Token")] string nodeToken)
     {
+        var user = await GetAuthenticatedUser(nodeToken);
+        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+
         var query = await _dbContext.SearchQueries.FindAsync(id);
         
         if (query == null)
@@ -141,10 +178,23 @@ public class ConfigController : ControllerBase
     /// Export valid keys
     /// </summary>
     [HttpGet("export-keys")]
-    public async Task<IActionResult> ExportKeys([FromQuery] string format = "json")
+    public async Task<IActionResult> ExportKeys(
+        [FromQuery] string format = "json",
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken = null)
     {
-        var validKeys = await _dbContext.APIKeys
-            .Where(k => k.Status == ApiStatusEnum.Valid)
+        var user = await GetAuthenticatedUser(nodeToken ?? "");
+        if (user == null) return Unauthorized("Node Token required for export");
+
+        var query = _dbContext.APIKeys
+            .Where(k => k.Status == ApiStatusEnum.Valid);
+
+        // If not admin, filter by the user who discovered them
+        if (!user.IsAdmin)
+        {
+            query = query.Where(k => k.DiscoveredByTelegramId == user.TelegramId);
+        }
+
+        var validKeys = await query
             .Select(k => new
             {
                 k.ApiType,
@@ -170,8 +220,13 @@ public class ConfigController : ControllerBase
     /// Reset database (WARNING: Deletes all data)
     /// </summary>
     [HttpPost("reset-database")]
-    public async Task<IActionResult> ResetDatabase([FromBody] ResetRequest request)
+    public async Task<IActionResult> ResetDatabase(
+        [FromBody] ResetRequest request,
+        [FromHeader(Name = "X-Node-Token")] string nodeToken)
     {
+        var user = await GetAuthenticatedUser(nodeToken);
+        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+
         if (request.Confirmation != "CONFIRM_RESET")
         {
             return BadRequest(new { 
