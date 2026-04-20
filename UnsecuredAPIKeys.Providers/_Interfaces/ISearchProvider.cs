@@ -13,13 +13,10 @@ namespace UnsecuredAPIKeys.Providers._Interfaces
         string ProviderName { get; }
 
         /// <summary>
-        /// Executes a search based on the provided query.
+        /// Executes a search based on the provided query with pagination support.
         /// </summary>
-        /// <param name="query">The search query details.</param>
-        /// <param name="token">The API token to use for the search.</param>
-        /// <returns>A SearchResponse containing findings and metadata.</returns>
-        Task<SearchResponse> SearchAsync(SearchQuery query, SearchProviderToken? token);
+        Task<SearchResponse> SearchAsync(SearchQuery query, SearchProviderToken? token, string? extraQueryParams, int startPage = 1);
     }
 
-    public record SearchResponse(IEnumerable<RepoReference> Results, int LastPageReached, int TotalCount, bool HitLimit);
+    public record SearchResponse(IEnumerable<RepoReference> Results, int LastPageReached, int TotalResultsCount, bool HitLimit);
 }

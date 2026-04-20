@@ -32,8 +32,13 @@ public class VerifierController : ControllerBase
     /// </summary>
     /// <param name="apiTypes">Optional comma-separated list of API types (e.g., "OpenAI,Anthropic")</param>
     [HttpPost("start")]
-    public IActionResult StartVerifier([FromQuery] string? apiTypes = null)
+    public async Task<IActionResult> StartVerifier([FromHeader(Name = "X-Node-Token")] string nodeToken, [FromQuery] string? apiTypes = null)
     {
+        var node = await _dbContext.TelegramSubscribers
+            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
+
+        if (node == null) return Unauthorized(new { message = "Invalid node token" });
+
         HashSet<ApiTypeEnum>? selectedTypes = null;
         
         if (!string.IsNullOrEmpty(apiTypes))
@@ -54,7 +59,7 @@ public class VerifierController : ControllerBase
         {
             var verifier = new VerifierService(_dbContext, _httpClientFactory, selectedTypes);
             await verifier.RunAsync(cancellationToken);
-        });
+        }, node.TelegramId);
 
         var typesList = selectedTypes != null 
             ? string.Join(", ", selectedTypes) 
@@ -104,10 +109,20 @@ public class VerifierController : ControllerBase
     /// Get all verifier jobs
     /// </summary>
     [HttpGet("jobs")]
-    public IActionResult GetAllJobs()
+    public async Task<IActionResult> GetAllJobs([FromHeader(Name = "X-Node-Token")] string nodeToken)
     {
+        var node = await _dbContext.TelegramSubscribers
+            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
+
+        if (node == null) return Unauthorized(new { message = "Invalid node token" });
+
         var jobs = _jobManager.GetAllJobs()
             .Where(j => j.JobType == "Verifier");
+        
+        if (!node.IsAdmin)
+        {
+            jobs = jobs.Where(j => j.OwnerTelegramId == node.TelegramId);
+        }
         
         return Ok(jobs);
     }

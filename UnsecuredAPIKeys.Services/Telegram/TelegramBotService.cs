@@ -337,7 +337,7 @@ public class TelegramBotService : BackgroundService
                         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
                         var scraper = new ScraperService(dbContext, httpClientFactory);
                         await scraper.RunScrapeByGroupAsync(groupName, isDeep, chatId, ct);
-                    });
+                    }, chatId);
  
                 await _botClient.SendMessage(chatId, $"🚀 Scraper started for *{groupName}* ({mode} mode)!\nJob ID: `{jobId}`", parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
                 }
@@ -367,7 +367,7 @@ public class TelegramBotService : BackgroundService
                     var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
                     var scraper = new ScraperService(dbContext, httpClientFactory);
                     await scraper.RunScrapeByGroupAsync(groupName, isDeep, targetId, ct);
-                });
+                }, targetId);
 
                 await _botClient.SendMessage(chatId, $"🚀 [Admin] Scraper started for @{targetId} group *{groupName}*!", parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
             }
@@ -421,7 +421,13 @@ public class TelegramBotService : BackgroundService
             }
             else if (callbackData == "jobs_list")
             {
-                var jobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
+                var jobsQuery = _jobManager.GetAllJobs().Where(j => j.Status == "Running");
+                if (!isAdmin)
+                {
+                    jobsQuery = jobsQuery.Where(j => j.OwnerTelegramId == chatId);
+                }
+                var jobs = jobsQuery.ToList();
+
                 if (!jobs.Any())
                 {
                     await _botClient.SendMessage(chatId, "No active jobs running.", cancellationToken: cancellationToken);
@@ -534,7 +540,13 @@ public class TelegramBotService : BackgroundService
         // Filter by targetUserId if provided, or by chatId if not admin
         long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
         var stats = await dbService.GetCategorizedStatisticsAsync(dbContext, filterBy);
-        var activeJobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
+        
+        var jobsQuery = _jobManager.GetAllJobs().Where(j => j.Status == "Running");
+        if (!isAdmin)
+        {
+            jobsQuery = jobsQuery.Where(j => j.OwnerTelegramId == chatId);
+        }
+        var activeJobs = jobsQuery.ToList();
 
         var sb = new StringBuilder();
         sb.AppendLine("<b>📡 SATELLITE STATUS</b>");

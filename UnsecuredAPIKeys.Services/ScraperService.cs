@@ -27,6 +27,7 @@ public class ScraperService
 
     private int _newKeysFound;
     private int _duplicateKeysFound;
+    private readonly ISearchProvider _searchProvider;
 
     // Worker Mode Properties
     public bool IsWorkerMode { get; set; } = false;
@@ -56,6 +57,7 @@ public class ScraperService
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _providers = ApiProviderRegistry.ScraperProviders;
+        _searchProvider = new GitHubSearchProvider();
     }
 
     public async Task<List<string>> GetAvailableGroupsAsync(CancellationToken cancellationToken = default)
@@ -137,6 +139,29 @@ public class ScraperService
                 await Task.Delay(LiteLimits.SEARCH_DELAY_MS, _cancellationTokenSource.Token);
             }
         }
+    }
+
+    public async Task RunScrapeAllGroupsAsync(long? discoveredBy, CancellationToken cancellationToken)
+    {
+        _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var groups = await GetAvailableGroupsAsync(cancellationToken);
+        
+        _logger?.LogInformation("Starting automated scrape for {Count} groups...", groups.Count);
+        
+        foreach (var group in groups)
+        {
+            if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+            
+            // For automated mode, we use Lite search by default to avoid excessive partitioning
+            await RunScrapeByGroupAsync(group, false, discoveredBy, _cancellationTokenSource.Token);
+            
+            if (group != groups.Last())
+            {
+                await Task.Delay(5000, _cancellationTokenSource.Token);
+            }
+        }
+        
+        _logger?.LogInformation("Automated scrape completed.");
     }
 
     // Default RunAsync for CLI (no discovery tagging)
@@ -758,16 +783,24 @@ public class ScraperService
         if (!IsWorkerMode)
         {
             query.LastSearchUTC = DateTime.UtcNow;
+            _dbContext.SearchQueries.Update(query);
             await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
         }
 
         // Search GitHub
-        var searchProvider = new GitHubSearchProvider(_dbContext);
         SearchResponse? response;
 
         try
         {
-            response = await searchProvider.SearchAsync(query, token, extraParams, startPage);
+            response = await _searchProvider.SearchAsync(query, token, extraParams, startPage);
+            
+            // Update results count stat on Master if we got a response
+            if (!IsWorkerMode && response != null && startPage == 1 && string.IsNullOrEmpty(extraParams))
+            {
+                query.SearchResultsCount = response.TotalResultsCount;
+                _dbContext.SearchQueries.Update(query);
+                await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
+            }
         }
         catch (Exception)
         {

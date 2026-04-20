@@ -11,17 +11,12 @@ namespace UnsecuredAPIKeys.Providers.Search_Providers
     /// <summary>
     /// Implements the ISearchProvider interface for searching code on GitHub.
     /// </summary>
-    public class GitHubSearchProvider(DBContext dbContext, ILogger<GitHubSearchProvider>? logger = null) : ISearchProvider
+    public class GitHubSearchProvider(ILogger<GitHubSearchProvider>? logger = null) : ISearchProvider
     {
         /// <inheritdoc />
         public string ProviderName => "GitHub";
 
         /// <inheritdoc />
-        public async Task<SearchResponse> SearchAsync(SearchQuery query, SearchProviderToken? token)
-        {
-            return await SearchAsync(query, token, null, 1);
-        }
-
         public async Task<SearchResponse> SearchAsync(SearchQuery query, SearchProviderToken? token, string? extraQueryParams, int startPage = 1)
         {
             if (token == null || string.IsNullOrWhiteSpace(token.Token))
@@ -72,12 +67,6 @@ namespace UnsecuredAPIKeys.Providers.Search_Providers
                         searchResult = await client.Search.SearchCode(request);
                         totalResultsCount = searchResult.TotalCount;
 
-                        if (page == 1 && string.IsNullOrEmpty(extraQueryParams))
-                        {
-                            query.SearchResultsCount = searchResult.TotalCount;
-                            dbContext.SearchQueries.Update(query);
-                            await dbContext.SaveChangesAsync();
-                        }
                     }
                     catch (RateLimitExceededException ex)
                     {

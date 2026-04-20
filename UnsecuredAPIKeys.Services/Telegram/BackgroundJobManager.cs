@@ -7,7 +7,7 @@ public class BackgroundJobManager
     private readonly ConcurrentDictionary<string, JobInfo> _jobs = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _cancellationTokens = new();
 
-    public string StartJob(string jobType, Func<CancellationToken, Task> jobTask)
+    public string StartJob(string jobType, Func<CancellationToken, Task> jobTask, long? ownerTelegramId = null)
     {
         var jobId = Guid.NewGuid().ToString();
         var cts = new CancellationTokenSource();
@@ -16,6 +16,7 @@ public class BackgroundJobManager
         {
             JobId = jobId,
             JobType = jobType,
+            OwnerTelegramId = ownerTelegramId,
             Status = "Running",
             StartedAt = DateTime.UtcNow
         };
@@ -93,6 +94,7 @@ public class JobInfo
 {
     public string JobId { get; set; } = string.Empty;
     public string JobType { get; set; } = string.Empty;
+    public long? OwnerTelegramId { get; set; }
     public string Status { get; set; } = string.Empty;
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
