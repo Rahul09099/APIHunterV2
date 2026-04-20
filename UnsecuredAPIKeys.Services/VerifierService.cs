@@ -27,9 +27,17 @@ public class VerifierService(
     private int _invalidCount;
     private int _verifiedCount;
     private bool _isIdle;
+    
+    public bool IsWorkerMode { get; set; } = string.Equals(Environment.GetEnvironmentVariable("IS_WORKER_MODE"), "true", StringComparison.OrdinalIgnoreCase);
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        if (IsWorkerMode)
+        {
+            Console.WriteLine("[yellow]⚠️ Verifier skipped: Ghost Worker node is strictly stateless and won't run verification cycles.[/]");
+            return;
+        }
+
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         Console.WriteLine("[green]Starting verifier service...[/]");

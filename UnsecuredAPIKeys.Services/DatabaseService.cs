@@ -534,7 +534,44 @@ public class DatabaseService(DBContext dbContext)
             categorized.Categories[category] = categoryStats;
         }
 
+        categorized.DatabaseSizeBytes = await GetDatabaseSizeInBytesAsync();
         return categorized;
+    }
+
+    public async Task<long> GetDatabaseSizeInBytesAsync()
+    {
+        try
+        {
+            if (dbContext.Database.IsNpgsql())
+            {
+                // PostgreSQL/Supabase: Get size of current database
+                var conn = dbContext.Database.GetDbConnection();
+                var dbName = conn.Database;
+                
+                using var command = conn.CreateCommand();
+                command.CommandText = $"SELECT pg_database_size('{dbName}');";
+                
+                if (conn.State != System.Data.ConnectionState.Open)
+                    await conn.OpenAsync();
+                
+                var result = await command.ExecuteScalarAsync();
+                return result != null ? Convert.ToInt64(result) : 0L;
+            }
+            else if (dbContext.Database.IsSqlite())
+            {
+                // SQLite: Get file size
+                if (File.Exists(_dbPath))
+                {
+                    return new FileInfo(_dbPath).Length;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DB] Error getting database size: {ex.Message}");
+        }
+        
+        return 0L;
     }
 
     public static ApiCategoryEnum GetCategoryForApiType(ApiTypeEnum apiType)
@@ -736,6 +773,7 @@ public class CategorizedStatistics
     public int UnverifiedKeys { get; set; }
     public int ValidNoCreditsKeys { get; set; }
     public int GitHubTokensCount { get; set; }
+    public long DatabaseSizeBytes { get; set; }
     public Dictionary<ApiCategoryEnum, CategoryStats> Categories { get; set; } = new();
 }
 

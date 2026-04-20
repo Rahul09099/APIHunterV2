@@ -565,8 +565,21 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine($"<b>🔑 Tokens:</b> <code>{stats.GitHubTokensCount} active</code>");
         sb.AppendLine($"<b>🏃 Jobs:</b> <code>{activeJobs.Count} running</code>");
         
+        // Database Health Section
+        sb.AppendLine();
+        sb.AppendLine("<b>💾 DATABASE HEALTH (Supabase)</b>");
+        double dbSizeMb = stats.DatabaseSizeBytes / (1024.0 * 1024.0);
+        const double dbLimitMb = 500.0; // Supabase Free Tier Limit
+        double dbUsagePercent = Math.Min(dbSizeMb / dbLimitMb, 1.0);
+        
+        string dbSizeStr = dbSizeMb > 1024 ? $"{(dbSizeMb / 1024.0):F2} GB" : $"{dbSizeMb:F2} MB";
+        sb.AppendLine($"<b>Storage:</b> {GetProgressBar(dbUsagePercent)} {dbUsagePercent:P1}");
+        sb.AppendLine($"<b>Used:</b> <code>{dbSizeStr} / {dbLimitMb} MB</code>");
+
         if (activeJobs.Any())
         {
+            sb.AppendLine();
+            sb.AppendLine("<b>🏃 Active Deployments:</b>");
             foreach (var job in activeJobs)
             {
                 sb.AppendLine($"- {job.JobType}: <code>{job.JobId}</code>");
@@ -574,6 +587,7 @@ public class TelegramBotService : BackgroundService
         }
         else
         {
+            sb.AppendLine();
             sb.AppendLine("<i>No active deployments running</i>");
         }
         
