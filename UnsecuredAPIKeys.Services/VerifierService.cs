@@ -384,6 +384,10 @@ public class VerifierService(
                             key.ValidationResponse = result.Detail;
                             // Reset error count as this is a definitive result, not a transient error
                             key.ErrorCount = 0; 
+                            
+                            // Optimization: Purge references for invalid keys to save space
+                            await PurgeKeyReferencesAsync(key);
+                            
                             return false; // Stop checking other providers
                         }
 
@@ -423,7 +427,32 @@ public class VerifierService(
         }
         
         Interlocked.Increment(ref _invalidCount);
+        
+        // Optimization: Purge references for invalid keys to save space
+        await PurgeKeyReferencesAsync(key);
+        
         return false;
+    }
+
+    private async Task PurgeKeyReferencesAsync(APIKey key)
+    {
+        try
+        {
+            // Use a fresh context for deletion to avoid tracking issues
+            using var localDb = new DBContext();
+            var references = await localDb.RepoReferences.Where(r => r.APIKeyId == key.Id).ToListAsync();
+            if (references.Any())
+            {
+                localDb.RepoReferences.RemoveRange(references);
+                await localDb.SaveChangesAsync();
+                Console.WriteLine($"[DB] Space Optimized: Purged {references.Count} sources for invalid key {key.Id}");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Fail silently, it's just an optimization
+            logger?.LogWarning(ex, "Failed to purge references for key {KeyId}", key.Id);
+        }
     }
 
     /// <summary>

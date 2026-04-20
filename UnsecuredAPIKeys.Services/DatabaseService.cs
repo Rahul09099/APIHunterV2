@@ -750,6 +750,33 @@ public class DatabaseService(DBContext dbContext)
 
         await File.WriteAllLinesAsync(filePath, lines);
     }
+
+    public async Task<int> PurgeInvalidReferencesAsync(DBContext context)
+    {
+        try
+        {
+            Console.WriteLine("[DB] Purging references for invalid keys...");
+            
+            // Subquery: Get IDs of all RepoReferences where parent APIKey is Invalid
+            var referencesToPurge = await context.RepoReferences
+                .Where(r => context.APIKeys.Any(k => k.Id == r.APIKeyId && k.Status == ApiStatusEnum.Invalid))
+                .ToListAsync();
+
+            if (referencesToPurge.Count > 0)
+            {
+                context.RepoReferences.RemoveRange(referencesToPurge);
+                await context.SaveChangesAsync();
+                Console.WriteLine($"[DB] Successfully purged {referencesToPurge.Count} junk references.");
+            }
+
+            return referencesToPurge.Count;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DB] Error during purge: {ex.Message}");
+            return 0;
+        }
+    }
 }
 
 public class Statistics

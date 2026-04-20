@@ -293,6 +293,9 @@ public class TelegramBotService : BackgroundService
                 case "/node_status":
                     await HandleNodeStatusCommand(chatId, isAdmin, cancellationToken);
                     break;
+                case "/purge":
+                    await HandlePurgeCommand(chatId, isAdmin, cancellationToken);
+                    break;
                 case "/user_dash":
                     if (isAdmin)
                     {
@@ -442,6 +445,10 @@ public class TelegramBotService : BackgroundService
                     await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: cancellationToken);
                 }
             }
+            else if (callbackData == "purge_junk")
+            {
+                await HandlePurgeCommand(chatId, isAdmin, cancellationToken);
+            }
         }
         catch (Exception ex)
         {
@@ -512,6 +519,7 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("💾 <b>Data</b>");
         help.AppendLine("├ /valid_keys - Count of valid keys");
         help.AppendLine("├ /export [csv|json] - Get keys file");
+        if (isAdmin) help.AppendLine("├ /purge - Clean junk records");
         if (isAdmin) help.AppendLine("└ /reset_database CONFIRM_RESET - Wipe DB");
  
         help.AppendLine();
@@ -596,7 +604,13 @@ public class TelegramBotService : BackgroundService
 
         var keyboard = new InlineKeyboardMarkup(new[]
         {
-            new [] { InlineKeyboardButton.WithCallbackData("🔄 Refresh", "status_refresh"), InlineKeyboardButton.WithCallbackData("📋 Active Jobs", "jobs_list") }
+            new [] { 
+                InlineKeyboardButton.WithCallbackData("🔄 Refresh", "status_refresh"), 
+                InlineKeyboardButton.WithCallbackData("📋 Active Jobs", "jobs_list") 
+            },
+            new [] {
+                InlineKeyboardButton.WithCallbackData("🧹 Purge Junk Sources", "purge_junk")
+            }
         });
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
@@ -1377,4 +1391,34 @@ public class TelegramBotService : BackgroundService
     }
 
     #endregion
+
+    private async Task HandlePurgeCommand(long chatId, bool isAdmin, CancellationToken ct)
+    {
+        if (!isAdmin)
+        {
+            await _botClient.SendMessage(chatId, "❌ Restricted to Admins.", cancellationToken: ct);
+            return;
+        }
+
+        var statusMsg = await _botClient.SendMessage(chatId, "🧹 <b>Scanning for junk data...</b>", parseMode: ParseMode.Html, cancellationToken: ct);
+
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+
+        int purgedCount = await dbService.PurgeInvalidReferencesAsync(dbContext);
+        
+        // Estimate space saved: average record ~2KB
+        double savedMb = (purgedCount * 2.0) / 1024.0; 
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<b>✅ DATABASE OPTIMIZATION COMPLETE</b>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine($"🧹 <b>Purged:</b> <code>{purgedCount}</code> source records");
+        sb.AppendLine($"💾 <b>Estimated Saved:</b> <code>~{savedMb:F2} MB</code>");
+        sb.AppendLine();
+        sb.AppendLine("<i>All Invalid keys were kept for duplicate detection, only their source code context was removed.</i>");
+
+        await _botClient.EditMessageText(chatId, statusMsg.MessageId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
 }
