@@ -89,14 +89,24 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Initialize database (Only for Master Node)
+// Initialize database (Only for Master Node) - Run in background to prevent Health Check Timeouts
 if (!isWorkerMode)
 {
-    using (var scope = app.Services.CreateScope())
+    _ = Task.Run(async () =>
     {
-        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
-        await dbService.InitializeDatabaseAsync();
-    }
+        try
+        {
+            using (var scope = app.Services.CreateScope())
+            {
+                var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+                await dbService.InitializeDatabaseAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[CRITICAL] Background DB Initialization Failed: {ex.Message}");
+        }
+    });
 }
 
 // Configure the HTTP request pipeline
