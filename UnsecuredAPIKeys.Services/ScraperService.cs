@@ -870,7 +870,6 @@ public class ScraperService
                 }
             }
         }
-        }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error processing result: {Url}", repoRef.FileURL);

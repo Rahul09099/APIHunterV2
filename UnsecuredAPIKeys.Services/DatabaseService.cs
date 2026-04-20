@@ -413,7 +413,48 @@ public class DatabaseService(DBContext dbContext)
             categorized.Categories[category] = categoryStats;
         }
 
+        // Calculate DB Size
+        try 
+        {
+            if (dbContext.Database.IsNpgsql())
+            {
+                using var command = dbContext.Database.GetDbConnection().CreateCommand();
+                command.CommandText = "SELECT pg_database_size(current_database())";
+                if (command.Connection.State != System.Data.ConnectionState.Open) await command.Connection.OpenAsync();
+                var result = await command.ExecuteScalarAsync();
+                categorized.DatabaseSizeBytes = Convert.ToInt64(result);
+            }
+            else
+            {
+                // Fallback to SQLite check via file info
+                var connStr = dbContext.Database.GetDbConnection().ConnectionString;
+                var parts = connStr.Split('=', StringSplitOptions.RemoveEmptyEntries);
+                var path = parts.Length > 1 ? parts[1].Trim() : _dbPath;
+                if (File.Exists(path))
+                {
+                    categorized.DatabaseSizeBytes = new FileInfo(path).Length;
+                }
+            }
+        }
+        catch { /* Fallback to 0 if size cannot be determined */ }
+
         return categorized;
+    }
+
+    public async Task<int> PurgeJunkSourcesAsync(DBContext dbContext)
+    {
+        // Find all references for keys that are marked invalid
+        // We keep the keys themselves for duplicate detection, but purge the heavy context data
+        var junkRefs = await dbContext.RepoReferences
+            .Where(r => dbContext.APIKeys.Any(k => k.Id == r.APIKeyId && k.Status == ApiStatusEnum.Invalid))
+            .ToListAsync();
+
+        if (junkRefs.Any())
+        {
+            dbContext.RepoReferences.RemoveRange(junkRefs);
+            return await dbContext.SaveChangesAsync();
+        }
+        return 0;
     }
 
     public static ApiCategoryEnum GetCategoryForApiType(ApiTypeEnum apiType)
@@ -615,6 +656,7 @@ public class CategorizedStatistics
     public int UnverifiedKeys { get; set; }
     public int ValidNoCreditsKeys { get; set; }
     public int GitHubTokensCount { get; set; }
+    public long DatabaseSizeBytes { get; set; }
     public Dictionary<ApiCategoryEnum, CategoryStats> Categories { get; set; } = new();
 }
 

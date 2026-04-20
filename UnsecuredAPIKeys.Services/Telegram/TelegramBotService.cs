@@ -323,6 +323,9 @@ public class TelegramBotService : BackgroundService
                 case "/node_status":
                     await HandleNodeStatusCommand(chatId, isAdmin, cancellationToken);
                     break;
+                case "/purge_junk":
+                    if (isAdmin) await HandlePurgeJunkCommand(chatId, cancellationToken);
+                    break;
                 default:
                     if (messageText.StartsWith("/"))
                         await _botClient.SendMessage(chatId, "❓ Unknown command. Use /help to see available commands.", cancellationToken: cancellationToken);
@@ -382,6 +385,17 @@ public class TelegramBotService : BackgroundService
                         sb.AppendLine($"▸ {job.JobType}: <code>{job.JobId.Substring(0, 8)}</code>");
                     }
                     await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+                }
+            }
+            else if (callbackData == "purge_junk")
+            {
+                if (isAdmin)
+                {
+                    using var scope = _serviceProvider.CreateScope();
+                    var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+                    var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+                    var count = await dbService.PurgeJunkSourcesAsync(dbContext);
+                    await _botClient.SendMessage(chatId, $"🧹 <b>Database Optimization Complete</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nPurged <code>{count}</code> junk repository references from invalid keys.", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
                 }
             }
         }
@@ -454,7 +468,8 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("💾 <b>Data</b>");
         help.AppendLine("├ /valid_keys - Count of valid keys");
         help.AppendLine("├ /export [csv|json] - Get keys file");
-        if (isAdmin) help.AppendLine("└ /reset_database CONFIRM_RESET - Wipe DB");
+        if (isAdmin) help.AppendLine("├ /reset_database CONFIRM_RESET - Wipe DB");
+        if (isAdmin) help.AppendLine("└ /purge_junk - Purge references for invalid keys");
  
         help.AppendLine();
         help.AppendLine("📡 <b>Ghost Node</b>");
@@ -534,13 +549,6 @@ public class TelegramBotService : BackgroundService
                 InlineKeyboardButton.WithCallbackData("📋 Active Jobs", "jobs_list") 
             }
         };
-
-        if (isAdmin)
-        {
-            keyboardButtons.Add(new [] {
-                InlineKeyboardButton.WithCallbackData("🧹 Purge Junk Sources", "purge_junk")
-            });
-        }
 
         var keyboard = new InlineKeyboardMarkup(keyboardButtons);
 
@@ -1227,6 +1235,17 @@ public class TelegramBotService : BackgroundService
         }
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    private async Task HandlePurgeJunkCommand(long chatId, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+        
+        await _botClient.SendMessage(chatId, "⏳ Purging junk repository references for invalid keys...", cancellationToken: ct);
+        var count = await dbService.PurgeJunkSourcesAsync(dbContext);
+        await _botClient.SendMessage(chatId, $"✅ Purged {count} junk references. Database space reclaimed.", cancellationToken: ct);
     }
 
     #endregion
