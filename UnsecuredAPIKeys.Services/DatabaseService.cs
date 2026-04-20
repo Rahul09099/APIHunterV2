@@ -591,8 +591,10 @@ public class DatabaseService(DBContext dbContext)
         {
             k.Id,
             k.ApiKey,
-            k.ApiType,
-            k.Status,
+            ApiType = (int)k.ApiType,
+            ApiTypeName = k.ApiType.ToString(),
+            Status = (int)k.Status,
+            StatusName = k.Status.ToString(),
             k.Balance,
             k.AccountTier,
             k.FirstFoundUTC,
@@ -601,7 +603,7 @@ public class DatabaseService(DBContext dbContext)
             k.ValidationResponse,
             Sources = k.References.Select(r => new
             {
-                Source = r.FileURL ?? $"{r.RepoURL}/blob/{r.Branch ?? "main"}/{r.FilePath}",
+                Source = r.FileURL ?? (string.IsNullOrWhiteSpace(r.RepoURL) ? "" : $"{r.RepoURL}/blob/{r.Branch ?? "main"}/{r.FilePath}"),
                 FoundUTC = r.FoundUTC
             })
         });
@@ -618,16 +620,25 @@ public class DatabaseService(DBContext dbContext)
     {
         var lines = new List<string>
         {
-            "Id,ApiKey,Type,Status,Balance,Tier,ValidationResponse,FirstFoundUTC,LastCheckedUTC,Source,SourceFoundUTC"
+            "Id,ApiKey,Type,TypeName,Status,Balance,Tier,ValidationResponse,FirstFoundUTC,LastCheckedUTC,Source,SourceFoundUTC"
         };
 
         foreach (var key in keys)
         {
-            foreach (var r in key.References)
+            var valResponse = key.ValidationResponse?.Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ") ?? "";
+            
+            if (key.References == null || !key.References.Any())
             {
-                var source = r.FileURL ?? $"{r.RepoURL}/blob/{r.Branch ?? "main"}/{r.FilePath}";
-                var valResponse = key.ValidationResponse?.Replace("\"", "\"\"").Replace("\n", " ") ?? "";
-                lines.Add($"{key.Id},{key.ApiKey},{key.ApiType},{key.Status},{key.Balance},{key.AccountTier},\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"{source}\",{r.FoundUTC:O}");
+                // Export at least one line even if no references exist
+                lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Balance},{key.AccountTier},\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"\",");
+            }
+            else
+            {
+                foreach (var r in key.References)
+                {
+                    var source = r.FileURL ?? (string.IsNullOrWhiteSpace(r.RepoURL) ? "" : $"{r.RepoURL}/blob/{r.Branch ?? "main"}/{r.FilePath}");
+                    lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Balance},{key.AccountTier},\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"{source}\",{r.FoundUTC:O}");
+                }
             }
         }
 

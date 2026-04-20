@@ -19,7 +19,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     {
         private const string API_ENDPOINT = "https://api.anthropic.com/v1/messages";
         private const string ANTHROPIC_VERSION = "2023-06-01";
-        private const string DEFAULT_MODEL = "claude-sonnet-4-20250514";
+        private const string DEFAULT_MODEL = "claude-3-5-haiku-latest";
         private const int MAX_RETRIES = 3;
         private const int TIMEOUT_SECONDS = 30;
 
@@ -39,11 +39,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         // Enhanced regex patterns with compiled regex for better performance
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"sk-ant-api\d{0,2}-[a-zA-Z0-9\-_]{40,120}",
-            @"sk-ant-[a-zA-Z0-9\-_]{40,95}",
-            @"sk-ant-v\d+-[a-zA-Z0-9\-_]{40,95}",
-            @"sk-ant-[a-zA-Z0-9]+-[a-zA-Z0-9\-_]{20,120}",
-            @"sk-ant-[a-zA-Z0-9]{40,64}",
+            @"\bsk-ant-api\d{2}-[a-zA-Z0-9\-_]{40,120}\b",
             @"\bsk-ant-[a-zA-Z0-9\-_]{20,120}\b"
         ];
 
@@ -109,30 +105,25 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             switch (statusCode)
             {
                 case HttpStatusCode.Unauthorized: // 401
-                    if (ContainsAny(bodyLower, InvalidKeyIndicators))
-                    {
-                        return ValidationResult.IsUnauthorized(statusCode);
-                    }
                     return ValidationResult.IsUnauthorized(statusCode);
 
-                case HttpStatusCode.Forbidden: // 403
-                    if (ContainsAny(bodyLower, PermissionIndicators))
+                case HttpStatusCode.NotFound: // 404
+                    if (bodyLower.Contains("model") || bodyLower.Contains("not_found_error"))
                     {
-                        _logger?.LogInformation("API key has permission restrictions but is valid");
+                        // The key is valid (accepted by gateway), but the model string was invalid.
+                        _logger?.LogInformation("API key is valid (404 model error confirms gateway acceptance)");
                         return ValidationResult.Success(statusCode);
                     }
-                    return ValidationResult.HasHttpError(statusCode, $"Forbidden: {TruncateResponse(responseBody)}");
+                    return ValidationResult.HasHttpError(statusCode, $"Endpoint not found: {TruncateResponse(responseBody)}");
+
+                case HttpStatusCode.Forbidden: // 403
+                    _logger?.LogInformation("API key has permission restrictions but is valid (403)");
+                    return ValidationResult.Success(statusCode);
 
                 case HttpStatusCode.BadRequest: // 400
-                    if (ContainsAny(bodyLower, QuotaIndicators))
-                    {
-                        _logger?.LogInformation("API key is valid but has quota/billing issues");
-                        return ValidationResult.Success(statusCode);
-                    }
-                    return ValidationResult.HasHttpError(statusCode, $"Bad request: {TruncateResponse(responseBody)}");
-
                 case HttpStatusCode.PaymentRequired: // 402
                 case HttpStatusCode.TooManyRequests: // 429
+                    _logger?.LogInformation("API key is valid but has quota/billing/status issues ({StatusCode})", statusCode);
                     return ValidationResult.Success(statusCode);
 
                 case HttpStatusCode.ServiceUnavailable: // 503
