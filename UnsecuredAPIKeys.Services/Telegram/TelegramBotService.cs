@@ -368,10 +368,33 @@ public class TelegramBotService : BackgroundService
                 }
                 else
                 {
+                    // Pre-fetch owner info if admin
+                    var ownerMap = new Dictionary<long, string?>();
+                    if (isAdmin)
+                    {
+                        var ownerIds = jobs.Select(j => j.OwnerTelegramId).Where(id => id.HasValue).Cast<long>().Distinct().ToList();
+                        if (ownerIds.Any())
+                        {
+                            using var scope = _serviceProvider.CreateScope();
+                            var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+                            ownerMap = await dbContext.TelegramSubscribers
+                                .Where(s => ownerIds.Contains(s.TelegramId))
+                                .ToDictionaryAsync(s => s.TelegramId, s => s.Username, cancellationToken);
+                        }
+                    }
+
                     var sb = new StringBuilder("<b>🏃 ACTIVE DEPLOYMENTS</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n");
                     foreach (var job in jobs)
                     {
-                        sb.AppendLine($"▸ {job.JobType}: <code>{job.JobId.Substring(0, 8)}</code>");
+                        string ownerStr = "";
+                        if (isAdmin && job.OwnerTelegramId.HasValue)
+                        {
+                            var identity = ownerMap.TryGetValue(job.OwnerTelegramId.Value, out var uname) && !string.IsNullOrEmpty(uname) 
+                                ? $"(@{uname})" 
+                                : $"(ID: {job.OwnerTelegramId})";
+                            ownerStr = $" | {identity}";
+                        }
+                        sb.AppendLine($"▸ {job.JobType}: <code>{job.JobId}</code>{ownerStr}");
                     }
                     await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: cancellationToken);
                 }
@@ -632,9 +655,30 @@ public class TelegramBotService : BackgroundService
 
         if (activeJobs.Any())
         {
+            // Fetch owners for active jobs if admin
+            var ownerMap = new Dictionary<long, string?>();
+            if (isAdmin)
+            {
+                var ownerIds = activeJobs.Select(j => j.OwnerTelegramId).Where(id => id.HasValue).Cast<long>().Distinct().ToList();
+                if (ownerIds.Any())
+                {
+                    ownerMap = await dbContext.TelegramSubscribers
+                        .Where(s => ownerIds.Contains(s.TelegramId))
+                        .ToDictionaryAsync(s => s.TelegramId, s => s.Username, ct);
+                }
+            }
+
             foreach (var job in activeJobs)
             {
-                sb.AppendLine($"- {job.JobType}: <code>{job.JobId}</code>");
+                string ownerStr = "";
+                if (isAdmin && job.OwnerTelegramId.HasValue)
+                {
+                    var identity = ownerMap.TryGetValue(job.OwnerTelegramId.Value, out var uname) && !string.IsNullOrEmpty(uname) 
+                        ? $"(@{uname})" 
+                        : $"(ID: {job.OwnerTelegramId})";
+                    ownerStr = $" | {identity}";
+                }
+                sb.AppendLine($"- {job.JobType}: <code>{job.JobId}</code>{ownerStr}");
             }
         }
         else
@@ -850,10 +894,34 @@ public class TelegramBotService : BackgroundService
 
         var sb = new StringBuilder();
         sb.AppendLine($"<b>📋 Recent {type} Jobs:</b>");
+
+        // Fetch owners if admin
+        var ownerMap = new Dictionary<long, string?>();
+        if (isAdmin)
+        {
+            var ownerIds = jobs.Select(j => j.OwnerTelegramId).Where(id => id.HasValue).Cast<long>().Distinct().ToList();
+            if (ownerIds.Any())
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+                ownerMap = await dbContext.TelegramSubscribers
+                    .Where(s => ownerIds.Contains(s.TelegramId))
+                    .ToDictionaryAsync(s => s.TelegramId, s => s.Username, ct);
+            }
+        }
+
         foreach (var job in jobs.TakeLast(5))
         {
             var jobId = System.Net.WebUtility.HtmlEncode(job.JobId);
-            sb.AppendLine($"- <code>{jobId}</code>: {job.Status} (Started: {job.StartedAt})");
+            string ownerStr = "";
+            if (isAdmin && job.OwnerTelegramId.HasValue)
+            {
+                var identity = ownerMap.TryGetValue(job.OwnerTelegramId.Value, out var uname) && !string.IsNullOrEmpty(uname) 
+                    ? $"(@{uname})" 
+                    : $"(ID: {job.OwnerTelegramId})";
+                ownerStr = $" | {identity}";
+            }
+            sb.AppendLine($"- <code>{jobId}</code>: {job.Status} (Started: {job.StartedAt:HH:mm}){ownerStr}");
         }
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
