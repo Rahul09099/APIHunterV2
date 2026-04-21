@@ -1,8 +1,0 @@
-C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.WebAPI\obj\Debug\net10.0\UnsecuredAPIKeys.WebAPI.csproj.AssemblyReference.cache
-C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.WebAPI\obj\Debug\net10.0\rpswa.dswa.cache.json
-C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.WebAPI\obj\Debug\net10.0\UnsecuredAPIKeys.WebAPI.GeneratedMSBuildEditorConfig.editorconfig
-C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.WebAPI\obj\Debug\net10.0\UnsecuredAPIKeys.WebAPI.AssemblyInfoInputs.cache
-C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.WebAPI\obj\Debug\net10.0\UnsecuredAPIKeys.WebAPI.AssemblyInfo.cs
-C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.WebAPI\obj\Debug\net10.0\UnsecuredAPIKeys.WebAPI.csproj.CoreCompileInputs.cache
-C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.WebAPI\obj\Debug\net10.0\UnsecuredAPIKeys.WebAPI.MvcApplicationPartsAssemblyInfo.cs
-C:\Users\rk170\Desktop\UnsecuredAPIKeys (Done)\UnsecuredAPIKeys.WebAPI\obj\Debug\net10.0\UnsecuredAPIKeys.WebAPI.MvcApplicationPartsAssemblyInfo.cache
