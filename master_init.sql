@@ -177,10 +177,11 @@ CREATE TABLE IF NOT EXISTS "ApplicationSettings" (
 );
 
 -- -----------------------------------------------------------------------------
--- 🎯 SEED DEFAULT QUERIES
+-- -----------------------------------------------------------------------------
+-- 🎯 SEED DEFAULT QUERIES (Incremental / Idempotent)
 -- -----------------------------------------------------------------------------
 INSERT INTO "SearchQueries" ("Query", "IsEnabled", "LastSearchUTC")
-SELECT "Query", "IsEnabled", CURRENT_TIMESTAMP FROM (
+SELECT v.q, v.e, CURRENT_TIMESTAMP FROM (
     VALUES 
     ('sk- OpenAI', true),
     ('anthropic Claude', true),
@@ -198,6 +199,11 @@ SELECT "Query", "IsEnabled", CURRENT_TIMESTAMP FROM (
     ('fireworks fw_', true),
     ('hf_ HuggingFace', true),
     ('sk_ A2E', true),
-    ('PIAPI_KEY', true)
-) AS v("Query", "IsEnabled")
-WHERE NOT EXISTS (SELECT 1 FROM "SearchQueries");
+    ('A2E_API_KEY', true),
+    ('A2E_SECRET', true),
+    ('PIAPI_KEY', true),
+    ('piapi.ai', true)
+) AS v(q, e)
+WHERE NOT EXISTS (
+    SELECT 1 FROM "SearchQueries" WHERE "Query" = v.q
+);

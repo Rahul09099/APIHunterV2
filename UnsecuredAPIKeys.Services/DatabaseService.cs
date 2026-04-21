@@ -290,41 +290,35 @@ public class DatabaseService(DBContext dbContext)
     {
         try 
         {
-            var count = await context.SearchQueries.CountAsync();
-            if (count > 0) return;
-
-            Console.WriteLine("[DB] Seeding default search targets...");
+            Console.WriteLine("[DB] Checking for default search targets...");
             var now = DateTime.UtcNow;
-            var defaults = new List<SearchQuery>
+            var defaults = new List<string>
             {
-                new() { Query = "sk- OpenAI", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "anthropic Claude", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "aizasy Gemini", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "deepseek", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "kling AI", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "pollo AI", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "runway ML", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "cohere", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "elevenlabs", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "stability AI", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "together AI", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "grok XAI", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "replicate r8_", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "fireworks fw_", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "hf_ HuggingFace", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "sk_ A2E", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "A2E_API_KEY", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "PIAPI_KEY", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "piapi.ai", IsEnabled = true, LastSearchUTC = now }
+                "sk- OpenAI", "anthropic Claude", "aizasy Gemini", "deepseek", 
+                "kling AI", "pollo AI", "runway ML", "cohere", "elevenlabs", 
+                "stability AI", "together AI", "grok XAI", "replicate r8_", 
+                "fireworks fw_", "hf_ HuggingFace", "sk_ A2E", "A2E_API_KEY", 
+                "A2E_SECRET", "PIAPI_KEY", "piapi.ai"
             };
 
-            context.SearchQueries.AddRange(defaults);
-            await context.SaveChangesAsync();
-            Console.WriteLine($"[DB] Seeded {defaults.Count} default search targets.");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[DB] Warning: Could not seed default queries: {ex.Message}");
+            var existingQueries = await context.SearchQueries.Select(q => q.Query).ToListAsync();
+            var existingSet = new HashSet<string>(existingQueries);
+            bool addedAny = false;
+
+            foreach (var q in defaults)
+            {
+                if (!existingSet.Contains(q))
+                {
+                    context.SearchQueries.Add(new SearchQuery { Query = q, IsEnabled = true, LastSearchUTC = now });
+                    addedAny = true;
+                }
+            }
+
+            if (addedAny)
+            {
+                await context.SaveChangesAsync();
+                Console.WriteLine("[DB] Seeded missing default search targets.");
+            }
         }
     }
     
