@@ -65,7 +65,7 @@ public class NodesController : ControllerBase
 
         if (!node.IsAdmin)
         {
-            tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == node.TelegramId);
+            tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == node.TelegramId || t.AddedByTelegramId == null);
         }
 
         var tokens = await tokenQuery.ToListAsync();
