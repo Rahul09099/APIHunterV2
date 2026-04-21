@@ -480,6 +480,19 @@ public class TelegramBotService : BackgroundService
                     await HandleExportCommand(chatId, "csv", true, cancellationToken, userId); 
                 }
             }
+            else if (callbackData == "scrape_all")
+            {
+                var jobId = _jobManager.StartJob("AutoScraper-All", async (ct) =>
+                {
+                    using var scope = _serviceProvider.CreateScope();
+                    var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+                    var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+                    var scraper = new ScraperService(dbContext, httpClientFactory);
+                    await scraper.RunScrapeAllGroupsAsync(chatId, ct);
+                }, chatId);
+
+                await _botClient.SendMessage(chatId, $"🚀 <b>Comprehensive Scan Started!</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nAll groups will be searched sequentially in Lite mode.\nJob ID: <code>{jobId.Substring(0, 8)}</code>", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+            }
         }
         catch (Exception ex)
         {
@@ -699,20 +712,71 @@ public class TelegramBotService : BackgroundService
 
         var groups = await scraper.GetAvailableGroupsAsync(ct);
 
-    if (groups.Count == 0)
-    {
-        await _botClient.SendMessage(chatId, "⚠️ No targets to scrape. Please ensure you have:\n1. Enabled <b>Search Queries</b> (/queries)\n2. Enabled <b>GitHub Tokens</b> (/tokens)", parseMode: ParseMode.Html, cancellationToken: ct);
-        return;
-    }
+        if (groups.Count == 0)
+        {
+            await _botClient.SendMessage(chatId, "⚠️ No targets to scrape. Please ensure you have:\n1. Enabled <b>Search Queries</b> (/queries)\n2. Enabled <b>GitHub Tokens</b> (/tokens)", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
 
-        var buttons = groups.Select(g => new[] { InlineKeyboardButton.WithCallbackData(g, $"scrape_group:{g}:lite"), InlineKeyboardButton.WithCallbackData($"{g} (Deep)", $"scrape_group:{g}:deep") }).ToArray();
-        
-        var inlineKeyboard = new InlineKeyboardMarkup(buttons);
+        var sb = new StringBuilder();
+        sb.AppendLine("<b>📡 SCRAPER CONTROL CENTER</b>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine("<i>Select a target group to begin mission.</i>");
+        sb.AppendLine();
+
+        var keyboardButtons = new List<InlineKeyboardButton[]>();
+
+        // 0. Scrape All Button (Top)
+        keyboardButtons.Add(new[] { InlineKeyboardButton.WithCallbackData("🚀 START COMPREHENSIVE SCAN (ALL)", "scrape_all") });
+        keyboardButtons.Add(new[] { InlineKeyboardButton.WithCallbackData("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", "noop") });
+
+        // Categorization logic
+        var reasoning = new[] { "OpenAI", "Anthropic", "Google", "DeepSeek", "xAI", "Cohere" };
+        var generation = new[] { "Runway", "Kling AI", "Pollo AI", "A2E AI", "Stability AI", "ElevenLabs" };
+        var infra = new[] { "Together AI", "Fireworks AI", "Replicate", "Hugging Face", "PiAPI" };
+
+        void AddCategorySection(string title, string[] targets)
+        {
+            var matchedGroups = groups.Where(g => targets.Contains(g)).OrderBy(g => Array.IndexOf(targets, g)).ToList();
+            if (matchedGroups.Any())
+            {
+                sb.AppendLine(title);
+                foreach (var g in matchedGroups)
+                {
+                    keyboardButtons.Add(new[] { 
+                        InlineKeyboardButton.WithCallbackData(g, $"scrape_group:{g}:lite"), 
+                        InlineKeyboardButton.WithCallbackData($"{g} (Deep)", $"scrape_group:{g}:deep") 
+                    });
+                }
+                sb.AppendLine();
+            }
+        }
+
+        AddCategorySection("<b>🟢 LLM / Reasoning</b>", reasoning);
+        AddCategorySection("<b>🟣 Media Generation</b>", generation);
+        AddCategorySection("<b>🔵 LLM Infrastructure / Hosting</b>", infra);
+
+        // Others
+        var others = groups.Where(g => !reasoning.Contains(g) && !generation.Contains(g) && !infra.Contains(g)).ToList();
+        if (others.Any())
+        {
+            sb.AppendLine("<b>⚪ Others</b>");
+            foreach (var g in others)
+            {
+                keyboardButtons.Add(new[] { 
+                    InlineKeyboardButton.WithCallbackData(g, $"scrape_group:{g}:lite"), 
+                    InlineKeyboardButton.WithCallbackData($"{g} (Deep)", $"scrape_group:{g}:deep") 
+                });
+            }
+        }
+
+        var keyboard = new InlineKeyboardMarkup(keyboardButtons);
 
         await _botClient.SendMessage(
             chatId: chatId,
-            text: "🔍 Select a provider group and mode to scrape:",
-            replyMarkup: inlineKeyboard,
+            text: sb.ToString(),
+            parseMode: ParseMode.Html,
+            replyMarkup: keyboard,
             cancellationToken: ct);
     }
 

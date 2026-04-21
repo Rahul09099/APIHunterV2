@@ -64,6 +64,8 @@ namespace UnsecuredAPIKeys.Data.Common
         KlingAI = 210,
         PolloAI = 215,
         RunwayML = 220,
+        A2E = 230,
+        PiAPI = 240,
 
         // Communication Category (4)
         SendGrid = 410,

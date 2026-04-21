@@ -311,7 +311,9 @@ public class DatabaseService(DBContext dbContext)
                 new() { Query = "grok XAI", IsEnabled = true, LastSearchUTC = now },
                 new() { Query = "replicate r8_", IsEnabled = true, LastSearchUTC = now },
                 new() { Query = "fireworks fw_", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "hf_ HuggingFace", IsEnabled = true, LastSearchUTC = now }
+                new() { Query = "hf_ HuggingFace", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "sk_ A2E", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "PIAPI_KEY", IsEnabled = true, LastSearchUTC = now }
             };
 
             context.SearchQueries.AddRange(defaults);
@@ -431,6 +433,12 @@ public class DatabaseService(DBContext dbContext)
             "key_",
             "RUNWAYML_API_SECRET",
             "RUNWAY_API_KEY",
+            "sk_",           // A2E
+            "A2E_API_KEY",
+            "A2E_SECRET",
+            "PIAPI_KEY",
+            "piapi.ai",
+            "X-API-KEY"
         };
 
         bool addedAny = false;
@@ -476,6 +484,8 @@ public class DatabaseService(DBContext dbContext)
             OpenAIKeys = await query.CountAsync(k => k.ApiType == ApiTypeEnum.OpenAI),
             AnthropicKeys = await query.CountAsync(k => k.ApiType == ApiTypeEnum.AnthropicClaude),
             GoogleKeys = await query.CountAsync(k => k.ApiType == ApiTypeEnum.GoogleAI),
+            A2EKeys = await query.CountAsync(k => k.ApiType == ApiTypeEnum.A2E),
+            PiAPIKeys = await query.CountAsync(k => k.ApiType == ApiTypeEnum.PiAPI),
             GitHubTokensCount = await dbContext.SearchProviderTokens
                 .CountAsync(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub)
         };
@@ -609,7 +619,8 @@ public class DatabaseService(DBContext dbContext)
             ApiTypeEnum.Cohere or ApiTypeEnum.HuggingFace or ApiTypeEnum.StabilityAI or
             ApiTypeEnum.Replicate or ApiTypeEnum.TogetherAI or ApiTypeEnum.DeepSeek or
             ApiTypeEnum.ElevenLabs or ApiTypeEnum.XAI or ApiTypeEnum.FireworksAI or
-            ApiTypeEnum.KlingAI or ApiTypeEnum.PolloAI or ApiTypeEnum.RunwayML
+            ApiTypeEnum.KlingAI or ApiTypeEnum.PolloAI or ApiTypeEnum.RunwayML or
+            ApiTypeEnum.A2E or ApiTypeEnum.PiAPI
                 => ApiCategoryEnum.AIAndLLM,
 
             ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack
@@ -800,6 +811,8 @@ public class Statistics
     public int OpenAIKeys { get; set; }
     public int AnthropicKeys { get; set; }
     public int GoogleKeys { get; set; }
+    public int A2EKeys { get; set; }
+    public int PiAPIKeys { get; set; }
     public int GitHubTokensCount { get; set; }
 }
 

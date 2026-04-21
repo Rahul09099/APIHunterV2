@@ -463,18 +463,20 @@ public class ScraperService
         if (q.Contains("openai") || q.Contains("sk-") || q.Contains("gpt")) return "OpenAI";
         if (q.Contains("anthropic") || q.Contains("claude")) return "Anthropic";
         if (q.Contains("google") || q.Contains("gemini") || q.Contains("aizasy")) return "Google";
-        if (q.Contains("kling")) return "KlingAI";
-        if (q.Contains("pollo")) return "PolloAI";
-        if (q.Contains("runway") || q.Contains("key_")) return "RunwayML";
+        if (q.Contains("kling")) return "Kling AI";
+        if (q.Contains("pollo")) return "Pollo AI";
+        if (q.Contains("runway") || q.Contains("key_")) return "Runway";
         if (q.Contains("deepseek")) return "DeepSeek";
         if (q.Contains("cohere")) return "Cohere";
         if (q.Contains("eleven") || q.Contains("xi-")) return "ElevenLabs";
-        if (q.Contains("stability")) return "StabilityAI";
-        if (q.Contains("together")) return "TogetherAI";
-        if (q.Contains("xai") || q.Contains("grok")) return "XAI";
+        if (q.Contains("stability")) return "Stability AI";
+        if (q.Contains("together")) return "Together AI";
+        if (q.Contains("xai") || q.Contains("grok")) return "xAI";
         if (q.Contains("replicate") || q.Contains("r8_")) return "Replicate";
-        if (q.Contains("fireworks") || q.Contains("fw_")) return "Fireworks";
-        if (q.Contains("hugging") || q.Contains("hf_")) return "HuggingFace";
+        if (q.Contains("fireworks") || q.Contains("fw_")) return "Fireworks AI";
+        if (q.Contains("hugging") || q.Contains("hf_")) return "Hugging Face";
+        if (q.Contains("a2e")) return "A2E AI";
+        if (q.Contains("piapi") || q.Contains("pi_api")) return "PiAPI";
         return "Other";
     }
 
