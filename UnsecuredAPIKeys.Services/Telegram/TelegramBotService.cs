@@ -756,10 +756,12 @@ public class TelegramBotService : BackgroundService
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
         var scraper = new ScraperService(dbContext, httpClientFactory);
 
         var allGroups = await scraper.GetAvailableGroupsAsync(ct);
+        var stats = await dbService.GetCategorizedStatisticsAsync(dbContext);
 
         if (allGroups.Count == 0)
         {
@@ -767,15 +769,32 @@ public class TelegramBotService : BackgroundService
             return;
         }
 
-        const int pageSize = 6;
-        var totalPages = (int)Math.Ceiling(allGroups.Count / (double)pageSize);
+        // Logic-based categorization
+        var reasoning = new[] { "OpenAI", "Anthropic", "Google", "DeepSeek", "xAI", "Cohere" };
+        var generation = new[] { "Runway", "Kling AI", "Pollo AI", "A2E AI", "Stability AI", "ElevenLabs" };
+        var infra = new[] { "Together AI", "Fireworks AI", "Replicate", "Hugging Face", "PiAPI" };
+
+        var categoryPages = new List<(string Name, string Icon, string[] Targets)>();
+        categoryPages.Add(("Reasoning", "🟢", reasoning));
+        categoryPages.Add(("Media Generation", "🟣", generation));
+        categoryPages.Add(("Infrastructure", "🔵", infra));
+
+        // Detect if there are "other" groups not in the lists
+        var otherGroups = allGroups.Where(g => !reasoning.Contains(g) && !generation.Contains(g) && !infra.Contains(g)).ToArray();
+        if (otherGroups.Any())
+        {
+            categoryPages.Add(("Others", "⚪", otherGroups));
+        }
+
+        var totalPages = categoryPages.Count;
         if (page < 0) page = 0;
         if (page >= totalPages) page = totalPages - 1;
 
-        var pageGroups = allGroups.Skip(page * pageSize).Take(pageSize).ToList();
+        var currentPage = categoryPages[page];
+        var pageGroups = allGroups.Where(g => currentPage.Targets.Contains(g)).OrderBy(g => Array.IndexOf(currentPage.Targets, g)).ToList();
 
         var sb = new StringBuilder();
-        sb.AppendLine($"<b>📡 MISSION CONTROL: SCRAPER</b> (Page {page + 1}/{totalPages})");
+        sb.AppendLine($"<b>📡 MISSION CONTROL: SCRAPER</b>");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         sb.AppendLine("Select a target provider below to begin key discovery.");
         sb.AppendLine();
@@ -783,58 +802,54 @@ public class TelegramBotService : BackgroundService
         var keyboardButtons = new List<InlineKeyboardButton[]>();
 
         // 1. Primary Action: Scrape All (Keep on every page as requested)
-        keyboardButtons.Add(new[] { InlineKeyboardButton.WithCallbackData("🚀 RUN COMPREHENSIVE SCAN (ALL)", "scrape_all") });
-        
-        // Categorization logic
-        var reasoning = new[] { "OpenAI", "Anthropic", "Google", "DeepSeek", "xAI", "Cohere" };
-        var generation = new[] { "Runway", "Kling AI", "Pollo AI", "A2E AI", "Stability AI", "ElevenLabs" };
-        var infra = new[] { "Together AI", "Fireworks AI", "Replicate", "Hugging Face", "PiAPI" };
-
-        void AddCategorySection(string titleIcon, string titleName, string[] targets)
+        if (page == 0)
         {
-            var matchedInRange = pageGroups.Where(g => targets.Contains(g)).OrderBy(g => Array.IndexOf(targets, g)).ToList();
-            if (matchedInRange.Any())
-            {
-                // Section Header (Non-responsive button)
-                keyboardButtons.Add(new[] { InlineKeyboardButton.WithCallbackData($"⎯⎯⎯⎯ {titleIcon} {titleName.ToUpper()} ⎯⎯⎯⎯", "noop") });
-                
-                // Rows of 2 providers each
-                foreach (var g in matchedInRange)
-                {
-                    keyboardButtons.Add(new[] { 
-                        InlineKeyboardButton.WithCallbackData($"⚡ {g}", $"scrape_group:{g}:lite"), 
-                        InlineKeyboardButton.WithCallbackData($"🔍 {g}", $"scrape_group:{g}:deep") 
-                    });
-                }
-            }
+            keyboardButtons.Add(new[] { InlineKeyboardButton.WithCallbackData("🚀 RUN COMPREHENSIVE SCAN (ALL)", "scrape_all") });
+            keyboardButtons.Add(new[] { InlineKeyboardButton.WithCallbackData("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯", "noop") });
+        }
+        
+        // Category Header with Stats
+        string categoryTotal = "0";
+        if (stats.Categories.TryGetValue(ApiCategoryEnum.AIAndLLM, out var aiStats))
+        {
+            // Map ApiTypeName to the short names used in our groupings
+            var currentCategoryCounts = aiStats.ApiTypes
+                .Where(t => {
+                    var name = t.ApiTypeName;
+                    var shortName = name.Replace("Claude", "").Replace("AI", "").Replace("ML", "").Trim();
+                    // Handle special cases
+                    if (name == "GoogleAI") shortName = "Google";
+                    if (name == "XAI") shortName = "xAI";
+                    
+                    return currentPage.Targets.Any(target => target.Contains(shortName, StringComparison.OrdinalIgnoreCase));
+                })
+                .Sum(t => t.KeyCount);
+            categoryTotal = currentCategoryCounts.ToString();
+        }
+        
+        keyboardButtons.Add(new[] { InlineKeyboardButton.WithCallbackData($"⎯⎯⎯⎯ {currentPage.Icon} {currentPage.Name.ToUpper()} ({categoryTotal}) ⎯⎯⎯⎯", "noop") });
+
+        foreach (var g in pageGroups)
+        {
+            keyboardButtons.Add(new[] { 
+                InlineKeyboardButton.WithCallbackData($"⚡ {g}", $"scrape_group:{g}:lite"), 
+                InlineKeyboardButton.WithCallbackData($"🔍 {g}", $"scrape_group:{g}:deep") 
+            });
         }
 
-        AddCategorySection("🟢", "Reasoning", reasoning);
-        AddCategorySection("🟣", "Media Gen", generation);
-        AddCategorySection("🔵", "Infrastructure", infra);
-
-        // Others
-        var othersInRange = pageGroups.Where(g => !reasoning.Contains(g) && !generation.Contains(g) && !infra.Contains(g)).ToList();
-        if (othersInRange.Any())
+        if (!pageGroups.Any())
         {
-            keyboardButtons.Add(new[] { InlineKeyboardButton.WithCallbackData("⎯⎯⎯⎯ ⚪ OTHERS ⎯⎯⎯⎯", "noop") });
-            foreach (var g in othersInRange)
-            {
-                keyboardButtons.Add(new[] { 
-                    InlineKeyboardButton.WithCallbackData($"⚡ {g}", $"scrape_group:{g}:lite"), 
-                    InlineKeyboardButton.WithCallbackData($"🔍 {g}", $"scrape_group:{g}:deep") 
-                });
-            }
+            keyboardButtons.Add(new[] { InlineKeyboardButton.WithCallbackData("<i>No active queries for this category</i>", "noop") });
         }
 
         // Navigation Row
         var navRow = new List<InlineKeyboardButton>();
         if (page > 0)
         {
-            navRow.Add(InlineKeyboardButton.WithCallbackData("⬅️ Previous", $"scrape_page:{page - 1}"));
+            navRow.Add(InlineKeyboardButton.WithCallbackData("⬅️ Back", $"scrape_page:{page - 1}"));
         }
         
-        navRow.Add(InlineKeyboardButton.WithCallbackData($"Page {page + 1}/{totalPages}", "noop"));
+        navRow.Add(InlineKeyboardButton.WithCallbackData($"{page + 1} / {totalPages}", "noop"));
 
         if (page < totalPages - 1)
         {

@@ -196,6 +196,8 @@ SELECT "Query", "IsEnabled", CURRENT_TIMESTAMP FROM (
     ('grok XAI', true),
     ('replicate r8_', true),
     ('fireworks fw_', true),
-    ('hf_ HuggingFace', true)
+    ('hf_ HuggingFace', true),
+    ('sk_ A2E', true),
+    ('PIAPI_KEY', true)
 ) AS v("Query", "IsEnabled")
 WHERE NOT EXISTS (SELECT 1 FROM "SearchQueries");

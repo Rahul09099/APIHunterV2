@@ -313,7 +313,9 @@ public class DatabaseService(DBContext dbContext)
                 new() { Query = "fireworks fw_", IsEnabled = true, LastSearchUTC = now },
                 new() { Query = "hf_ HuggingFace", IsEnabled = true, LastSearchUTC = now },
                 new() { Query = "sk_ A2E", IsEnabled = true, LastSearchUTC = now },
-                new() { Query = "PIAPI_KEY", IsEnabled = true, LastSearchUTC = now }
+                new() { Query = "A2E_API_KEY", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "PIAPI_KEY", IsEnabled = true, LastSearchUTC = now },
+                new() { Query = "piapi.ai", IsEnabled = true, LastSearchUTC = now }
             };
 
             context.SearchQueries.AddRange(defaults);
