@@ -706,12 +706,7 @@ public class DatabaseService(DBContext dbContext)
 
         if (validOnly)
         {
-            // Only export keys with credits (truly working keys)
-            query = query.Where(k => k.Status == ApiStatusEnum.Valid);
-        }
-        else
-        {
-            // Export all valid keys (with and without credits)
+            // Export all working keys (with credits and without credits)
             query = query.Where(k => k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits);
         }
 
@@ -764,7 +759,7 @@ public class DatabaseService(DBContext dbContext)
     {
         var lines = new List<string>
         {
-            "Id,ApiKey,Type,TypeName,Status,Balance,Tier,ValidationResponse,FirstFoundUTC,LastCheckedUTC,Source,SourceFoundUTC"
+            "Id,ApiKey,Type,TypeName,Status,StatusName,Balance,Tier,ValidationResponse,FirstFoundUTC,LastCheckedUTC,Source,SourceFoundUTC"
         };
 
         foreach (var key in keys)
@@ -774,14 +769,14 @@ public class DatabaseService(DBContext dbContext)
             if (key.References == null || !key.References.Any())
             {
                 // Export at least one line even if no references exist
-                lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Balance},{key.AccountTier},\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"\",");
+                lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"\",");
             }
             else
             {
                 foreach (var r in key.References)
                 {
                     var source = r.FileURL ?? (string.IsNullOrWhiteSpace(r.RepoURL) ? "" : $"{r.RepoURL}/blob/{r.Branch ?? "main"}/{r.FilePath}");
-                    lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Balance},{key.AccountTier},\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"{source}\",{r.FoundUTC:O}");
+                    lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"{source}\",{r.FoundUTC:O}");
                 }
             }
         }
