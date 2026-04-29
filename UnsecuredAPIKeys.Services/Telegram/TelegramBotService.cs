@@ -167,7 +167,7 @@ public class TelegramBotService : BackgroundService
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         
         // Authorization Logics
-        var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { chatId }, cancellationToken);
+        var user = await dbContext.TelegramSubscribers.FindAsync(chatId, cancellationToken);
         var isSuperAdmin = _adminChatId != 0 && chatId == _adminChatId;
         var hasActiveSub = user != null && user.SubscriptionExpiryUtc > DateTime.UtcNow;
         var isAdmin = isSuperAdmin || (user != null && user.IsAdmin);
@@ -466,7 +466,7 @@ public class TelegramBotService : BackgroundService
 
                     using var scope = _serviceProvider.CreateScope();
                     var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
-                    var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { userId }, cancellationToken);
+                    var user = await dbContext.TelegramSubscribers.FindAsync(userId, cancellationToken);
                     if (user != null)
                     {
                         if (user.SubscriptionExpiryUtc < DateTime.UtcNow)
@@ -769,10 +769,10 @@ public class TelegramBotService : BackgroundService
             return;
         }
 
-        // Logic-based categorization
-        var reasoning = new[] { "OpenAI", "Anthropic", "Google", "DeepSeek", "xAI", "Cohere" };
+        // Logic-based categorization — update this when adding new providers
+        var reasoning = new[] { "OpenAI", "Anthropic", "Google", "DeepSeek", "xAI", "Cohere", "Groq", "Mistral AI", "Perplexity", "Cerebras" };
         var generation = new[] { "Runway", "Kling AI", "Pollo AI", "A2E AI", "Stability AI", "ElevenLabs" };
-        var infra = new[] { "Together AI", "Fireworks AI", "Replicate", "Hugging Face", "PiAPI" };
+        var infra = new[] { "Together AI", "Fireworks AI", "Replicate", "Hugging Face", "PiAPI", "OpenRouter", "Voyage AI", "AWS Bedrock", "Azure OpenAI" };
 
         var categoryPages = new List<(string Name, string Icon, string[] Targets)>();
         categoryPages.Add(("Reasoning", "🟢", reasoning));
@@ -1244,7 +1244,7 @@ public class TelegramBotService : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         
-        var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetId }, ct);
+        var user = await dbContext.TelegramSubscribers.FindAsync(targetId, ct);
         if (user == null)
         {
             user = new TelegramSubscriber { TelegramId = targetId, SubscriptionExpiryUtc = DateTime.UtcNow.AddDays(days) };
@@ -1307,7 +1307,7 @@ public class TelegramBotService : BackgroundService
 
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
-        var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetId }, ct);
+        var user = await dbContext.TelegramSubscribers.FindAsync(targetId, ct);
         
         if (user != null)
         {
@@ -1374,7 +1374,7 @@ public class TelegramBotService : BackgroundService
         {
             if (long.TryParse(idStr.Trim(), out long targetId))
             {
-                var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetId }, ct);
+                var user = await dbContext.TelegramSubscribers.FindAsync(targetId, ct);
                 if (user != null)
                 {
                     user.IsAdmin = isAdmin;
@@ -1412,7 +1412,7 @@ public class TelegramBotService : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         
-        var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { chatId }, ct);
+        var user = await dbContext.TelegramSubscribers.FindAsync(chatId, ct);
         
         // If user is missing but is the super admin, auto-register them
         if (user == null)
@@ -1534,7 +1534,7 @@ public class TelegramBotService : BackgroundService
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        var targetUser = await dbContext.TelegramSubscribers.FindAsync(new object[] { targetUserId }, ct);
+        var targetUser = await dbContext.TelegramSubscribers.FindAsync(targetUserId, ct);
         if (targetUser == null)
         {
             await _botClient.SendMessage(chatId, "❌ User not found.", cancellationToken: ct);

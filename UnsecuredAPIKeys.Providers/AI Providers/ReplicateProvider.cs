@@ -34,12 +34,26 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (response.IsSuccessStatusCode)
                 {
-                    return new ValidationResult 
-                    { 
-                        Status = ValidationAttemptStatus.Valid, 
-                        HttpStatusCode = response.StatusCode, 
-                        Detail = responseBody 
+                    var result = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.Valid,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = "Valid Replicate token"
                     };
+
+                    // Parse username/type from account response
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("username", out var username))
+                            result.AccountTier = username.GetString();
+                        if (root.TryGetProperty("type", out var type))
+                            result.Detail = $"Valid Replicate token ({type.GetString()})";
+                    }
+                    catch { /* Best effort */ }
+
+                    return result;
                 }
                 
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
@@ -51,7 +65,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             }
             catch (Exception ex)
             {
-                return ValidationResult.HasHttpError(System.Net.HttpStatusCode.InternalServerError, ex.Message);
+                // Network-level failure — use HasNetworkError, not HasHttpError
+                return ValidationResult.HasNetworkError(ex.Message);
             }
         }
 

@@ -121,10 +121,23 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     return ValidationResult.Success(statusCode);
 
                 case HttpStatusCode.BadRequest: // 400
+                    // A 400 on a well-formed request means the API rejected it.
+                    // Check the body: if it's a model/param error the key is valid;
+                    // if it's an auth error the key is bad.
+                    if (bodyLower.Contains("invalid_api_key") ||
+                        bodyLower.Contains("authentication_error") ||
+                        bodyLower.Contains("unauthorized"))
+                    {
+                        return ValidationResult.IsUnauthorized(statusCode, "Invalid API key (400 auth error)");
+                    }
+                    // 400 due to model/param issue = key accepted by gateway = valid
+                    _logger?.LogInformation("API key is valid (400 non-auth error confirms gateway acceptance)");
+                    return ValidationResult.Success(statusCode, "Valid key (400 non-auth error)");
+
                 case HttpStatusCode.PaymentRequired: // 402
                 case HttpStatusCode.TooManyRequests: // 429
                     _logger?.LogInformation("API key is valid but has quota/billing/status issues ({StatusCode})", statusCode);
-                    return ValidationResult.Success(statusCode);
+                    return ValidationResult.Success(statusCode, "Valid key but quota/billing issue");
 
                 case HttpStatusCode.ServiceUnavailable: // 503
                 case HttpStatusCode.GatewayTimeout: // 504

@@ -51,28 +51,28 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         return ValidationResult.IsUnauthorized(response.StatusCode);
 
                     case System.Net.HttpStatusCode.Forbidden: // 403
-                        _logger?.LogInformation("API key has permission restrictions but is valid (403)");
-                        return ValidationResult.Success(response.StatusCode, "Valid key (restricted)");
+                        // Stability AI 403 = key is invalid or lacks permissions — NOT a valid key
+                        return ValidationResult.IsUnauthorized(response.StatusCode,
+                            "Key forbidden (invalid or insufficient permissions)");
 
                     case System.Net.HttpStatusCode.NotFound: // 404
-                        return ValidationResult.HasHttpError(response.StatusCode, 
+                        return ValidationResult.HasHttpError(response.StatusCode,
                             $"Endpoint not found (not a key issue): {TruncateResponse(responseBody)}");
 
                     case (System.Net.HttpStatusCode)429: // 429
+                        // Rate limited = key exists and is valid
                         _logger?.LogInformation("API key is valid but rate limited (429)");
                         return ValidationResult.Success(response.StatusCode, "Rate limited (valid key)");
 
                     default:
-                        // Check for quota/billing issues in any other status code
-                        if (bodyLower.Contains("quota") || bodyLower.Contains("billing") || 
-                            bodyLower.Contains("limit") || bodyLower.Contains("credits") || 
-                            bodyLower.Contains("insufficient"))
+                        if (bodyLower.Contains("quota") || bodyLower.Contains("billing") ||
+                            bodyLower.Contains("credits") || bodyLower.Contains("insufficient"))
                         {
                             _logger?.LogInformation("API key is valid but has quota/billing issues ({StatusCode})", response.StatusCode);
                             return ValidationResult.Success(response.StatusCode, $"Valid key but access issue: {TruncateResponse(responseBody)}");
                         }
 
-                        return ValidationResult.HasHttpError(response.StatusCode, 
+                        return ValidationResult.HasHttpError(response.StatusCode,
                             $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
                 }
             }

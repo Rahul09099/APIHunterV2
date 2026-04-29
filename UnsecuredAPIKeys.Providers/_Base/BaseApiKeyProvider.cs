@@ -45,7 +45,11 @@ namespace UnsecuredAPIKeys.Providers._Base
             {
                 if (retry > 0)
                 {
-                    var delay = TimeSpan.FromSeconds(Math.Pow(2, retry - 1));
+                    // Exponential backoff with jitter to avoid thundering herd
+                    var baseDelay = 500 * Math.Pow(2, retry - 1); // 500ms base, doubles each retry
+                    var jitter = Random.Shared.Next(0, 300);       // up to 300ms random jitter
+                    var delay = TimeSpan.FromMilliseconds(baseDelay + jitter);
+
                     _logger?.LogDebug("Retrying {Provider} validation after {Delay}ms (attempt {Retry}/{MaxRetries})",
                         ProviderName, delay.TotalMilliseconds, retry + 1, GetMaxRetries());
                     await Task.Delay(delay);
@@ -55,6 +59,9 @@ namespace UnsecuredAPIKeys.Providers._Base
                 {
                     using var httpClient = CreateHttpClient(httpClientFactory);
                     var result = await ValidateKeyWithHttpClientAsync(apiKey, httpClient);
+
+                    // Record latency metric (best-effort, no dependency on Services project)
+                    // MetricsService.Instance.RecordProviderLatency is called from VerifierService instead
 
                     if (result.Status != ValidationAttemptStatus.NetworkError)
                     {
@@ -69,6 +76,13 @@ namespace UnsecuredAPIKeys.Providers._Base
                     lastException = ex;
                     _logger?.LogWarning(ex, "HTTP request failed on attempt {Retry}/{MaxRetries} for {Provider}",
                         retry + 1, GetMaxRetries(), ProviderName);
+
+                    // Check for Retry-After header in the exception (if available via inner exception)
+                    if (TryGetRetryAfterDelay(ex, out var retryAfter))
+                    {
+                        _logger?.LogInformation("Provider {Provider} sent Retry-After: {Delay}s", ProviderName, retryAfter.TotalSeconds);
+                        await Task.Delay(retryAfter);
+                    }
 
                     if (retry == GetMaxRetries() - 1)
                     {
@@ -94,6 +108,27 @@ namespace UnsecuredAPIKeys.Providers._Base
             }
 
             return ValidationResult.HasNetworkError($"Failed after {GetMaxRetries()} retries. Last error: {lastException?.Message ?? "Unknown error"}");
+        }
+
+        /// <summary>
+        /// Attempts to extract Retry-After delay from an HttpRequestException.
+        /// Returns true if found, false otherwise.
+        /// </summary>
+        private static bool TryGetRetryAfterDelay(HttpRequestException ex, out TimeSpan delay)
+        {
+            delay = TimeSpan.Zero;
+
+            // Check if the exception message contains "Retry-After" hints
+            // (HttpClient doesn't expose response headers in exceptions, so this is best-effort)
+            var message = ex.Message.ToLowerInvariant();
+            if (message.Contains("retry") && message.Contains("after"))
+            {
+                // Default to 5 seconds if we detect a retry-after hint but can't parse it
+                delay = TimeSpan.FromSeconds(5);
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>

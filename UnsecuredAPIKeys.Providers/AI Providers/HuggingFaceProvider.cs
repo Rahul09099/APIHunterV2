@@ -33,12 +33,24 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (response.IsSuccessStatusCode)
                 {
-                    return new ValidationResult 
-                    { 
-                        Status = ValidationAttemptStatus.Valid, 
-                        HttpStatusCode = response.StatusCode, 
-                        Detail = responseBody 
+                    var result = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.Valid,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = "Valid HuggingFace token"
                     };
+
+                    // Parse username/org from whoami response for display
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("name", out var name))
+                            result.AccountTier = name.GetString(); // reuse AccountTier for username display
+                    }
+                    catch { /* Best effort */ }
+
+                    return result;
                 }
                 
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
@@ -50,7 +62,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             }
             catch (Exception ex)
             {
-                return ValidationResult.HasHttpError(System.Net.HttpStatusCode.InternalServerError, ex.Message);
+                // Network-level failure — use HasNetworkError, not HasHttpError
+                return ValidationResult.HasNetworkError(ex.Message);
             }
         }
 

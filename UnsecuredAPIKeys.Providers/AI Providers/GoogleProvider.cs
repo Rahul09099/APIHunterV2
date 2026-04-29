@@ -168,9 +168,12 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
             if ((int)generateResponse.StatusCode == 429)
             {
-                return ValidationResult.IsUnauthorized(
-                    generateResponse.StatusCode,
-                    "No credit or quota exhausted");
+                // 429 = quota exhausted — the key IS valid but has no remaining quota
+                // Returning IsUnauthorized here was wrong — it would mark the key as Invalid
+                var quotaResult = ValidationResult.Success(generateResponse.StatusCode,
+                    "quota exhausted");
+                quotaResult.AvailableModels = modelsToUse;
+                return quotaResult;
             }
 
             // Check for leaked key message globally

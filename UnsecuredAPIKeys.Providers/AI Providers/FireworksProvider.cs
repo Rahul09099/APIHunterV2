@@ -82,17 +82,31 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 {
                     return ValidationResult.Success(chatResponse.StatusCode, discoveredModels);
                 }
+                else if (chatResponse.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                         chatResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    // Key was accepted by /models but rejected at inference — treat as invalid
+                    return ValidationResult.IsUnauthorized(chatResponse.StatusCode,
+                        "Key rejected at inference endpoint");
+                }
+                else if ((int)chatResponse.StatusCode == 429)
+                {
+                    // Rate limited = key is valid
+                    var rateLimited = ValidationResult.Success(chatResponse.StatusCode, "Rate limited (key is valid)");
+                    rateLimited.AvailableModels = discoveredModels;
+                    return rateLimited;
+                }
                 else
                 {
                     // Check for quota/billing issues
                     if (ContainsAny(chatBody, new HashSet<string> { "quota", "billing", "insufficient", "balance", "credit" }))
                     {
-                        var result = ValidationResult.Success(chatResponse.StatusCode, $"Valid key but access issue: {TruncateResponse(chatBody)}");
+                        var result = ValidationResult.Success(chatResponse.StatusCode, $"Valid key but quota/billing issue: {TruncateResponse(chatBody)}");
                         result.AvailableModels = discoveredModels;
                         return result;
                     }
 
-                    var errorResult = ValidationResult.HasHttpError(chatResponse.StatusCode, 
+                    var errorResult = ValidationResult.HasHttpError(chatResponse.StatusCode,
                         $"API request failed with status {chatResponse.StatusCode}. Response: {TruncateResponse(chatBody)}");
                     errorResult.AvailableModels = discoveredModels;
                     return errorResult;

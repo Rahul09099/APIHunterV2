@@ -66,6 +66,14 @@ namespace UnsecuredAPIKeys.Data.Common
         RunwayML = 220,
         A2E = 230,
         PiAPI = 240,
+        Groq = 250,
+        MistralAI = 260,
+        OpenRouter = 270,
+        Perplexity = 280,
+        Cerebras = 290,
+        VoyageAI = 300,
+        AWSBedrock = 310,
+        AzureOpenAI = 320,
 
         // Communication Category (4)
         SendGrid = 410,

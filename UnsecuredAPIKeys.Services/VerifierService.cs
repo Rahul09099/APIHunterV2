@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using System.Diagnostics;
 using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Data.Models;
@@ -8,6 +9,42 @@ using UnsecuredAPIKeys.Providers;
 using UnsecuredAPIKeys.Providers._Interfaces;
 
 namespace UnsecuredAPIKeys.Services;
+
+/// <summary>
+/// Per-provider rate limiter using SemaphoreSlim.
+/// Prevents hammering any single provider with too many concurrent requests.
+///
+/// IMPACT: Reduces 429 (Too Many Requests) errors from providers.
+/// Each provider gets its own semaphore sized from ProviderRateLimits constants.
+/// </summary>
+internal static class ProviderRateLimiter
+{
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _semaphores = new();
+
+    public static SemaphoreSlim GetSemaphore(string providerName)
+    {
+        return _semaphores.GetOrAdd(providerName, name =>
+        {
+            int limit = name switch
+            {
+                "OpenAI"       => ProviderRateLimits.OpenAI,
+                "Anthropic"    => ProviderRateLimits.Anthropic,
+                "Google"       => ProviderRateLimits.Google,
+                "DeepSeek"     => ProviderRateLimits.DeepSeek,
+                "Groq"         => ProviderRateLimits.Groq,
+                "Mistral AI"   => ProviderRateLimits.Mistral,
+                "OpenRouter"   => ProviderRateLimits.OpenRouter,
+                "Perplexity"   => ProviderRateLimits.Perplexity,
+                "Cerebras"     => ProviderRateLimits.Cerebras,
+                "Voyage AI"    => ProviderRateLimits.VoyageAI,
+                "AWS Bedrock"  => ProviderRateLimits.AWSBedrock,
+                "Azure OpenAI" => ProviderRateLimits.AzureOpenAI,
+                _              => ProviderRateLimits.Default
+            };
+            return new SemaphoreSlim(limit, limit);
+        });
+    }
+}
 
 /// <summary>
 /// Verifier service that maintains up to 50 valid API keys.
@@ -69,6 +106,9 @@ public class VerifierService(
 
                 if (_cancellationTokenSource.Token.IsCancellationRequested)
                     break;
+
+                // Flush metrics to DB periodically (best-effort, non-blocking)
+                _ = Task.Run(() => MetricsService.Instance.FlushIfDueAsync(dbContext));
 
                 // Wait before next cycle
                 if (!_isIdle)
@@ -164,16 +204,16 @@ public class VerifierService(
             .StartAsync(async ctx =>
             {
                 var task = ctx.AddTask("[green]Re-verifying keys[/]", maxValue: keysToReVerify.Count);
-                var semaphore = new SemaphoreSlim(10); // Limit to 10 parallel verifications
+                // Reduced from 10 to 3 — Render free tier (0.1 CPU) starves with 10 concurrent HTTP calls
+                var semaphore = new SemaphoreSlim(3);
 
                 var parallelTasks = keysToReVerify.Select(async key =>
                 {
                     await semaphore.WaitAsync(_cancellationTokenSource.Token);
                     try
                     {
-                        // Use a fresh context per key to avoid thread-safety issues with SQLite
                         using var localDb = new DBContext();
-                        var localKey = await localDb.APIKeys.FindAsync(new object[] { key.Id }, _cancellationTokenSource.Token);
+                        var localKey = await localDb.APIKeys.FindAsync(key.Id, _cancellationTokenSource.Token);
                         if (localKey != null)
                         {
                             await VerifyKeyAsync(localKey);
@@ -205,17 +245,22 @@ public class VerifierService(
         {
             query = query.Where(k => _selectedApiTypes.Contains(k.ApiType));
         }
-        // Debug: Log breakdown of keys for selected types
+        // Debug: Log breakdown of keys for selected types (single query instead of N×5 queries)
         if (_selectedApiTypes != null && _selectedApiTypes.Count > 0 && !_isIdle)
         {
+            var breakdown = await dbContext.APIKeys
+                .Where(k => _selectedApiTypes.Contains(k.ApiType))
+                .GroupBy(k => new { k.ApiType, k.Status })
+                .Select(g => new { g.Key.ApiType, g.Key.Status, Count = g.Count() })
+                .ToListAsync(_cancellationTokenSource!.Token);
+
             foreach (var apiType in _selectedApiTypes)
             {
-                var unverified = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.Unverified).CountAsync(_cancellationTokenSource!.Token);
-                var valid = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.Valid).CountAsync(_cancellationTokenSource!.Token);
-                var invalid = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.Invalid).CountAsync(_cancellationTokenSource!.Token);
-                var noCredits = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.ValidNoCredits).CountAsync(_cancellationTokenSource!.Token);
-                var errorCount = await dbContext.APIKeys.AsQueryable().Where(k => k.ApiType == apiType && k.Status == ApiStatusEnum.Error).CountAsync(_cancellationTokenSource!.Token);
-                
+                var unverified = breakdown.FirstOrDefault(x => x.ApiType == apiType && x.Status == ApiStatusEnum.Unverified)?.Count ?? 0;
+                var valid      = breakdown.FirstOrDefault(x => x.ApiType == apiType && x.Status == ApiStatusEnum.Valid)?.Count ?? 0;
+                var invalid    = breakdown.FirstOrDefault(x => x.ApiType == apiType && x.Status == ApiStatusEnum.Invalid)?.Count ?? 0;
+                var noCredits  = breakdown.FirstOrDefault(x => x.ApiType == apiType && x.Status == ApiStatusEnum.ValidNoCredits)?.Count ?? 0;
+                var errorCount = breakdown.FirstOrDefault(x => x.ApiType == apiType && x.Status == ApiStatusEnum.Error)?.Count ?? 0;
                 Console.WriteLine($"[dim]Type {apiType}: {unverified} unverified, {valid} valid, {invalid} invalid, {noCredits} no-credits, {errorCount} error[/]");
             }
         }
@@ -241,7 +286,8 @@ public class VerifierService(
             .StartAsync(async ctx =>
             {
                 var task = ctx.AddTask("[green]Verifying new keys[/]", maxValue: keysToVerify.Count);
-                var semaphore = new SemaphoreSlim(10); // Limit to 10 parallel verifications
+                // Reduced from 10 to 3 — prevents thread pool starvation on Render free tier
+                var semaphore = new SemaphoreSlim(3);
                 var validFound = 0;
 
                 var parallelTasks = keysToVerify.Select(async key =>
@@ -253,7 +299,7 @@ public class VerifierService(
                     {
                         // Use a fresh context per key for concurrency safety
                         using var localDb = new DBContext();
-                        var localKey = await localDb.APIKeys.FindAsync(new object[] { key.Id }, _cancellationTokenSource.Token);
+                        var localKey = await localDb.APIKeys.FindAsync(key.Id, _cancellationTokenSource.Token);
                         if (localKey != null)
                         {
                             var wasValid = await VerifyKeyAsync(localKey);
@@ -275,6 +321,7 @@ public class VerifierService(
     private async Task<bool> VerifyKeyAsync(APIKey key)
     {
         Interlocked.Increment(ref _verifiedCount);
+        MetricsService.Instance.RecordVerified();
 
         // Clear previous validation response and reset error count for a fresh start
         key.ValidationResponse = null;
@@ -294,10 +341,20 @@ public class VerifierService(
         // Try each matching provider until one succeeds
         foreach (var provider in providersToTry)
         {
+            // Acquire per-provider rate limit slot before making the API call
+            var semaphore = ProviderRateLimiter.GetSemaphore(provider.ProviderName);
+            await semaphore.WaitAsync(_cancellationTokenSource!.Token);
+
+            var sw = Stopwatch.StartNew();
             try
             {
                 var result = await provider.ValidateKeyAsync(key.ApiKey, httpClientFactory);
-                key.ValidationResponse = result.Detail; // Store the raw response/error
+                sw.Stop();
+
+                // Record latency for this provider
+                MetricsService.Instance.RecordProviderLatency(provider.ProviderName, sw.ElapsedMilliseconds);
+
+                key.ValidationResponse = result.Detail;
                 key.LastCheckedUTC = DateTime.UtcNow;
 
                 switch (result.Status)
@@ -343,6 +400,7 @@ public class VerifierService(
                         key.ErrorCount = 0;
                         key.ValidationResponse = result.Detail ?? "Key is valid";
                         Interlocked.Increment(ref _validCount);
+                        MetricsService.Instance.RecordValid();
                         
                         var balanceInfo = !string.IsNullOrEmpty(key.Balance) ? $" [dim](Balance: {key.Balance})[/]" : "";
                         var tierInfo = !string.IsNullOrEmpty(key.AccountTier) ? $" [dim](Tier: {key.AccountTier})[/]" : "";
@@ -396,6 +454,7 @@ public class VerifierService(
 
                     case Providers.Common.ValidationAttemptStatus.NetworkError:
                         // Network error - don't try other providers, just increment error count
+                        MetricsService.Instance.RecordNetworkError();
                         key.ErrorCount++;
                         if (key.ErrorCount >= 3)
                         {
@@ -416,17 +475,22 @@ public class VerifierService(
                 // Continue to next provider on exception
                 continue;
             }
+            finally
+            {
+                // Always release the rate limit slot, whether we returned, continued, or threw
+                semaphore.Release();
+            }
         }
 
         // All providers failed - mark as invalid
         key.Status = ApiStatusEnum.Invalid;
-        // If we have a stored response from the last attempt (often "Unauthorized"), keep it or set a generic one
         if (string.IsNullOrEmpty(key.ValidationResponse))
         {
              key.ValidationResponse = "Invalid or unauthorized";
         }
         
         Interlocked.Increment(ref _invalidCount);
+        MetricsService.Instance.RecordInvalid();
         
         // Optimization: Purge references for invalid keys to save space
         await PurgeKeyReferencesAsync(key);
@@ -438,19 +502,22 @@ public class VerifierService(
     {
         try
         {
-            // Use a fresh context for deletion to avoid tracking issues
+            // Use a direct DELETE query instead of loading into memory first.
+            // This is much more efficient when a key has many references.
             using var localDb = new DBContext();
-            var references = await localDb.RepoReferences.Where(r => r.APIKeyId == key.Id).ToListAsync();
-            if (references.Any())
+
+            int deleted = await localDb.RepoReferences
+                .Where(r => r.APIKeyId == key.Id)
+                .ExecuteDeleteAsync();
+
+            if (deleted > 0)
             {
-                localDb.RepoReferences.RemoveRange(references);
-                await localDb.SaveChangesAsync();
-                Console.WriteLine($"[DB] Space Optimized: Purged {references.Count} sources for invalid key {key.Id}");
+                Console.WriteLine($"[dim][DB] Purged {deleted} repo reference(s) for invalid key {key.Id}[/]");
             }
         }
         catch (Exception ex)
         {
-            // Fail silently, it's just an optimization
+            // Fail silently — purging is an optimization, not critical
             logger?.LogWarning(ex, "Failed to purge references for key {KeyId}", key.Id);
         }
     }

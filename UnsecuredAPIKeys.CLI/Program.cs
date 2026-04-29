@@ -320,6 +320,56 @@ async Task ShowStatusAsync(DBContext db, DatabaseService dbService)
 
     AnsiConsole.WriteLine();
 
+    // ── Session Metrics ──────────────────────────────────────────────────────
+    var metrics = UnsecuredAPIKeys.Services.MetricsService.Instance.GetSnapshot();
+    if (metrics.TotalFilesScanned > 0 || metrics.TotalKeysVerified > 0)
+    {
+        AnsiConsole.Write(new Rule("[dim]Session Metrics[/]").LeftJustified().RuleStyle("dim"));
+
+        var metricsTable = new Table()
+            .Border(TableBorder.None)
+            .HideHeaders()
+            .AddColumn(new TableColumn("").LeftAligned())
+            .AddColumn(new TableColumn("").RightAligned());
+
+        metricsTable.AddRow("[dim]Uptime[/]",            $"[dim]{metrics.SessionUptime:hh\\:mm\\:ss}[/]");
+        metricsTable.AddRow("[dim]Files Scanned[/]",     $"[dim]{metrics.TotalFilesScanned:N0}[/]");
+        metricsTable.AddRow("[dim]Keys Found[/]",        $"[green]{metrics.TotalKeysFound:N0}[/]");
+        metricsTable.AddRow("[dim]Duplicates Skipped[/]",$"[dim]{metrics.TotalDuplicatesSkipped:N0}[/]");
+        metricsTable.AddRow("[dim]GitHub Requests[/]",   $"[dim]{metrics.TotalGitHubRequests:N0}[/]");
+        metricsTable.AddRow("[dim]Rate Limit Hits[/]",   metrics.TotalGitHubRateLimitHits > 0
+            ? $"[yellow]{metrics.TotalGitHubRateLimitHits}[/]" : "[dim]0[/]");
+        metricsTable.AddRow("[dim]Keys Verified[/]",     $"[dim]{metrics.TotalKeysVerified:N0}[/]");
+        metricsTable.AddRow("[dim]Valid Found[/]",       $"[green]{metrics.TotalValidFound:N0}[/]");
+        metricsTable.AddRow("[dim]Invalid Found[/]",     $"[red]{metrics.TotalInvalidFound:N0}[/]");
+        metricsTable.AddRow("[dim]Network Errors[/]",    metrics.TotalNetworkErrors > 0
+            ? $"[red]{metrics.TotalNetworkErrors}[/]" : "[dim]0[/]");
+
+        AnsiConsole.Write(metricsTable);
+
+        if (metrics.ProviderLatencies.Count > 0)
+        {
+            AnsiConsole.WriteLine();
+            var latencyTable = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey);
+            latencyTable.Title("[dim]Provider Avg. Latency (this session)[/]");
+            latencyTable.AddColumn("Provider");
+            latencyTable.AddColumn("Avg (ms)");
+            latencyTable.AddColumn("Calls");
+
+            foreach (var p in metrics.ProviderLatencies.Take(8))
+            {
+                var color = p.AverageMs < 1000 ? "green" : p.AverageMs < 3000 ? "yellow" : "red";
+                latencyTable.AddRow(
+                    p.ProviderName,
+                    $"[{color}]{p.AverageMs}[/]",
+                    p.TotalCalls.ToString());
+            }
+            AnsiConsole.Write(latencyTable);
+        }
+
+        AnsiConsole.WriteLine();
+    }
+
     // Display categorized breakdown
     foreach (var category in catStats.Categories.OrderBy(c => c.Key))
     {

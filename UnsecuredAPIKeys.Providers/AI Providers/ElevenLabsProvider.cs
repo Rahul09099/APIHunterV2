@@ -29,6 +29,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
+                // GET /v1/user/subscription — confirmed official endpoint (elevenlabs.io/docs/api-reference/user/get-subscription)
+                // Header: xi-api-key — confirmed correct authentication method
                 using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.elevenlabs.io/v1/user/subscription");
                 request.Headers.Add("xi-api-key", apiKey);
 
@@ -40,22 +42,43 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, $"Subscription check successful: {TruncateResponse(responseBody)}");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid ElevenLabs key");
+
+                    // Parse subscription info for balance/tier display
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        var root = doc.RootElement;
+
+                        // tier: "free", "starter", "creator", "pro", "scale", "business"
+                        if (root.TryGetProperty("tier", out var tier))
+                            result.AccountTier = tier.GetString();
+
+                        // character_count / character_limit gives remaining quota
+                        if (root.TryGetProperty("character_count", out var used) &&
+                            root.TryGetProperty("character_limit", out var limit))
+                        {
+                            var remaining = limit.GetInt64() - used.GetInt64();
+                            result.Balance = $"{remaining:N0} chars remaining";
+                        }
+                    }
+                    catch { /* Best effort parsing */ }
+
+                    return result;
                 }
-                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
+                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
                          response.StatusCode == System.Net.HttpStatusCode.Forbidden)
                 {
                     return ValidationResult.IsUnauthorized(response.StatusCode);
                 }
+                else if ((int)response.StatusCode == 429)
+                {
+                    // 429 = rate limited but key is valid
+                    return ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
+                }
                 else
                 {
-                    // Check for quota/billing issues
-                    if (ContainsAny(responseBody, new HashSet<string> { "quota", "billing", "limit", "insufficient" }))
-                    {
-                        return ValidationResult.Success(response.StatusCode, $"Valid key but subscription issue: {TruncateResponse(responseBody)}");
-                    }
-
-                    return ValidationResult.HasHttpError(response.StatusCode, 
+                    return ValidationResult.HasHttpError(response.StatusCode,
                         $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
                 }
             }

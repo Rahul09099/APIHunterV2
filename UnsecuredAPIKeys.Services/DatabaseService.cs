@@ -43,6 +43,10 @@ public class DatabaseService(DBContext dbContext)
         // Manual column check for all tables (Full Robustness Layer)
         await EnsureAllTableColumnsExistAsync(dbContext);
         
+        // Clean up repo references for any keys already marked Invalid
+        // (handles keys that were invalidated before auto-purge was implemented)
+        await PurgeJunkSourcesAsync(dbContext);
+
         // Seed default queries if database is empty or queries are missing
         await SeedDefaultQueriesAsync(dbContext);
 
@@ -294,11 +298,56 @@ public class DatabaseService(DBContext dbContext)
             var now = DateTime.UtcNow;
             var defaults = new List<string>
             {
-                "sk- OpenAI", "anthropic Claude", "aizasy Gemini", "deepseek", 
-                "kling AI", "pollo AI", "runway ML", "cohere", "elevenlabs", 
-                "stability AI", "together AI", "grok XAI", "replicate r8_", 
-                "fireworks fw_", "hf_ HuggingFace", "sk_ A2E", "A2E_API_KEY", 
-                "A2E_SECRET", "PIAPI_KEY", "piapi.ai"
+                // OpenAI
+                "sk-proj-", "sk-svcacct-", "OPENAI_API_KEY",
+                // Anthropic
+                "sk-ant-api", "ANTHROPIC_API_KEY",
+                // Google
+                "AIzaSy", "GOOGLE_API_KEY", "GEMINI_API_KEY",
+                // DeepSeek
+                "DEEPSEEK_API_KEY", "deepseek-chat",
+                // Kling AI
+                "KLING_ACCESS_KEY", "KLING_API_KEY",
+                // Pollo AI
+                "POLLO_API_KEY", "pollo_",
+                // Runway ML
+                "RUNWAYML_API_SECRET", "RUNWAY_API_KEY",
+                // Cohere
+                "COHERE_API_KEY", "CO_API_KEY",
+                // ElevenLabs
+                "ELEVENLABS_API_KEY", "ELEVEN_API_KEY", "xi-api-key",
+                // Stability AI
+                "STABILITY_API_KEY",
+                // Together AI
+                "TOGETHER_API_KEY",
+                // xAI / Grok
+                "XAI_API_KEY", "xai-",
+                // Replicate
+                "REPLICATE_API_TOKEN", "r8_",
+                // Fireworks AI
+                "FIREWORKS_API_KEY", "fw_",
+                // HuggingFace
+                "HUGGINGFACE_API_KEY", "HF_TOKEN", "hf_",
+                // A2E AI
+                "A2E_API_KEY", "A2E_SECRET",
+                // PiAPI
+                "PIAPI_KEY",
+                // Groq
+                "GROQ_API_KEY", "gsk_",
+                // Mistral AI
+                "MISTRAL_API_KEY",
+                // OpenRouter
+                "OPENROUTER_API_KEY", "sk-or-v1-",
+                // Perplexity
+                "PERPLEXITY_API_KEY", "PPLX_API_KEY", "pplx-",
+                // Cerebras
+                "CEREBRAS_API_KEY", "csk-",
+                // Voyage AI
+                "VOYAGE_API_KEY", "VOYAGEAI_API_KEY",
+                // AWS Bedrock
+                "AWS_BEARER_TOKEN_BEDROCK", "BEDROCK_API_KEY",
+                // Azure OpenAI
+                "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_KEY",
             };
 
             var existingQueries = await context.SearchQueries.Select(q => q.Query).ToListAsync();
@@ -319,6 +368,10 @@ public class DatabaseService(DBContext dbContext)
                 await context.SaveChangesAsync();
                 Console.WriteLine("[DB] Seeded missing default search targets.");
             }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DB] Warning: Could not seed default queries: {ex.Message}");
         }
     }
     
@@ -584,21 +637,21 @@ public class DatabaseService(DBContext dbContext)
     {
         try
         {
-            Console.WriteLine("[DB] Purging references for invalid keys...");
-            
-            // Subquery: Get IDs of all RepoReferences where parent APIKey is Invalid
-            var referencesToPurge = await context.RepoReferences
-                .Where(r => context.APIKeys.Any(k => k.Id == r.APIKeyId && k.Status == ApiStatusEnum.Invalid))
-                .ToListAsync();
+            Console.WriteLine("[DB] Purging repo references for invalid keys...");
 
-            if (referencesToPurge.Count > 0)
-            {
-                context.RepoReferences.RemoveRange(referencesToPurge);
-                await context.SaveChangesAsync();
-                Console.WriteLine($"[DB] Successfully purged {referencesToPurge.Count} junk references.");
-            }
+            // Direct bulk DELETE — no need to load rows into memory first.
+            // Deletes all RepoReferences whose parent APIKey has Status = Invalid (0).
+            int deleted = await context.RepoReferences
+                .Where(r => context.APIKeys
+                    .Any(k => k.Id == r.APIKeyId && k.Status == ApiStatusEnum.Invalid))
+                .ExecuteDeleteAsync();
 
-            return referencesToPurge.Count;
+            if (deleted > 0)
+                Console.WriteLine($"[DB] Purged {deleted} junk repo reference(s) for invalid keys.");
+            else
+                Console.WriteLine("[DB] No junk references found.");
+
+            return deleted;
         }
         catch (Exception ex)
         {
@@ -616,7 +669,10 @@ public class DatabaseService(DBContext dbContext)
             ApiTypeEnum.Replicate or ApiTypeEnum.TogetherAI or ApiTypeEnum.DeepSeek or
             ApiTypeEnum.ElevenLabs or ApiTypeEnum.XAI or ApiTypeEnum.FireworksAI or
             ApiTypeEnum.KlingAI or ApiTypeEnum.PolloAI or ApiTypeEnum.RunwayML or
-            ApiTypeEnum.A2E or ApiTypeEnum.PiAPI
+            ApiTypeEnum.A2E or ApiTypeEnum.PiAPI or ApiTypeEnum.Groq or
+            ApiTypeEnum.MistralAI or ApiTypeEnum.OpenRouter or ApiTypeEnum.Perplexity or
+            ApiTypeEnum.Cerebras or ApiTypeEnum.VoyageAI or ApiTypeEnum.AWSBedrock or
+            ApiTypeEnum.AzureOpenAI
                 => ApiCategoryEnum.AIAndLLM,
 
             ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack

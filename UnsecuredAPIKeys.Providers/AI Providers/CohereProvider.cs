@@ -27,14 +27,18 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // Usage of chat endpoint to verify credits/quota
-                using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.cohere.ai/v1/chat");
+                // Use v2 chat endpoint (v1 is deprecated as of 2024)
+                using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.cohere.com/v2/chat");
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
                 request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
                 var requestBody = new
                 {
-                    message = "hi",
+                    model = "command-r",
+                    messages = new[]
+                    {
+                        new { role = "user", content = "hi" }
+                    },
                     max_tokens = 1
                 };
 

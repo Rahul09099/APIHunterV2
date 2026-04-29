@@ -25,6 +25,9 @@ public class ScraperService
     private CancellationTokenSource? _cancellationTokenSource;
     private readonly SemaphoreSlim _parallelSemaphore = new(8); // Limit concurrency for Render Free Tier (512MB RAM)
 
+    // Pre-compiled regex patterns for performance (compiled once at startup, not per-file)
+    private readonly IReadOnlyList<(IApiKeyProvider Provider, System.Text.RegularExpressions.Regex Regex)> _compiledPatterns;
+
     private int _newKeysFound;
     private int _duplicateKeysFound;
     private readonly ISearchProvider _searchProvider;
@@ -58,6 +61,27 @@ public class ScraperService
         _logger = logger;
         _providers = ApiProviderRegistry.ScraperProviders;
         _searchProvider = new GitHubSearchProvider();
+
+        // Pre-compile all regex patterns once at startup for performance
+        var compiled = new List<(IApiKeyProvider, System.Text.RegularExpressions.Regex)>();
+        foreach (var provider in _providers)
+        {
+            foreach (var pattern in provider.RegexPatterns)
+            {
+                try
+                {
+                    compiled.Add((provider, new System.Text.RegularExpressions.Regex(
+                        pattern,
+                        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+                        TimeSpan.FromSeconds(2))));
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning("Invalid regex pattern '{Pattern}' for provider {Provider}: {Error}", pattern, provider.ProviderName, ex.Message);
+                }
+            }
+        }
+        _compiledPatterns = compiled;
     }
 
     public async Task<List<string>> GetAvailableGroupsAsync(CancellationToken cancellationToken = default)
@@ -460,23 +484,32 @@ public class ScraperService
     private string InferProviderFromQuery(string query)
     {
         var q = query.ToLower();
-        if (q.Contains("openai") || q.Contains("sk-") || q.Contains("gpt")) return "OpenAI";
-        if (q.Contains("anthropic") || q.Contains("claude")) return "Anthropic";
-        if (q.Contains("google") || q.Contains("gemini") || q.Contains("aizasy")) return "Google";
+        // Check specific prefixes BEFORE generic sk- to avoid misclassification
+        if (q.Contains("sk-ant") || q.Contains("anthropic") || q.Contains("claude")) return "Anthropic";
+        if (q.Contains("sk-or-v1") || q.Contains("openrouter")) return "OpenRouter";
+        if (q.Contains("openai") || q.Contains("sk-proj") || q.Contains("sk-svcacct") || q.Contains("gpt")) return "OpenAI";
+        if (q.Contains("google") || q.Contains("gemini") || q.Contains("aizasy") || q.Contains("aiza")) return "Google";
+        if (q.Contains("groq") || q.Contains("gsk_")) return "Groq";
+        if (q.Contains("perplexity") || q.Contains("pplx")) return "Perplexity";
+        if (q.Contains("cerebras") || q.Contains("csk-")) return "Cerebras";
+        if (q.Contains("voyage")) return "Voyage AI";
+        if (q.Contains("bedrock") || q.Contains("aws_bearer")) return "AWS Bedrock";
+        if (q.Contains("azure")) return "Azure OpenAI";
+        if (q.Contains("mistral")) return "Mistral AI";
         if (q.Contains("kling")) return "Kling AI";
         if (q.Contains("pollo")) return "Pollo AI";
-        if (q.Contains("runway") || q.Contains("key_")) return "Runway";
+        if (q.Contains("runway") || q.Contains("runwayml")) return "Runway";
         if (q.Contains("deepseek")) return "DeepSeek";
-        if (q.Contains("cohere")) return "Cohere";
-        if (q.Contains("eleven") || q.Contains("xi-")) return "ElevenLabs";
+        if (q.Contains("cohere") || q.Contains("co_api")) return "Cohere";
+        if (q.Contains("eleven") || q.Contains("xi-api")) return "ElevenLabs";
         if (q.Contains("stability")) return "Stability AI";
         if (q.Contains("together")) return "Together AI";
         if (q.Contains("xai") || q.Contains("grok")) return "xAI";
-        if (q.Contains("replicate") || q.Contains("r8_")) return "Replicate";
-        if (q.Contains("fireworks") || q.Contains("fw_")) return "Fireworks AI";
-        if (q.Contains("hugging") || q.Contains("hf_")) return "Hugging Face";
+        if (q.Contains("replicate") || q.StartsWith("r8_")) return "Replicate";
+        if (q.Contains("fireworks") || q.StartsWith("fw_")) return "Fireworks AI";
+        if (q.Contains("hugging") || q.Contains("hf_token") || q.StartsWith("hf_")) return "Hugging Face";
         if (q.Contains("a2e")) return "A2E AI";
-        if (q.Contains("piapi") || q.Contains("pi_api")) return "PiAPI";
+        if (q.Contains("piapi")) return "PiAPI";
         return "Other";
     }
 
@@ -752,6 +785,7 @@ public class ScraperService
             catch (Octokit.RateLimitExceededException ex)
             {
                 Console.WriteLine($"[yellow]Token {cursor.Index + 1} hit GitHub rate limit. Reset at {ex.Reset.LocalDateTime.ToIst():HH:mm:ss} IST.[/]");
+                MetricsService.Instance.RecordGitHubRateLimit();
                 depletedTokens[cursor.Index] = ex.Reset.UtcDateTime.AddSeconds(5); // Add buffer
                 cursor.Index = (cursor.Index + 1) % tokens.Count;
                 retryCount++;
@@ -890,20 +924,23 @@ public class ScraperService
         {
             // Get file content
             var content = await FetchFileContentAsync(repoRef, token);
+            MetricsService.Instance.RecordGitHubRequest();
+
             if (string.IsNullOrEmpty(content))
                 return discoveredKeys;
 
-            // Search for API keys using all provider patterns
-            foreach (var provider in _providers)
-            {
-                foreach (var pattern in provider.RegexPatterns)
-                {
-                    var regex = new System.Text.RegularExpressions.Regex(pattern);
-                    var matches = regex.Matches(content);
+            MetricsService.Instance.RecordFileScanned();
 
-                    foreach (System.Text.RegularExpressions.Match match in matches)
-                    {
-                        var apiKey = match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
+            // Search for API keys using all provider patterns (pre-compiled for performance)
+            foreach (var (provider, regex) in _compiledPatterns)
+            {
+                System.Text.RegularExpressions.MatchCollection matches;
+                try { matches = regex.Matches(content); }
+                catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { continue; }
+
+                foreach (System.Text.RegularExpressions.Match match in matches)
+                {
+                    var apiKey = match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
 
                         // Special handling for Kling AI
                         if (provider.ApiType == ApiTypeEnum.KlingAI && !apiKey.Contains(':'))
@@ -931,6 +968,7 @@ public class ScraperService
                                  FileUrl = repoRef.FileURL ?? string.Empty
                              });
                             Interlocked.Increment(ref _newKeysFound);
+                            MetricsService.Instance.RecordKeyFound();
                         }
                         else
                         {
@@ -940,6 +978,7 @@ public class ScraperService
                             if (exists)
                             {
                                 Interlocked.Increment(ref _duplicateKeysFound);
+                                MetricsService.Instance.RecordDuplicate();
                                 continue;
                             }
 
@@ -983,6 +1022,7 @@ public class ScraperService
                                 await db.SaveChangesAsync(_cancellationTokenSource!.Token);
 
                                 Interlocked.Increment(ref _newKeysFound);
+                                MetricsService.Instance.RecordKeyFound();
                                 Console.WriteLine($"[green]+ New {Markup.Escape(provider.ProviderName)} key found![/]");
                                 Console.WriteLine($"  [dim]Source: {Markup.Escape(repoRef.FileURL ?? "Unknown")}[/]");
                                 Console.WriteLine($"  [dim]Repo: {Markup.Escape(repoRef.RepoURL ?? "Unknown")}[/]");
@@ -994,7 +1034,6 @@ public class ScraperService
                             }
                         }
                     }
-                }
             }
         }
         catch (Exception ex)
@@ -1039,7 +1078,7 @@ public class ScraperService
 
         try
         {
-            var client = _httpClientFactory.CreateClient();
+            using var client = _httpClientFactory.CreateClient(); // use 'using' to ensure disposal
             client.DefaultRequestHeaders.Add("X-Node-Token", NodeToken);
 
             var report = new NodeBulkReportDto { Discoveries = new List<NodeReportDto> { discovery } };

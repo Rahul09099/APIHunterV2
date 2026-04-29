@@ -33,7 +33,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 var requestBody = new
                 {
-                    model = "meta-llama/Llama-2-7b-chat-hf", // Standard model that is likely to be available
+                    model = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", // Llama-2-7b-chat-hf is deprecated; use current serverless model
                     messages = new[]
                     {
                         new { role = "user", content = "hi" }

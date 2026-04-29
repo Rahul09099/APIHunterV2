@@ -35,7 +35,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 var requestBody = new
                 {
-                    model = "grok-beta", 
+                    model = "grok-3-mini", // grok-beta is deprecated; grok-3-mini is the current lightweight model
                     messages = new[]
                     {
                         new { role = "user", content = "hi" }
