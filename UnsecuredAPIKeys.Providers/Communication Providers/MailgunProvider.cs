@@ -31,17 +31,32 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
                 // Mailgun uses Basic auth with 'api' as username
                 var authValue = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes($"api:{apiKey}"));
                 
-                using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.mailgun.net/v3/domains");
+                // Get monthly custom limits
+                using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.mailgun.net/v5/accounts/limit/custom/monthly");
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authValue);
 
                 var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
 
-                _logger?.LogDebug("Mailgun API response: Status={StatusCode}", response.StatusCode);
+                _logger?.LogDebug("Mailgun limit API response: Status={StatusCode}, Body={Body}", 
+                    response.StatusCode, TruncateResponse(responseBody));
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, $"Key is valid. Domains retrieved successfully.");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid Mailgun key");
+                    
+                    try 
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        if (doc.RootElement.TryGetProperty("limit", out var limit) && 
+                            doc.RootElement.TryGetProperty("current", out var current))
+                        {
+                            result.Balance = $"{current} / {limit} Messages Used";
+                        }
+                    }
+                    catch { /* Best effort */ }
+
+                    return result;
                 }
                 else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
                          response.StatusCode == System.Net.HttpStatusCode.Forbidden)
@@ -50,6 +65,16 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
                 }
                 else
                 {
+                    // Fallback to domain check if v5 limit endpoint fails
+                    using var domainsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.mailgun.net/v3/domains");
+                    domainsRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authValue);
+                    var domainsResponse = await httpClient.SendAsync(domainsRequest);
+                    
+                    if (IsSuccessStatusCode(domainsResponse.StatusCode))
+                    {
+                        return ValidationResult.Success(domainsResponse.StatusCode, "Valid Mailgun key (Domain check passed)");
+                    }
+
                     return ValidationResult.HasHttpError(response.StatusCode, 
                         $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
                 }

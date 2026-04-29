@@ -30,48 +30,61 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.x.ai/v1/chat/completions");
-                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                // 1. Get Team ID
+                using var teamsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.x.ai/v1/teams");
+                teamsRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
-                var requestBody = new
+                var teamsResponse = await httpClient.SendAsync(teamsRequest);
+                string teamsBody = await teamsResponse.Content.ReadAsStringAsync();
+
+                if (teamsResponse.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
+                    teamsResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
                 {
-                    model = "grok-3-mini", // grok-beta is deprecated; grok-3-mini is the current lightweight model
-                    messages = new[]
-                    {
-                        new { role = "user", content = "hi" }
-                    },
-                    max_tokens = 1
-                };
-
-                var jsonContent = System.Text.Json.JsonSerializer.Serialize(requestBody);
-                request.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-
-                var response = await httpClient.SendAsync(request);
-                string responseBody = await response.Content.ReadAsStringAsync();
-
-                _logger?.LogDebug("XAI API response: Status={StatusCode}, Body={Body}",
-                    response.StatusCode, TruncateResponse(responseBody));
-
-                if (IsSuccessStatusCode(response.StatusCode))
-                {
-                    return ValidationResult.Success(response.StatusCode, $"Key is valid and generation working.");
+                    return ValidationResult.IsUnauthorized(teamsResponse.StatusCode);
                 }
-                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
-                         response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+
+                if (teamsResponse.IsSuccessStatusCode)
                 {
-                    return ValidationResult.IsUnauthorized(response.StatusCode);
-                }
-                else
-                {
-                    // Check for quota/billing issues
-                    if (ContainsAny(responseBody, new HashSet<string> { "quota", "billing", "limit", "credits", "insufficient" }))
+                    try 
                     {
-                        return ValidationResult.Success(response.StatusCode, $"Valid key but access issue: {TruncateResponse(responseBody)}");
+                        using var doc = System.Text.Json.JsonDocument.Parse(teamsBody);
+                        if (doc.RootElement.TryGetProperty("teams", out var teams) && 
+                            teams.ValueKind == System.Text.Json.JsonValueKind.Array && 
+                            teams.GetArrayLength() > 0)
+                        {
+                            var firstTeam = teams[0];
+                            if (firstTeam.TryGetProperty("id", out var teamId))
+                            {
+                                string id = teamId.GetString() ?? "";
+                                
+                                // 2. Get Balance for this team
+                                using var balanceRequest = new HttpRequestMessage(HttpMethod.Get, $"https://api.x.ai/v1/billing/teams/{id}/prepaid/balance");
+                                balanceRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                                
+                                var balanceResponse = await httpClient.SendAsync(balanceRequest);
+                                string balanceBody = await balanceResponse.Content.ReadAsStringAsync();
+                                
+                                if (balanceResponse.IsSuccessStatusCode)
+                                {
+                                    using var balanceDoc = System.Text.Json.JsonDocument.Parse(balanceBody);
+                                    if (balanceDoc.RootElement.TryGetProperty("balance", out var balance))
+                                    {
+                                        var result = ValidationResult.Success(balanceResponse.StatusCode, "Valid X.AI key");
+                                        result.Balance = $"{balance} Credits";
+                                        result.AccountTier = firstTeam.TryGetProperty("name", out var name) ? name.GetString() : id;
+                                        return result;
+                                    }
+                                }
+                            }
+                        }
                     }
+                    catch { /* Fallback */ }
 
-                    return ValidationResult.HasHttpError(response.StatusCode, 
-                        $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                    return ValidationResult.Success(teamsResponse.StatusCode, "Valid X.AI key (Account Found)");
                 }
+
+                return ValidationResult.HasHttpError(teamsResponse.StatusCode, 
+                    $"Account check failed: {teamsResponse.StatusCode}");
             }
             catch (Exception ex)
             {

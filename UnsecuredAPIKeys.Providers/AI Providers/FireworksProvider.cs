@@ -24,93 +24,61 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // 1. Discover available models
-                using var modelsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.fireworks.ai/inference/v1/models");
-                modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                // 1. Get Account ID
+                using var accountRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.fireworks.ai/v1/accounts");
+                accountRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-                var modelsResponse = await httpClient.SendAsync(modelsRequest);
-                string modelsBody = await modelsResponse.Content.ReadAsStringAsync();
+                var accountResponse = await httpClient.SendAsync(accountRequest);
+                string accountBody = await accountResponse.Content.ReadAsStringAsync();
 
-                if (modelsResponse.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
-                    modelsResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                if (accountResponse.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
+                    accountResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
                 {
-                    return ValidationResult.IsUnauthorized(modelsResponse.StatusCode);
+                    return ValidationResult.IsUnauthorized(accountResponse.StatusCode);
                 }
 
-                // If models call failed for other reasons, we'll try a fallback check
-                string modelToUse = "accounts/fireworks/models/llama-v3p1-8b-instruct"; // Reasonable default
-                List<ModelInfo>? discoveredModels = null;
-
-                if (modelsResponse.IsSuccessStatusCode)
+                if (accountResponse.IsSuccessStatusCode)
                 {
-                    discoveredModels = ParseFireworksModels(modelsBody);
-                    if (discoveredModels != null && discoveredModels.Any())
+                    try 
                     {
-                        // Use the first available model that looks like a chat model
-                        var chatModel = discoveredModels.FirstOrDefault(m => m.ModelId.Contains("instruct") || m.ModelId.Contains("chat"));
-                        if (chatModel != null)
+                        using var doc = System.Text.Json.JsonDocument.Parse(accountBody);
+                        if (doc.RootElement.TryGetProperty("accounts", out var accounts) && 
+                            accounts.ValueKind == System.Text.Json.JsonValueKind.Array && 
+                            accounts.GetArrayLength() > 0)
                         {
-                            modelToUse = chatModel.ModelId;
+                            var firstAccount = accounts[0];
+                            if (firstAccount.TryGetProperty("name", out var accountName))
+                            {
+                                string name = accountName.GetString() ?? "";
+                                
+                                // 2. Get Credits for this account
+                                using var creditsRequest = new HttpRequestMessage(HttpMethod.Get, $"https://api.fireworks.ai/v1/{name}/credits");
+                                creditsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                                
+                                var creditsResponse = await httpClient.SendAsync(creditsRequest);
+                                string creditsBody = await creditsResponse.Content.ReadAsStringAsync();
+                                
+                                if (creditsResponse.IsSuccessStatusCode)
+                                {
+                                    using var creditsDoc = System.Text.Json.JsonDocument.Parse(creditsBody);
+                                    if (creditsDoc.RootElement.TryGetProperty("totalAmountUsd", out var total))
+                                    {
+                                        var result = ValidationResult.Success(creditsResponse.StatusCode, "Valid Fireworks AI key");
+                                        result.Balance = $"{total} USD";
+                                        result.AccountTier = name;
+                                        return result;
+                                    }
+                                }
+                            }
                         }
                     }
+                    catch { /* Fallback to success if account found but credit call failed */ }
+
+                    return ValidationResult.Success(accountResponse.StatusCode, "Valid Fireworks AI key (Account Found)");
                 }
-
-                // 2. Test chat completion to check for quota/credits
-                using var chatRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.fireworks.ai/inference/v1/chat/completions");
-                chatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-                var requestBody = new
-                {
-                    model = modelToUse,
-                    messages = new[]
-                    {
-                        new { role = "user", content = "Hi" }
-                    },
-                    max_tokens = 5
-                };
-
-                var jsonContent = System.Text.Json.JsonSerializer.Serialize(requestBody);
-                chatRequest.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-
-                var chatResponse = await httpClient.SendAsync(chatRequest);
-                string chatBody = await chatResponse.Content.ReadAsStringAsync();
-
-                _logger?.LogDebug("Fireworks chat API response ({Model}): Status={StatusCode}, Body={Body}",
-                    modelToUse, chatResponse.StatusCode, TruncateResponse(chatBody));
-
-                if (IsSuccessStatusCode(chatResponse.StatusCode))
-                {
-                    return ValidationResult.Success(chatResponse.StatusCode, discoveredModels);
-                }
-                else if (chatResponse.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
-                         chatResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                {
-                    // Key was accepted by /models but rejected at inference — treat as invalid
-                    return ValidationResult.IsUnauthorized(chatResponse.StatusCode,
-                        "Key rejected at inference endpoint");
-                }
-                else if ((int)chatResponse.StatusCode == 429)
-                {
-                    // Rate limited = key is valid
-                    var rateLimited = ValidationResult.Success(chatResponse.StatusCode, "Rate limited (key is valid)");
-                    rateLimited.AvailableModels = discoveredModels;
-                    return rateLimited;
-                }
-                else
-                {
-                    // Check for quota/billing issues
-                    if (ContainsAny(chatBody, new HashSet<string> { "quota", "billing", "insufficient", "balance", "credit" }))
-                    {
-                        var result = ValidationResult.Success(chatResponse.StatusCode, $"Valid key but quota/billing issue: {TruncateResponse(chatBody)}");
-                        result.AvailableModels = discoveredModels;
-                        return result;
-                    }
-
-                    var errorResult = ValidationResult.HasHttpError(chatResponse.StatusCode,
-                        $"API request failed with status {chatResponse.StatusCode}. Response: {TruncateResponse(chatBody)}");
-                    errorResult.AvailableModels = discoveredModels;
-                    return errorResult;
-                }
+                
+                return ValidationResult.HasHttpError(accountResponse.StatusCode, 
+                    $"Account check failed: {accountResponse.StatusCode}");
             }
             catch (Exception ex)
             {

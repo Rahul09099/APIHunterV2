@@ -51,8 +51,10 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         if (root.TryGetProperty("usage_tier", out var tier))
                             result.AccountTier = tier.GetString();
                             
-                        if (root.TryGetProperty("billing", out var billing) && billing.TryGetProperty("credits", out var credits))
-                            result.Balance = $"{credits.GetInt64()} Credits";
+                        if (root.TryGetProperty("creditBalance", out var credits))
+                            result.Balance = $"{credits} Credits";
+                        else if (root.TryGetProperty("billing", out var billing) && billing.TryGetProperty("credits", out var billingCredits))
+                            result.Balance = $"{billingCredits} Credits";
                     }
                     catch { /* Best effort parsing */ }
 

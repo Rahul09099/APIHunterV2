@@ -28,17 +28,33 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
         {
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.sendgrid.com/v3/scopes");
+                using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.sendgrid.com/v3/user/credits");
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
                 var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
 
-                _logger?.LogDebug("SendGrid API response: Status={StatusCode}", response.StatusCode);
+                _logger?.LogDebug("SendGrid credits API response: Status={StatusCode}, Body={Body}", 
+                    response.StatusCode, TruncateResponse(responseBody));
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, $"Key is valid. Scopes retrieved successfully.");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid SendGrid key");
+                    
+                    try 
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        var root = doc.RootElement;
+                        
+                        if (root.TryGetProperty("remain", out var remain) && 
+                            root.TryGetProperty("total", out var total))
+                        {
+                            result.Balance = $"{remain} / {total} Credits Remaining";
+                        }
+                    }
+                    catch { /* Best effort */ }
+
+                    return result;
                 }
                 else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
                          response.StatusCode == System.Net.HttpStatusCode.Forbidden)
@@ -47,6 +63,16 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
                 }
                 else
                 {
+                    // Fallback to scopes check
+                    using var scopesRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.sendgrid.com/v3/scopes");
+                    scopesRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                    var scopesResponse = await httpClient.SendAsync(scopesRequest);
+                    
+                    if (IsSuccessStatusCode(scopesResponse.StatusCode))
+                    {
+                        return ValidationResult.Success(scopesResponse.StatusCode, "Valid SendGrid key (Scopes check passed)");
+                    }
+
                     return ValidationResult.HasHttpError(response.StatusCode, 
                         $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
                 }

@@ -28,65 +28,57 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(string apiKey, HttpClient httpClient)
         {
-            // DeepSeek uses OpenAI-compatible API
-            using var chatRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.deepseek.com/v1/chat/completions");
-            chatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            
-            // Simple test with their cheapest model
-            var requestBody = new
-            {
-                model = "deepseek-chat",
-                messages = new[]
-                {
-                    new { role = "user", content = "Hi" }
-                },
-                max_tokens = 5
-            };
-            
-            var jsonContent = System.Text.Json.JsonSerializer.Serialize(requestBody);
-            chatRequest.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-            
-            var chatResponse = await httpClient.SendAsync(chatRequest);
-            string responseBody = await chatResponse.Content.ReadAsStringAsync();
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.deepseek.com/user/balance");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            _logger?.LogDebug("DeepSeek chat API response: Status={StatusCode}, Body={Body}",
-                chatResponse.StatusCode, TruncateResponse(responseBody));
+            try 
+            {
+                var response = await httpClient.SendAsync(request);
+                string responseBody = await response.Content.ReadAsStringAsync();
 
-            if (IsSuccessStatusCode(chatResponse.StatusCode))
-            {
-                // Successfully generated content - key has credits
-                return ValidationResult.Success(chatResponse.StatusCode, "Chat completion successful");
-            }
-            else if (chatResponse.StatusCode == HttpStatusCode.Unauthorized)
-            {
-                return ValidationResult.IsUnauthorized(chatResponse.StatusCode);
-            }
-            else if ((int)chatResponse.StatusCode == 429)
-            {
-                // Check if it's quota exhausted or temporary rate limit
-                if (ContainsAny(responseBody, new HashSet<string> { "insufficient", "balance", "quota", "billing", "exceeded" }))
+                _logger?.LogDebug("DeepSeek balance API response: Status={StatusCode}, Body={Body}",
+                    response.StatusCode, TruncateResponse(responseBody));
+
+                if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    // Insufficient balance - key exists but unusable
-                    return ValidationResult.HasHttpError(chatResponse.StatusCode, $"Insufficient balance (key unusable): {TruncateResponse(responseBody)}");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid DeepSeek key");
+                    
+                    try 
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        if (doc.RootElement.TryGetProperty("data", out var data) && 
+                            data.TryGetProperty("balance_infos", out var balanceInfos) && 
+                            balanceInfos.GetArrayLength() > 0)
+                        {
+                            var firstBalance = balanceInfos[0];
+                            if (firstBalance.TryGetProperty("total_balance", out var total))
+                            {
+                                string currency = firstBalance.TryGetProperty("currency", out var curr) ? curr.GetString() ?? "USD" : "USD";
+                                result.Balance = $"{total} {currency}";
+                            }
+                        }
+                    }
+                    catch { /* Best effort */ }
+
+                    return result;
                 }
-                // Temporary rate limit means the key is valid
-                return ValidationResult.Success(chatResponse.StatusCode, "Rate limited (key is valid)");
-            }
-            else if (chatResponse.StatusCode == HttpStatusCode.PaymentRequired)
-            {
-                // Payment required means key exists but is unusable - don't count as valid
-                return ValidationResult.HasHttpError(chatResponse.StatusCode, "Payment required (key unusable)");
-            }
-            else
-            {
-                // Check response body for quota/billing issues
-                if (ContainsAny(responseBody, new HashSet<string> { "insufficient", "balance", "quota", "billing", "exceeded" }))
+                else if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    return ValidationResult.HasHttpError(chatResponse.StatusCode, $"Balance/quota issue (key unusable): {TruncateResponse(responseBody)}");
+                    return ValidationResult.IsUnauthorized(response.StatusCode);
                 }
-                
-                return ValidationResult.HasHttpError(chatResponse.StatusCode, 
-                    $"API request failed with status {chatResponse.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                else if ((int)response.StatusCode == 429)
+                {
+                    return ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
+                }
+                else
+                {
+                    return ValidationResult.HasHttpError(response.StatusCode, 
+                        $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                }
+            }
+            catch (Exception ex)
+            {
+                return ValidationResult.HasHttpError(HttpStatusCode.ServiceUnavailable, $"Connection failed: {ex.Message}");
             }
         }
 

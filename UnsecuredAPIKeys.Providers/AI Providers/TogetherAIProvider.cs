@@ -28,31 +28,30 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.together.xyz/v1/chat/completions");
+                using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.together.xyz/v1/credits");
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
-
-                var requestBody = new
-                {
-                    model = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", // Llama-2-7b-chat-hf is deprecated; use current serverless model
-                    messages = new[]
-                    {
-                        new { role = "user", content = "hi" }
-                    },
-                    max_tokens = 1
-                };
-
-                var jsonContent = System.Text.Json.JsonSerializer.Serialize(requestBody);
-                request.Content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
 
                 var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
 
-                _logger?.LogDebug("Together AI API response: Status={StatusCode}, Body={Body}",
+                _logger?.LogDebug("Together AI credits API response: Status={StatusCode}, Body={Body}",
                     response.StatusCode, TruncateResponse(responseBody));
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, $"Key is valid and generation working.");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid Together AI key");
+                    
+                    try 
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        if (doc.RootElement.TryGetProperty("credits", out var credits))
+                        {
+                            result.Balance = $"{credits} Credits";
+                        }
+                    }
+                    catch { /* Best effort */ }
+
+                    return result;
                 }
                 else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
                          response.StatusCode == System.Net.HttpStatusCode.Forbidden)
@@ -61,12 +60,6 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 }
                 else
                 {
-                    // Check for quota/billing issues
-                    if (ContainsAny(responseBody, new HashSet<string> { "quota", "billing", "limit", "credits", "insufficient" }))
-                    {
-                        return ValidationResult.Success(response.StatusCode, $"Valid key but access issue: {TruncateResponse(responseBody)}");
-                    }
-
                     return ValidationResult.HasHttpError(response.StatusCode, 
                         $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
                 }

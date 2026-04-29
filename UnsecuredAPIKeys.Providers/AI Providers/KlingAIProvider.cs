@@ -65,7 +65,29 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, "Valid KlingAI key (JWT Signed)");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid KlingAI key (JWT Signed)");
+
+                    try 
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        if (doc.RootElement.TryGetProperty("data", out var data) && 
+                            data.TryGetProperty("resource_pack_subscribe_infos", out var packs) && 
+                            packs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        {
+                            double totalRemaining = 0;
+                            foreach (var pack in packs.EnumerateArray())
+                            {
+                                if (pack.TryGetProperty("remaining_quantity", out var rem) && rem.TryGetDouble(out double val))
+                                {
+                                    totalRemaining += val;
+                                }
+                            }
+                            result.Balance = $"{totalRemaining} Credits";
+                        }
+                    }
+                    catch { /* Best effort */ }
+
+                    return result;
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
                 {

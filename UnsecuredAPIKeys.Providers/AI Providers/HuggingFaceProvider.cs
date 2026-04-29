@@ -24,8 +24,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try 
             {
-                // WhoAmI endpoint is standard for HF token validation
-                using var request = new HttpRequestMessage(HttpMethod.Get, "https://huggingface.co/api/whoami");
+                // WhoAmI-v2 endpoint provides more details including credit balance
+                using var request = new HttpRequestMessage(HttpMethod.Get, "https://huggingface.co/api/whoami-v2");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
                 var response = await httpClient.SendAsync(request);
@@ -33,20 +33,18 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var result = new ValidationResult
-                    {
-                        Status = ValidationAttemptStatus.Valid,
-                        HttpStatusCode = response.StatusCode,
-                        Detail = "Valid HuggingFace token"
-                    };
+                    var result = ValidationResult.Success(response.StatusCode, "Valid HuggingFace token");
 
-                    // Parse username/org from whoami response for display
                     try
                     {
                         using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
                         var root = doc.RootElement;
+                        
                         if (root.TryGetProperty("name", out var name))
-                            result.AccountTier = name.GetString(); // reuse AccountTier for username display
+                            result.AccountTier = name.GetString();
+
+                        if (root.TryGetProperty("creditBalance", out var balance))
+                            result.Balance = $"{balance} Credits";
                     }
                     catch { /* Best effort */ }
 

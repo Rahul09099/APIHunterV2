@@ -29,7 +29,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             {
                 httpClient.Timeout = TimeSpan.FromSeconds(15);
                 
-                using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.stability.ai/v1/user/account");
+                using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.stability.ai/v1/user/balance");
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
                 var response = await httpClient.SendAsync(request);
@@ -40,35 +40,39 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, $"Key is valid. Account check successful.");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid Stability AI key");
+                    
+                    try 
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        if (doc.RootElement.TryGetProperty("credits", out var credits))
+                        {
+                            result.Balance = $"{credits} Credits";
+                        }
+                    }
+                    catch { /* Best effort */ }
+
+                    return result;
                 }
                 
                 var bodyLower = responseBody.ToLowerInvariant();
 
                 switch (response.StatusCode)
                 {
-                    case System.Net.HttpStatusCode.Unauthorized: // 401
+                    case System.Net.HttpStatusCode.Unauthorized:
                         return ValidationResult.IsUnauthorized(response.StatusCode);
 
-                    case System.Net.HttpStatusCode.Forbidden: // 403
-                        // Stability AI 403 = key is invalid or lacks permissions — NOT a valid key
+                    case System.Net.HttpStatusCode.Forbidden:
                         return ValidationResult.IsUnauthorized(response.StatusCode,
                             "Key forbidden (invalid or insufficient permissions)");
 
-                    case System.Net.HttpStatusCode.NotFound: // 404
-                        return ValidationResult.HasHttpError(response.StatusCode,
-                            $"Endpoint not found (not a key issue): {TruncateResponse(responseBody)}");
-
-                    case (System.Net.HttpStatusCode)429: // 429
-                        // Rate limited = key exists and is valid
-                        _logger?.LogInformation("API key is valid but rate limited (429)");
+                    case (System.Net.HttpStatusCode)429:
                         return ValidationResult.Success(response.StatusCode, "Rate limited (valid key)");
 
                     default:
                         if (bodyLower.Contains("quota") || bodyLower.Contains("billing") ||
                             bodyLower.Contains("credits") || bodyLower.Contains("insufficient"))
                         {
-                            _logger?.LogInformation("API key is valid but has quota/billing issues ({StatusCode})", response.StatusCode);
                             return ValidationResult.Success(response.StatusCode, $"Valid key but access issue: {TruncateResponse(responseBody)}");
                         }
 

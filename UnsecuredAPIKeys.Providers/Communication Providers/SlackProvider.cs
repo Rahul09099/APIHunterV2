@@ -41,9 +41,34 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
                     // Slack returns 200 OK even for invalid tokens, but with "ok": false in body
-                    if (responseBody.Contains("\"ok\":true") || responseBody.Contains("\"ok\": true"))
+                    using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                    var root = doc.RootElement;
+                    
+                    if (root.TryGetProperty("ok", out var ok) && ok.GetBoolean())
                     {
-                         return ValidationResult.Success(response.StatusCode, $"Key is valid. {TruncateResponse(responseBody, 50)}");
+                        var result = ValidationResult.Success(response.StatusCode, "Valid Slack token");
+                        
+                        string teamName = root.TryGetProperty("team", out var team) ? team.GetString() ?? "" : "";
+                        string user = root.TryGetProperty("user", out var usr) ? usr.GetString() ?? "" : "";
+                        result.Detail = $"Workspace: {teamName}, User: {user}";
+
+                        // Try to get billing plan type
+                        try 
+                        {
+                            using var billingRequest = new HttpRequestMessage(HttpMethod.Get, "https://slack.com/api/team.billing.info");
+                            billingRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                            var billingResponse = await httpClient.SendAsync(billingRequest);
+                            var billingBody = await billingResponse.Content.ReadAsStringAsync();
+                            
+                            using var billingDoc = System.Text.Json.JsonDocument.Parse(billingBody);
+                            if (billingDoc.RootElement.TryGetProperty("plan", out var plan))
+                            {
+                                result.Balance = $"Plan: {plan.GetString()}";
+                            }
+                        }
+                        catch { /* Best effort */ }
+
+                        return result;
                     }
                     else if (responseBody.Contains("invalid_auth") || responseBody.Contains("account_inactive"))
                     {
