@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Spectre.Console;
+using System.Text.Json;
 using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Data.Models;
@@ -127,6 +128,26 @@ public class DatabaseService(DBContext dbContext)
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_APIKeys_ApiKey"" ON ""APIKeys"" (""ApiKey"");");
 
+            // 4b. AWS IAM columns for APIKeys (SQLite doesn't support ADD COLUMN IF NOT EXISTS in older versions,
+            //     so we use a try/catch per column)
+            var awsColumns = new[]
+            {
+                (@"ALTER TABLE ""APIKeys"" ADD COLUMN ""AwsAccountId"" TEXT", "AwsAccountId"),
+                (@"ALTER TABLE ""APIKeys"" ADD COLUMN ""AwsUserArn"" TEXT", "AwsUserArn"),
+                (@"ALTER TABLE ""APIKeys"" ADD COLUMN ""AwsUserId"" TEXT", "AwsUserId"),
+                (@"ALTER TABLE ""APIKeys"" ADD COLUMN ""AwsCredentialType"" TEXT", "AwsCredentialType"),
+                (@"ALTER TABLE ""APIKeys"" ADD COLUMN ""AwsAttachedPolicies"" TEXT", "AwsAttachedPolicies"),
+                (@"ALTER TABLE ""APIKeys"" ADD COLUMN ""AwsRiskLevel"" TEXT", "AwsRiskLevel"),
+                (@"ALTER TABLE ""APIKeys"" ADD COLUMN ""AwsIsRootAccount"" INTEGER DEFAULT 0", "AwsIsRootAccount"),
+            };
+            foreach (var (sql, colName) in awsColumns)
+            {
+                try { await context.Database.ExecuteSqlRawAsync(sql); }
+                catch { /* Column already exists — safe to ignore */ }
+            }
+            // Dummy statement to satisfy the compiler (the above block replaces the original single call)
+            await Task.CompletedTask;;
+
             // 5. RepoReferences
             await context.Database.ExecuteSqlRawAsync(@"
                 CREATE TABLE IF NOT EXISTS ""RepoReferences"" (
@@ -236,6 +257,13 @@ public class DatabaseService(DBContext dbContext)
                 ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AccountTier"" TEXT;
                 ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""DiscoveredByTelegramId"" BIGINT;
                 ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""Metadata"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AwsAccountId"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AwsUserArn"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AwsUserId"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AwsCredentialType"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AwsAttachedPolicies"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AwsRiskLevel"" TEXT;
+                ALTER TABLE ""APIKeys"" ADD COLUMN IF NOT EXISTS ""AwsIsRootAccount"" BOOLEAN DEFAULT FALSE;
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_APIKeys_ApiKey"" ON ""APIKeys"" (""ApiKey"");");
 
             // 5. RepoReferences
@@ -348,6 +376,9 @@ public class DatabaseService(DBContext dbContext)
                 "AWS_BEARER_TOKEN_BEDROCK", "BEDROCK_API_KEY",
                 // Azure OpenAI
                 "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_KEY",
+                // AWS IAM
+                "AKIA", "ASIA", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+                "aws_access_key_id", "aws_secret_access_key",
             };
 
             var existingQueries = await context.SearchQueries.Select(q => q.Query).ToListAsync();
@@ -487,7 +518,15 @@ public class DatabaseService(DBContext dbContext)
             "A2E_SECRET",
             "PIAPI_KEY",
             "piapi.ai",
-            "X-API-KEY"
+            "X-API-KEY",
+
+            // AWS IAM
+            "AKIA",
+            "ASIA",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "aws_access_key_id",
+            "aws_secret_access_key",
         };
 
         bool addedAny = false;
@@ -672,7 +711,7 @@ public class DatabaseService(DBContext dbContext)
             ApiTypeEnum.A2E or ApiTypeEnum.PiAPI or ApiTypeEnum.Groq or
             ApiTypeEnum.MistralAI or ApiTypeEnum.OpenRouter or ApiTypeEnum.Perplexity or
             ApiTypeEnum.Cerebras or ApiTypeEnum.VoyageAI or ApiTypeEnum.AWSBedrock or
-            ApiTypeEnum.AzureOpenAI
+            ApiTypeEnum.AzureOpenAI or ApiTypeEnum.AWSIAM
                 => ApiCategoryEnum.AIAndLLM,
 
             ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack
@@ -803,6 +842,18 @@ public class DatabaseService(DBContext dbContext)
             k.LastCheckedUTC,
             k.TimesDisplayed,
             k.ValidationResponse,
+            AwsMetadata = k.AwsAccountId != null ? (object?)new
+            {
+                k.AwsAccountId,
+                k.AwsUserArn,
+                k.AwsUserId,
+                k.AwsCredentialType,
+                k.AwsRiskLevel,
+                k.AwsIsRootAccount,
+                AwsAttachedPolicies = !string.IsNullOrEmpty(k.AwsAttachedPolicies)
+                    ? JsonSerializer.Deserialize<List<string>>(k.AwsAttachedPolicies)
+                    : new List<string>()
+            } : null,
             Sources = k.References.Select(r => new
             {
                 Source = r.FileURL ?? (string.IsNullOrWhiteSpace(r.RepoURL) ? "" : $"{r.RepoURL}/blob/{r.Branch ?? "main"}/{r.FilePath}"),
@@ -822,24 +873,47 @@ public class DatabaseService(DBContext dbContext)
     {
         var lines = new List<string>
         {
-            "Id,ApiKey,Type,TypeName,Status,StatusName,Balance,Tier,ValidationResponse,FirstFoundUTC,LastCheckedUTC,Source,SourceFoundUTC"
+            "Id,ApiKey,Type,TypeName,Status,StatusName,Balance,Tier,ValidationResponse," +
+            "AwsAccountId,AwsUserArn,AwsCredentialType,AwsRiskLevel,AwsIsRootAccount,AwsAttachedPolicies," +
+            "FirstFoundUTC,LastCheckedUTC,Source,SourceFoundUTC"
         };
 
         foreach (var key in keys)
         {
             var valResponse = key.ValidationResponse?.Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ") ?? "";
-            
+
+            // Format AWS attached policies as semicolon-separated string
+            var policies = string.Empty;
+            if (!string.IsNullOrEmpty(key.AwsAttachedPolicies))
+            {
+                try
+                {
+                    var policyList = JsonSerializer.Deserialize<List<string>>(key.AwsAttachedPolicies);
+                    policies = policyList != null ? string.Join("; ", policyList) : "";
+                }
+                catch
+                {
+                    policies = key.AwsAttachedPolicies;
+                }
+            }
+
             if (key.References == null || !key.References.Any())
             {
                 // Export at least one line even if no references exist
-                lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"\",");
+                lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\"," +
+                          $"\"{key.AwsAccountId ?? ""}\",\"{key.AwsUserArn ?? ""}\",\"{key.AwsCredentialType ?? ""}\"," +
+                          $"\"{key.AwsRiskLevel ?? ""}\",{key.AwsIsRootAccount},\"{policies}\"," +
+                          $"{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"\",");
             }
             else
             {
                 foreach (var r in key.References)
                 {
                     var source = r.FileURL ?? (string.IsNullOrWhiteSpace(r.RepoURL) ? "" : $"{r.RepoURL}/blob/{r.Branch ?? "main"}/{r.FilePath}");
-                    lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\",{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"{source}\",{r.FoundUTC:O}");
+                    lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\"," +
+                              $"\"{key.AwsAccountId ?? ""}\",\"{key.AwsUserArn ?? ""}\",\"{key.AwsCredentialType ?? ""}\"," +
+                              $"\"{key.AwsRiskLevel ?? ""}\",{key.AwsIsRootAccount},\"{policies}\"," +
+                              $"{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"{source}\",{r.FoundUTC:O}");
                 }
             }
         }

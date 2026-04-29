@@ -74,6 +74,7 @@ namespace UnsecuredAPIKeys.Data.Common
         VoyageAI = 300,
         AWSBedrock = 310,
         AzureOpenAI = 320,
+        AWSIAM = 330,
 
         // Communication Category (4)
         SendGrid = 410,

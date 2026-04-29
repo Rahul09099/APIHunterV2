@@ -39,6 +39,15 @@ namespace UnsecuredAPIKeys.Providers.Common
         public string? Balance { get; set; }
         public string? AccountTier { get; set; }
 
+        // AWS-specific metadata
+        public string? AwsAccountId { get; set; }
+        public string? AwsUserArn { get; set; }
+        public string? AwsUserId { get; set; }
+        public string? AwsCredentialType { get; set; }
+        public List<string>? AwsAttachedPolicies { get; set; }
+        public string? AwsRiskLevel { get; set; }
+        public bool AwsIsRootAccount { get; set; }
+
         // Helper factory methods for convenience
         public static ValidationResult Success(HttpStatusCode statusCode, List<ModelInfo>? models = null) =>
             new() { Status = ValidationAttemptStatus.Valid, HttpStatusCode = statusCode, AvailableModels = models };

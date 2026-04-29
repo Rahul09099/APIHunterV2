@@ -314,6 +314,38 @@ public class TelegramBotService : BackgroundService
                             await _botClient.SendMessage(chatId, "❌ Usage: <code>/user_dash &lt;telegram_id&gt;</code>", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
                     }
                     break;
+                case "/manage_tokens":
+                    if (isAdmin)
+                    {
+                        if (long.TryParse(args, out long tokenTargetId))
+                            await HandleAdminManageTokensCommand(chatId, tokenTargetId, cancellationToken);
+                        else
+                            await _botClient.SendMessage(chatId, "❌ Usage: <code>/manage_tokens &lt;telegram_id&gt;</code>", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+                    }
+                    break;
+                case "/add_token_for":
+                    if (isAdmin)
+                    {
+                        // /add_token_for <userId> <token>
+                        var atfParts = args.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                        if (atfParts.Length == 2 && long.TryParse(atfParts[0], out long atfUserId))
+                            await HandleAdminAddTokenForUserCommand(chatId, atfUserId, atfParts[1], cancellationToken);
+                        else
+                            await _botClient.SendMessage(chatId, "❌ Usage: <code>/add_token_for &lt;userId&gt; &lt;token&gt;</code>", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+                    }
+                    break;
+                case "/broadcast":
+                    if (isAdmin && !string.IsNullOrWhiteSpace(args))
+                        await HandleBroadcastCommand(chatId, args, cancellationToken);
+                    else if (isAdmin)
+                        await _botClient.SendMessage(chatId, "❌ Usage: <code>/broadcast &lt;message&gt;</code>", parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+                    break;
+                case "/stop_all":
+                    if (isAdmin) await HandleStopAllJobsCommand(chatId, cancellationToken);
+                    break;
+                case "/partition_status":
+                    if (isAdmin) await HandlePartitionStatusCommand(chatId, cancellationToken);
+                    break;
                 default:
                     if (messageText.StartsWith("/"))
                         await _botClient.SendMessage(chatId, "❓ Unknown command. Use /help to see available commands.", cancellationToken: cancellationToken);
@@ -456,7 +488,14 @@ public class TelegramBotService : BackgroundService
                     await HandleAdminSubManageCommand(chatId, userId, cancellationToken);
                 }
             }
-            else if (callbackData.StartsWith("admin_sub_ext:"))
+            else if (callbackData.StartsWith("admin_manage_tokens:"))
+            {
+                if (isAdmin)
+                {
+                    var userId = long.Parse(callbackData.Split(':')[1]);
+                    await HandleAdminManageTokensCommand(chatId, userId, cancellationToken);
+                }
+            }            else if (callbackData.StartsWith("admin_sub_ext:"))
             {
                 if (isAdmin)
                 {
@@ -574,7 +613,12 @@ public class TelegramBotService : BackgroundService
             help.AppendLine("├ /remove_sub &lt;id&gt; - Remove access");
             help.AppendLine("├ /list_subs - List all subscribers");
             help.AppendLine("├ /admins - List all admins");
-            help.AppendLine("└ /set_admin &lt;id&gt; &lt;true/false&gt; - Toggle admin");
+            help.AppendLine("├ /set_admin &lt;id&gt; &lt;true/false&gt; - Toggle admin");
+            help.AppendLine("├ /manage_tokens &lt;id&gt; - Manage user's GitHub tokens");
+            help.AppendLine("├ /add_token_for &lt;id&gt; &lt;token&gt; - Add token for user");
+            help.AppendLine("├ /broadcast &lt;msg&gt; - Message all subscribers");
+            help.AppendLine("├ /stop_all - Kill all running jobs");
+            help.AppendLine("└ /partition_status - Node query distribution");
         }
 
         if (isAdmin)
@@ -1007,7 +1051,7 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine("<b>🔑 GitHub Tokens:</b>");
         foreach (var t in tokens)
         {
-            var preview = t.Token.Length > 10 ? System.Net.WebUtility.HtmlEncode(t.Token.Substring(0, 10)) + "..." : "***";
+            var preview = System.Net.WebUtility.HtmlEncode(t.Token);
             var owner = t.AddedByTelegramId.HasValue ? $"[Owner: {t.AddedByTelegramId}]" : "[System]";
             sb.AppendLine($"- ID: <code>{t.Id}</code> | {preview} | Enabled: {t.IsEnabled} {(isAdmin ? owner : "")}");
         }
@@ -1525,6 +1569,12 @@ public class TelegramBotService : BackgroundService
             sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         }
 
+        if (isAdmin)
+        {
+            sb.AppendLine();
+            sb.AppendLine("<i>Use /partition_status to see query distribution across nodes.</i>");
+        }
+
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
@@ -1561,7 +1611,8 @@ public class TelegramBotService : BackgroundService
         {
             new [] { InlineKeyboardButton.WithCallbackData("🔍 Start Scraper", $"admin_scrape:{targetUserId}"), InlineKeyboardButton.WithCallbackData("📊 View Stats", $"admin_stats:{targetUserId}") },
             new [] { InlineKeyboardButton.WithCallbackData("🔑 View Tokens", $"admin_tokens:{targetUserId}"), InlineKeyboardButton.WithCallbackData("💾 Export Data", $"admin_export:{targetUserId}") },
-            new [] { InlineKeyboardButton.WithCallbackData("👤 Manage Sub", $"admin_sub_manage:{targetUserId}"), InlineKeyboardButton.WithCallbackData("🔙 Back to List", "admin_list_subs") }
+            new [] { InlineKeyboardButton.WithCallbackData("⚙️ Manage Tokens", $"admin_manage_tokens:{targetUserId}"), InlineKeyboardButton.WithCallbackData("👤 Manage Sub", $"admin_sub_manage:{targetUserId}") },
+            new [] { InlineKeyboardButton.WithCallbackData("🔙 Back to List", "admin_list_subs") }
         });
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, replyMarkup: keyboard, cancellationToken: ct);
@@ -1649,6 +1700,215 @@ public class TelegramBotService : BackgroundService
     private async Task HandlePurgeJunkCommand(long chatId, CancellationToken ct)
     {
         await HandlePurgeCommand(chatId, true, ct);
+    }
+
+    // ── New Admin Commands ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Admin: view and manage GitHub tokens for a specific subscriber.
+    /// </summary>
+    private async Task HandleAdminManageTokensCommand(long chatId, long targetUserId, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+
+        var targetUser = await dbContext.TelegramSubscribers.FindAsync(targetUserId, ct);
+        if (targetUser == null)
+        {
+            await _botClient.SendMessage(chatId, $"❌ User <code>{targetUserId}</code> not found.", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        var tokens = await dbContext.SearchProviderTokens
+            .Where(t => t.AddedByTelegramId == targetUserId && t.SearchProvider == SearchProviderEnum.GitHub)
+            .OrderBy(t => t.Id)
+            .ToListAsync(ct);
+
+        var nameStr = !string.IsNullOrEmpty(targetUser.Username) ? $"@{targetUser.Username}" : $"{targetUserId}";
+        var sb = new StringBuilder();
+        sb.AppendLine($"<b>🔑 TOKENS FOR {System.Net.WebUtility.HtmlEncode(nameStr)}</b>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+
+        if (!tokens.Any())
+        {
+            sb.AppendLine("<i>No GitHub tokens found for this user.</i>");
+        }
+        else
+        {
+            foreach (var t in tokens)
+            {
+                var masked = t.Token.Length > 12
+                    ? $"{t.Token[..4]}...{t.Token[^4..]}"
+                    : "****";
+                var status = t.IsEnabled ? "🟢" : "🔴";
+                sb.AppendLine($"{status} ID: <code>{t.Id}</code> | <code>{System.Net.WebUtility.HtmlEncode(masked)}</code>");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine($"<i>To add a token: /add_token_for {targetUserId} &lt;token&gt;</i>");
+        sb.AppendLine($"<i>To delete a token: /delete_token &lt;id&gt;</i>");
+
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    /// <summary>
+    /// Admin: add a GitHub token on behalf of a subscriber.
+    /// </summary>
+    private async Task HandleAdminAddTokenForUserCommand(long chatId, long targetUserId, string token, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            await _botClient.SendMessage(chatId, "❌ Token cannot be empty.", cancellationToken: ct);
+            return;
+        }
+
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+
+        var targetUser = await dbContext.TelegramSubscribers.FindAsync(targetUserId, ct);
+        if (targetUser == null)
+        {
+            await _botClient.SendMessage(chatId, $"❌ User <code>{targetUserId}</code> not found.", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        // Check for duplicate
+        var exists = await dbContext.SearchProviderTokens
+            .AnyAsync(t => t.Token == token && t.SearchProvider == SearchProviderEnum.GitHub, ct);
+
+        if (exists)
+        {
+            await _botClient.SendMessage(chatId, "⚠️ This token already exists in the system.", cancellationToken: ct);
+            return;
+        }
+
+        await dbService.AddGitHubTokenAsync(dbContext, token, targetUserId);
+
+        var nameStr = !string.IsNullOrEmpty(targetUser.Username) ? $"@{targetUser.Username}" : $"{targetUserId}";
+        await _botClient.SendMessage(chatId,
+            $"✅ GitHub token added for <b>{System.Net.WebUtility.HtmlEncode(nameStr)}</b>.",
+            parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    /// <summary>
+    /// Admin: broadcast a message to all active subscribers.
+    /// </summary>
+    private async Task HandleBroadcastCommand(long chatId, string message, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+
+        var activeSubs = await dbContext.TelegramSubscribers
+            .Where(s => s.SubscriptionExpiryUtc > DateTime.UtcNow)
+            .Select(s => s.TelegramId)
+            .ToListAsync(ct);
+
+        var statusMsg = await _botClient.SendMessage(chatId,
+            $"📢 Broadcasting to <b>{activeSubs.Count}</b> subscribers...",
+            parseMode: ParseMode.Html, cancellationToken: ct);
+
+        int sent = 0, failed = 0;
+        var broadcastText = $"📢 <b>Admin Broadcast</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n{System.Net.WebUtility.HtmlEncode(message)}";
+
+        foreach (var subId in activeSubs)
+        {
+            if (subId == chatId) continue; // Don't send to self
+            try
+            {
+                await _botClient.SendMessage(subId, broadcastText, parseMode: ParseMode.Html, cancellationToken: ct);
+                sent++;
+                await Task.Delay(50, ct); // Avoid Telegram flood limits
+            }
+            catch { failed++; }
+        }
+
+        await _botClient.EditMessageText(chatId, statusMsg.MessageId,
+            $"✅ <b>Broadcast Complete</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n📤 Sent: <code>{sent}</code>\n❌ Failed: <code>{failed}</code>",
+            parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    /// <summary>
+    /// Admin: stop all running jobs across all users.
+    /// </summary>
+    private async Task HandleStopAllJobsCommand(long chatId, CancellationToken ct)
+    {
+        var runningJobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
+
+        if (!runningJobs.Any())
+        {
+            await _botClient.SendMessage(chatId, "ℹ️ No running jobs to stop.", cancellationToken: ct);
+            return;
+        }
+
+        int stopped = 0;
+        foreach (var job in runningJobs)
+        {
+            if (_jobManager.StopJob(job.JobId)) stopped++;
+        }
+
+        await _botClient.SendMessage(chatId,
+            $"⏹️ <b>All Jobs Stopped</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nStopped <code>{stopped}</code> of <code>{runningJobs.Count}</code> running jobs.",
+            parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    /// <summary>
+    /// Admin: show how queries are currently partitioned across active nodes.
+    /// </summary>
+    private async Task HandlePartitionStatusCommand(long chatId, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+
+        var activeThreshold = DateTime.UtcNow.AddMinutes(-10);
+        var activeNodes = await dbContext.TelegramSubscribers
+            .Where(s => s.NodeToken != null && s.LastNodeHeartbeatUtc > activeThreshold)
+            .OrderBy(s => s.TelegramId)
+            .ToListAsync(ct);
+
+        var allQueries = await dbContext.SearchQueries
+            .Where(q => q.IsEnabled)
+            .OrderBy(q => q.Id)
+            .ToListAsync(ct);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<b>🗂️ QUERY PARTITION STATUS</b>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine($"<b>Active Nodes:</b> <code>{activeNodes.Count}</code>");
+        sb.AppendLine($"<b>Total Queries:</b> <code>{allQueries.Count}</code>");
+        sb.AppendLine();
+
+        if (!activeNodes.Any())
+        {
+            sb.AppendLine("<i>No active nodes. All queries will be assigned to the first node that syncs.</i>");
+        }
+        else
+        {
+            for (int i = 0; i < activeNodes.Count; i++)
+            {
+                var node = activeNodes[i];
+                var nodeQueries = allQueries
+                    .Select((q, idx) => (q, idx))
+                    .Where(x => x.idx % activeNodes.Count == i)
+                    .Select(x => x.q)
+                    .ToList();
+
+                var nameStr = !string.IsNullOrEmpty(node.Username) ? $"@{node.Username}" : $"{node.TelegramId}";
+                var lastSeen = node.LastNodeHeartbeatUtc.HasValue
+                    ? $"{(DateTime.UtcNow - node.LastNodeHeartbeatUtc.Value).TotalMinutes:F0}m ago"
+                    : "never";
+
+                sb.AppendLine($"<b>Node {i + 1}:</b> {System.Net.WebUtility.HtmlEncode(nameStr)} (seen {lastSeen})");
+                sb.AppendLine($"  Queries: <code>{nodeQueries.Count}</code> — {System.Net.WebUtility.HtmlEncode(string.Join(", ", nodeQueries.Take(5).Select(q => q.Query)) + (nodeQueries.Count > 5 ? "..." : ""))}");
+                sb.AppendLine();
+            }
+        }
+
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine("<i>Nodes are considered active if heartbeat &lt; 10 min ago.</i>");
+
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     #endregion

@@ -2,10 +2,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Spectre.Console;
+using System.Text.Json;
 
 using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.Common;
+using UnsecuredAPIKeys.Data.Models;
 
 // Initialize services
 var services = new ServiceCollection();
@@ -294,6 +296,20 @@ async Task ShowStatusAsync(DBContext db, DatabaseService dbService)
     summaryTable.AddRow("GitHub Tokens", catStats.GitHubTokensCount > 0 ? $"[green]{catStats.GitHubTokensCount} Configured[/]" : "[red]Not configured[/]");
 
     AnsiConsole.Write(summaryTable);
+
+    // Show valid keys list
+    var validKeysList = await db.APIKeys
+        .Where(k => k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits)
+        .OrderByDescending(k => k.LastCheckedUTC)
+        .Take(20)
+        .ToListAsync();
+
+    if (validKeysList.Any())
+    {
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(new Rule("[green]Valid Keys[/]").LeftJustified().RuleStyle("green"));
+        DisplayValidKeys(validKeysList);
+    }
 
     // Show top keys with balance
     var richKeys = await db.APIKeys
@@ -610,4 +626,157 @@ async Task ExportKeysAsync(DBContext db, DatabaseService dbService)
         });
 
     AnsiConsole.MarkupLine($"[green]Exported to [bold]{Markup.Escape(fileName)}[/][/]");
+}
+
+// === Display Helpers ===
+
+static void DisplayValidKeys(IEnumerable<APIKey> keys)
+{
+    var table = new Table()
+        .Border(TableBorder.Rounded)
+        .BorderColor(Color.Green)
+        .AddColumn(new TableColumn("[bold]ID[/]").RightAligned())
+        .AddColumn(new TableColumn("[bold]Type[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Key (Masked)[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Status[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]AWS Account[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Risk[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Last Checked[/]").LeftAligned());
+
+    foreach (var key in keys)
+    {
+        var awsAccount = key.AwsAccountId != null
+            ? $"[cyan]{Markup.Escape(key.AwsAccountId)}[/]"
+            : "[dim]N/A[/]";
+
+        var riskMarkup = key.AwsRiskLevel switch
+        {
+            "Critical" => "[red]Critical[/]",
+            "High"     => "[darkorange]High[/]",
+            "Medium"   => "[yellow]Medium[/]",
+            "Low"      => "[green]Low[/]",
+            _          => "[dim]N/A[/]"
+        };
+
+        table.AddRow(
+            key.Id.ToString(),
+            $"[cyan]{key.ApiType}[/]",
+            $"[dim]{Markup.Escape(MaskKey(key.ApiKey))}[/]",
+            GetStatusMarkup(key.Status),
+            awsAccount,
+            riskMarkup,
+            key.LastCheckedUTC.HasValue
+                ? $"[dim]{key.LastCheckedUTC.Value:yyyy-MM-dd HH:mm}[/]"
+                : "[dim]Never[/]"
+        );
+    }
+
+    AnsiConsole.Write(table);
+}
+
+static void DisplayKeyDetails(APIKey key)
+{
+    var table = new Table()
+        .Border(TableBorder.Rounded)
+        .AddColumn("[bold]Property[/]")
+        .AddColumn("[bold]Value[/]");
+
+    table.AddRow("ID", key.Id.ToString());
+    table.AddRow("API Key", $"[dim]{Markup.Escape(MaskKey(key.ApiKey))}[/]");
+    table.AddRow("Type", $"[cyan]{key.ApiType}[/]");
+    table.AddRow("Status", GetStatusMarkup(key.Status));
+
+    if (!string.IsNullOrEmpty(key.Balance))
+        table.AddRow("Balance", $"[green]{Markup.Escape(key.Balance)}[/]");
+
+    if (!string.IsNullOrEmpty(key.AccountTier))
+        table.AddRow("Tier", $"[yellow]{Markup.Escape(key.AccountTier)}[/]");
+
+    // AWS-specific metadata (shown when key is AWS IAM or AWS metadata is present)
+    if (key.ApiType == ApiTypeEnum.AWSIAM || key.AwsAccountId != null)
+    {
+        table.AddRow("[bold cyan]AWS Account ID[/]",
+            $"[cyan]{Markup.Escape(key.AwsAccountId ?? "N/A")}[/]");
+
+        table.AddRow("[bold cyan]AWS User ARN[/]",
+            $"[dim]{Markup.Escape(key.AwsUserArn ?? "N/A")}[/]");
+
+        table.AddRow("[bold cyan]AWS Credential Type[/]",
+            $"[yellow]{Markup.Escape(key.AwsCredentialType ?? "N/A")}[/]");
+
+        // Risk level with color coding
+        var riskMarkup = key.AwsRiskLevel switch
+        {
+            "Critical" => "[red]Critical[/]",
+            "High"     => "[darkorange]High[/]",
+            "Medium"   => "[yellow]Medium[/]",
+            "Low"      => "[green]Low[/]",
+            _          => "[dim]N/A[/]"
+        };
+        table.AddRow("[bold cyan]AWS Risk Level[/]", riskMarkup);
+
+        // Root account warning
+        if (key.AwsIsRootAccount)
+        {
+            table.AddRow("[bold red]⚠ ROOT ACCOUNT[/]",
+                "[bold red]⚠ ROOT ACCOUNT - CRITICAL RISK[/]");
+        }
+
+        // Attached policies as bullet list
+        if (!string.IsNullOrEmpty(key.AwsAttachedPolicies))
+        {
+            try
+            {
+                var policies = JsonSerializer.Deserialize<List<string>>(key.AwsAttachedPolicies);
+                if (policies != null && policies.Count > 0)
+                {
+                    var policyText = string.Join("\n", policies.Select(p => $"• {Markup.Escape(p)}"));
+                    table.AddRow("[bold cyan]AWS Attached Policies[/]", $"[dim]{policyText}[/]");
+                }
+                else
+                {
+                    table.AddRow("[bold cyan]AWS Attached Policies[/]", "[dim]N/A[/]");
+                }
+            }
+            catch
+            {
+                table.AddRow("[bold cyan]AWS Attached Policies[/]",
+                    $"[dim]{Markup.Escape(key.AwsAttachedPolicies)}[/]");
+            }
+        }
+        else
+        {
+            table.AddRow("[bold cyan]AWS Attached Policies[/]", "[dim]N/A[/]");
+        }
+    }
+
+    if (!string.IsNullOrEmpty(key.ValidationResponse))
+        table.AddRow("Validation", $"[dim]{Markup.Escape(key.ValidationResponse)}[/]");
+
+    table.AddRow("First Found", key.FirstFoundUTC.ToString("yyyy-MM-dd HH:mm:ss UTC"));
+
+    if (key.LastCheckedUTC.HasValue)
+        table.AddRow("Last Checked", key.LastCheckedUTC.Value.ToString("yyyy-MM-dd HH:mm:ss UTC"));
+
+    AnsiConsole.Write(table);
+}
+
+static string GetStatusMarkup(ApiStatusEnum status)
+{
+    return status switch
+    {
+        ApiStatusEnum.Valid          => "[green]Valid[/]",
+        ApiStatusEnum.ValidNoCredits => "[yellow]Valid (No Credits)[/]",
+        ApiStatusEnum.Invalid        => "[red]Invalid[/]",
+        ApiStatusEnum.Unverified     => "[grey]Unverified[/]",
+        ApiStatusEnum.Error          => "[orange1]Error[/]",
+        _                            => "[white]Unknown[/]"
+    };
+}
+
+static string MaskKey(string apiKey)
+{
+    if (string.IsNullOrEmpty(apiKey) || apiKey.Length <= 8)
+        return "****";
+    return $"{apiKey[..4]}...{apiKey[^4..]}";
 }

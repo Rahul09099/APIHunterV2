@@ -7,6 +7,12 @@ public class NodeSyncDTO
 {
     public List<SearchProviderTokenDTO> Tokens { get; set; } = new();
     public List<SearchQueryDTO> Queries { get; set; } = new();
+
+    /// <summary>Zero-based index of this node in the active node pool (for logging).</summary>
+    public int NodeIndex { get; set; }
+
+    /// <summary>Total number of active nodes at the time of sync.</summary>
+    public int TotalNodes { get; set; }
 }
 
 public class SearchProviderTokenDTO

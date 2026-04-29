@@ -54,6 +54,88 @@ public class ScraperService
         public DateTime SearchEndDate { get; set; }
     }
 
+    // ── Distributed Scrape Lock ───────────────────────────────────────────────
+    // Uses ApplicationSettings table as a lightweight mutex.
+    // Key format:  scrape_lock:<queryId>
+    // Value format: <nodeIdentifier>|<ISO8601 timestamp>
+    // A lock is considered stale after 15 minutes (covers the longest scrape cycle).
+
+    private const string LockPrefix = "scrape_lock:";
+    private static readonly TimeSpan LockTtl = TimeSpan.FromMinutes(15);
+
+    private string NodeIdentifier =>
+        NodeToken ?? Environment.GetEnvironmentVariable("RENDER_EXTERNAL_URL") ?? "master";
+
+    /// <summary>
+    /// Try to acquire a scrape lock for a query.
+    /// Returns true if the lock was acquired (this node should proceed).
+    /// Returns false if another node already holds a fresh lock (skip this query).
+    /// </summary>
+    private async Task<bool> TryAcquireScrapeQueryLockAsync(long queryId, CancellationToken ct)
+    {
+        var key = $"{LockPrefix}{queryId}";
+        var now = DateTime.UtcNow;
+
+        try
+        {
+            var existing = await _dbContext.ApplicationSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Key == key, ct);
+
+            if (existing != null)
+            {
+                // Parse existing lock: "nodeId|timestamp"
+                var parts = existing.Value.Split('|');
+                if (parts.Length == 2 && DateTime.TryParse(parts[1], out var lockedAt))
+                {
+                    var age = now - lockedAt;
+                    if (age < LockTtl && parts[0] != NodeIdentifier)
+                    {
+                        // Another node holds a fresh lock — skip
+                        _logger?.LogDebug("Query {Id} locked by {Node}, skipping", queryId, parts[0]);
+                        return false;
+                    }
+                }
+                // Lock is stale or belongs to us — overwrite it
+                await _dbContext.ApplicationSettings
+                    .Where(s => s.Key == key)
+                    .ExecuteDeleteAsync(ct);
+            }
+
+            // Insert our lock
+            _dbContext.ApplicationSettings.Add(new ApplicationSetting
+            {
+                Key = key,
+                Value = $"{NodeIdentifier}|{now:O}",
+                Description = "Scrape lock — auto-expires after 15 min"
+            });
+            await _dbContext.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // If lock acquisition fails (e.g. race condition unique constraint), skip the query
+            _logger?.LogDebug("Lock acquisition failed for query {Id}: {Msg}", queryId, ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>Release the scrape lock for a query when done.</summary>
+    private async Task ReleaseScrapeQueryLockAsync(long queryId)
+    {
+        var key = $"{LockPrefix}{queryId}";
+        try
+        {
+            await _dbContext.ApplicationSettings
+                .Where(s => s.Key == key && s.Value.StartsWith(NodeIdentifier + "|"))
+                .ExecuteDeleteAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug("Lock release failed for query {Id}: {Msg}", queryId, ex.Message);
+        }
+    }
+
     public ScraperService(DBContext dbContext, IHttpClientFactory httpClientFactory, ILogger<ScraperService>? logger = null)
     {
         _dbContext = dbContext;
@@ -149,13 +231,27 @@ public class ScraperService
         {
             if (_cancellationTokenSource.Token.IsCancellationRequested) break;
 
-            if (isDeepSearch)
+            // Acquire distributed lock — skip if another node is already scraping this query
+            if (!await TryAcquireScrapeQueryLockAsync(query.Id, _cancellationTokenSource.Token))
             {
-                await RunDeepSearchAsync(tokens, query, tokenCursor, discoveredBy);
+                _logger?.LogInformation("Skipping query '{Query}' — already being scraped by another node", query.Query);
+                continue;
             }
-            else
+
+            try
             {
-                await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null, discoveredBy);
+                if (isDeepSearch)
+                {
+                    await RunDeepSearchAsync(tokens, query, tokenCursor, discoveredBy);
+                }
+                else
+                {
+                    await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null, discoveredBy);
+                }
+            }
+            finally
+            {
+                await ReleaseScrapeQueryLockAsync(query.Id);
             }
 
             if (query != queriesToRun.Last())
@@ -276,7 +372,7 @@ public class ScraperService
             return;
         }
 
-        Console.WriteLine($"[yellow]Starting scrape of {queriesToRun.Count} queries...[/]");
+        Console.WriteLine($"[yellow]Starting scrape of {queriesToRun.Count} queries (partition {syncData?.NodeIndex + 1}/{syncData?.TotalNodes})...[/]");
         var tokenCursor = new TokenCursor { Index = 0 };
 
         foreach (var qDto in queriesToRun)
@@ -284,8 +380,23 @@ public class ScraperService
             if (ct.IsCancellationRequested) break;
 
             var queryModel = new SearchQuery { Id = qDto.Id, Query = qDto.Query, IsEnabled = qDto.IsEnabled };
-            await RunScrapingCycleUtilsAsync(tokensToUse, queryModel, tokenCursor, null, null);
-            
+
+            // Acquire distributed lock — skip if Master or another worker is already on this query
+            if (!await TryAcquireScrapeQueryLockAsync(queryModel.Id, ct))
+            {
+                Console.WriteLine($"[dim]Skipping '{queryModel.Query}' — locked by another node[/]");
+                continue;
+            }
+
+            try
+            {
+                await RunScrapingCycleUtilsAsync(tokensToUse, queryModel, tokenCursor, null, null);
+            }
+            finally
+            {
+                await ReleaseScrapeQueryLockAsync(queryModel.Id);
+            }
+
             // Short delay between queries
             await Task.Delay(LiteLimits.SEARCH_DELAY_MS, ct);
         }
@@ -494,6 +605,7 @@ public class ScraperService
         if (q.Contains("cerebras") || q.Contains("csk-")) return "Cerebras";
         if (q.Contains("voyage")) return "Voyage AI";
         if (q.Contains("bedrock") || q.Contains("aws_bearer")) return "AWS Bedrock";
+        if (q.Contains("akia") || q.Contains("asia") || q.Contains("aws")) return "AWS IAM";
         if (q.Contains("azure")) return "Azure OpenAI";
         if (q.Contains("mistral")) return "Mistral AI";
         if (q.Contains("kling")) return "Kling AI";

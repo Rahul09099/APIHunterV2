@@ -88,6 +88,9 @@ public static class ProviderRateLimits
     /// <summary>Max concurrent requests to Azure OpenAI.</summary>
     public const int AzureOpenAI = 3;
 
+    /// <summary>Max concurrent requests to AWS IAM (conservative to avoid AWS API throttling).</summary>
+    public const int AWSIAM = 3;
+
     /// <summary>
     /// Max concurrent file-content fetches from raw.githubusercontent.com.
     /// GitHub secondary rate limit kicks in around 100 req/min unauthenticated.

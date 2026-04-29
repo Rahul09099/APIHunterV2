@@ -26,6 +26,7 @@ ENV NODE_TOKEN=""
 ENV WORKER_GITHUB_TOKENS=""
 ENV TELEGRAM_BOT_TOKEN="DISABLED"
 ENV PORT=10000
+ENV ASPNETCORE_URLS=http://+:10000
 
 # We still run the WebAPI dll, but we will modify the Program.cs 
 # to detect IS_WORKER_MODE and skip the Telegram Bot startup if needed.

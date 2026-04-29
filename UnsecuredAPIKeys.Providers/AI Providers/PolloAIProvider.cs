@@ -45,16 +45,25 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     try 
                     {
                         using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                        if (doc.RootElement.TryGetProperty("data", out var data) && 
-                            data.TryGetProperty("balance", out var balance))
+                        if (doc.RootElement.TryGetProperty("data", out var data))
                         {
-                            if (balance.ValueKind == System.Text.Json.JsonValueKind.Number && balance.TryGetDouble(out double val))
+                            string? credits = null;
+                            if (data.TryGetProperty("availableCredits", out var available))
                             {
-                                result.Balance = $"{val} Credits";
+                                credits = available.ToString();
+                                if (data.TryGetProperty("totalCredits", out var total))
+                                {
+                                    credits += $" / {total}";
+                                }
                             }
-                            else
+                            else if (data.TryGetProperty("balance", out var balance))
                             {
-                                result.Balance = balance.ToString();
+                                credits = balance.ToString();
+                            }
+
+                            if (credits != null)
+                            {
+                                result.Balance = $"{credits} Credits";
                             }
                         }
                     }

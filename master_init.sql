@@ -89,7 +89,7 @@ CREATE INDEX IF NOT EXISTS "IX_SearchProviderTokens_AddedByTelegramId"
 --   A2E           = 230   PiAPI           = 240   Groq          = 250
 --   MistralAI     = 260   OpenRouter      = 270   Perplexity    = 280
 --   Cerebras      = 290   VoyageAI        = 300   AWSBedrock    = 310
---   AzureOpenAI   = 320
+--   AzureOpenAI   = 320   AWSIAM          = 330
 --   SendGrid      = 410   Mailgun         = 425   Slack         = 430
 --   Mapbox        = 600
 --
@@ -129,6 +129,15 @@ ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "AccountTier"           TEXT;
 ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "DiscoveredByTelegramId" BIGINT;
 ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "Metadata"              TEXT;
 
+-- AWS IAM-specific metadata columns
+ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "AwsAccountId"          TEXT;
+ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "AwsUserArn"            TEXT;
+ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "AwsUserId"             TEXT;
+ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "AwsCredentialType"     TEXT;
+ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "AwsAttachedPolicies"   TEXT;
+ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "AwsRiskLevel"          TEXT;
+ALTER TABLE "APIKeys" ADD COLUMN IF NOT EXISTS "AwsIsRootAccount"      BOOLEAN DEFAULT FALSE;
+
 CREATE UNIQUE INDEX IF NOT EXISTS "IX_APIKeys_ApiKey"
     ON "APIKeys" ("ApiKey");
 CREATE INDEX IF NOT EXISTS "IX_APIKeys_Status_ApiType"
@@ -139,6 +148,12 @@ CREATE INDEX IF NOT EXISTS "IX_APIKeys_LastCheckedUTC"
     ON "APIKeys" ("LastCheckedUTC");
 CREATE INDEX IF NOT EXISTS "IX_APIKeys_DiscoveredByTelegramId"
     ON "APIKeys" ("DiscoveredByTelegramId");
+
+-- AWS IAM-specific indexes
+CREATE INDEX IF NOT EXISTS "IX_APIKeys_AwsAccountId"
+    ON "APIKeys" ("AwsAccountId") WHERE "AwsAccountId" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "IX_APIKeys_AwsRiskLevel"
+    ON "APIKeys" ("AwsRiskLevel") WHERE "AwsRiskLevel" IS NOT NULL;
 
 -- =============================================================================
 -- SECTION 5: REPO REFERENCES
@@ -322,7 +337,15 @@ FROM (VALUES
 
     -- ── Azure OpenAI ─────────────────────────────────────────────────────────
     ('AZURE_OPENAI_API_KEY'),
-    ('AZURE_OPENAI_KEY')
+    ('AZURE_OPENAI_KEY'),
+
+    -- ── AWS IAM ──────────────────────────────────────────────────────────────
+    ('AKIA'),
+    ('ASIA'),
+    ('AWS_ACCESS_KEY_ID'),
+    ('AWS_SECRET_ACCESS_KEY'),
+    ('aws_access_key_id'),
+    ('aws_secret_access_key')
 
 ) AS v(q)
 WHERE NOT EXISTS (

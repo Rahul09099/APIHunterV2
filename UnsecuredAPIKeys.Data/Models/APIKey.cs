@@ -43,6 +43,15 @@ namespace UnsecuredAPIKeys.Data.Models
         // Extra info (e.g., node name)
         public string? Metadata { get; set; }
 
+        // AWS-specific metadata
+        public string? AwsAccountId { get; set; }
+        public string? AwsUserArn { get; set; }
+        public string? AwsUserId { get; set; }
+        public string? AwsCredentialType { get; set; }
+        public string? AwsAttachedPolicies { get; set; } // JSON serialized List<string>
+        public string? AwsRiskLevel { get; set; }
+        public bool AwsIsRootAccount { get; set; }
+
         // Navigation property to where this key was found
         public virtual ICollection<RepoReference> References { get; set; } = [];
     }

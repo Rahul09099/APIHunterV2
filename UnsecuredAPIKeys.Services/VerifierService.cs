@@ -39,6 +39,7 @@ internal static class ProviderRateLimiter
                 "Voyage AI"    => ProviderRateLimits.VoyageAI,
                 "AWS Bedrock"  => ProviderRateLimits.AWSBedrock,
                 "Azure OpenAI" => ProviderRateLimits.AzureOpenAI,
+                "AWS IAM"      => ProviderRateLimits.AWSIAM,
                 _              => ProviderRateLimits.Default
             };
             return new SemaphoreSlim(limit, limit);
@@ -395,6 +396,20 @@ public class VerifierService(
                         // Update balance and account tier info
                         key.Balance = result.Balance;
                         key.AccountTier = result.AccountTier;
+
+                        // Persist AWS-specific metadata if present
+                        if (result.AwsAccountId != null || result.AwsUserArn != null)
+                        {
+                            key.AwsAccountId = result.AwsAccountId;
+                            key.AwsUserArn = result.AwsUserArn;
+                            key.AwsUserId = result.AwsUserId;
+                            key.AwsCredentialType = result.AwsCredentialType;
+                            key.AwsRiskLevel = result.AwsRiskLevel;
+                            key.AwsIsRootAccount = result.AwsIsRootAccount;
+                            key.AwsAttachedPolicies = result.AwsAttachedPolicies != null
+                                ? System.Text.Json.JsonSerializer.Serialize(result.AwsAttachedPolicies)
+                                : null;
+                        }
 
                         key.Status = ApiStatusEnum.Valid;
                         key.ErrorCount = 0;

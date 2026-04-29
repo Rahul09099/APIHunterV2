@@ -48,6 +48,8 @@ public class NodesController : ControllerBase
 
     /// <summary>
     /// Sync tokens and queries for the specific node.
+    /// Queries are partitioned across active nodes so each node scrapes a unique subset,
+    /// preventing duplicate work and maximising GitHub API quota usage.
     /// </summary>
     [HttpGet("sync")]
     public async Task<IActionResult> Sync([FromHeader(Name = "X-Node-Token")] string nodeToken)
@@ -70,9 +72,41 @@ public class NodesController : ControllerBase
 
         var tokens = await tokenQuery.ToListAsync();
 
-        var queries = await _dbContext.SearchQueries
-            .Where(q => q.IsEnabled)
+        // ── Query Partitioning ────────────────────────────────────────────────
+        // Determine how many nodes are currently active (heartbeat within last 10 min).
+        // Assign each node a stable index based on its TelegramId sort order so the
+        // partition is deterministic and doesn't change on every sync call.
+        var activeThreshold = DateTime.UtcNow.AddMinutes(-10);
+        var activeNodeIds = await _dbContext.TelegramSubscribers
+            .Where(s => s.NodeToken != null && s.LastNodeHeartbeatUtc > activeThreshold)
+            .OrderBy(s => s.TelegramId)   // stable ordering
+            .Select(s => s.TelegramId)
             .ToListAsync();
+
+        var allQueries = await _dbContext.SearchQueries
+            .Where(q => q.IsEnabled)
+            .OrderBy(q => q.Id)           // stable ordering
+            .ToListAsync();
+
+        List<SearchQuery> assignedQueries;
+
+        int totalNodes = activeNodeIds.Count;
+        int nodeIndex  = activeNodeIds.IndexOf(node.TelegramId);
+
+        if (totalNodes <= 1 || nodeIndex < 0)
+        {
+            // Only one node active (or this node just came online) — give it everything
+            assignedQueries = allQueries;
+        }
+        else
+        {
+            // Round-robin partition: node i gets queries where (query_index % totalNodes == nodeIndex)
+            assignedQueries = allQueries
+                .Select((q, i) => (q, i))
+                .Where(x => x.i % totalNodes == nodeIndex)
+                .Select(x => x.q)
+                .ToList();
+        }
 
         var result = new NodeSyncDTO
         {
@@ -81,13 +115,21 @@ public class NodesController : ControllerBase
                 Token = t.Token, 
                 SearchProvider = t.SearchProvider 
             }).ToList(),
-            Queries = queries.Select(q => new SearchQueryDTO 
+            Queries = assignedQueries.Select(q => new SearchQueryDTO 
             { 
                 Id = q.Id, 
                 Query = q.Query, 
                 IsEnabled = q.IsEnabled 
-            }).ToList()
+            }).ToList(),
+            // Expose partition info so workers can log it
+            NodeIndex  = nodeIndex < 0 ? 0 : nodeIndex,
+            TotalNodes = totalNodes < 1 ? 1 : totalNodes
         };
+
+        _logger.LogInformation(
+            "Node {Id} synced: partition {Index}/{Total}, {QCount} queries, {TCount} tokens",
+            node.TelegramId, result.NodeIndex + 1, result.TotalNodes,
+            result.Queries.Count, result.Tokens.Count);
 
         return Ok(result);
     }
