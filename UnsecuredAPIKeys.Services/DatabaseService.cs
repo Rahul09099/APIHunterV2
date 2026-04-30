@@ -846,6 +846,7 @@ public class DatabaseService(DBContext dbContext)
             k.LastCheckedUTC,
             k.TimesDisplayed,
             k.ValidationResponse,
+            k.Metadata,
             AwsMetadata = k.AwsAccountId != null ? (object?)new
             {
                 k.AwsAccountId,

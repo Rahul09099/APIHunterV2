@@ -204,6 +204,7 @@ public class ConfigController : ControllerBase
                 k.Balance,
                 k.AccountTier,
                 k.ValidationResponse,
+                k.Metadata,
                 k.LastCheckedUTC,
                 k.FirstFoundUTC
             })

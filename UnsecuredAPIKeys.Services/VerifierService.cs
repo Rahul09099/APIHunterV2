@@ -379,7 +379,7 @@ public class VerifierService(
                             }
                             key.Status = ApiStatusEnum.ValidNoCredits;
                             key.ErrorCount = 0;
-                            key.ValidationResponse = result.Detail ?? "Valid key but no credits";
+                            key.ValidationResponse = result.RawResponse ?? result.Detail ?? "Valid key but no credits";
                             Interlocked.Increment(ref _validCount);
                             Console.WriteLine($"[yellow]✓ Valid [no credits]: {Markup.Escape(provider.ProviderName)} key[/]");
                             if (!string.IsNullOrEmpty(result.Detail))
@@ -397,8 +397,27 @@ public class VerifierService(
                         // Update balance and account tier info
                         key.Balance = result.Balance;
                         key.AccountTier = result.AccountTier;
+                        key.ValidationResponse = result.RawResponse ?? result.Detail ?? "Key is valid";
+                        
+                        // Merge models and structured metadata into Metadata field
+                        var metadataObj = new Dictionary<string, object>();
+                        if (result.Metadata != null)
+                        {
+                            foreach (var kvp in result.Metadata)
+                                metadataObj[kvp.Key] = kvp.Value;
+                        }
 
-                        // Persist AWS-specific metadata if present
+                        if (result.AvailableModels != null && result.AvailableModels.Any())
+                        {
+                            metadataObj["available_models"] = result.AvailableModels;
+                        }
+
+                        if (metadataObj.Any())
+                        {
+                            key.Metadata = JsonSerializer.Serialize(metadataObj, new JsonSerializerOptions { WriteIndented = true });
+                        }
+
+                        // Capture AWS metadata if applicable
                         if (result.AwsAccountId != null || result.AwsUserArn != null)
                         {
                             key.AwsAccountId = result.AwsAccountId;
@@ -414,7 +433,7 @@ public class VerifierService(
 
                         key.Status = ApiStatusEnum.Valid;
                         key.ErrorCount = 0;
-                        key.ValidationResponse = result.Detail ?? "Key is valid";
+                        key.ValidationResponse = result.RawResponse ?? result.Detail ?? "Key is valid";
                         Interlocked.Increment(ref _validCount);
                         MetricsService.Instance.RecordValid();
                         

@@ -39,6 +39,10 @@ namespace UnsecuredAPIKeys.Providers.Common
         public string? Balance { get; set; }
         public string? AccountTier { get; set; }
 
+        // Structured metadata and raw response capture
+        public string? RawResponse { get; set; }
+        public Dictionary<string, object>? Metadata { get; set; }
+
         // AWS-specific metadata
         public string? AwsAccountId { get; set; }
         public string? AwsUserArn { get; set; }

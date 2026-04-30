@@ -96,6 +96,13 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                             
                             result.Balance = $"{total} {currency} (Grant: {granted}, Paid: {toppedUp})";
                             
+                            // Structured capture
+                            result.Metadata ??= new Dictionary<string, object>();
+                            result.Metadata["currency"] = currency;
+                            result.Metadata["total_balance"] = total;
+                            result.Metadata["granted_balance"] = granted;
+                            result.Metadata["topped_up_balance"] = toppedUp;
+
                             // Determine tier
                             if (decimal.TryParse(toppedUp, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out decimal paid) && paid > 0)
                             {
@@ -111,6 +118,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         if (root.TryGetProperty("is_available", out var isAvailable))
                         {
                             bool available = isAvailable.GetBoolean();
+                            result.Metadata ??= new Dictionary<string, object>();
+                            result.Metadata["is_available"] = available;
+                            
                             if (!available)
                             {
                                 result.Detail = "Key is valid but not currently available (insufficient balance/quota)";
@@ -123,6 +133,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         _logger?.LogWarning(ex, "Error parsing DeepSeek balance response");
                     }
 
+                    result.RawResponse = responseBody;
                     return result;
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized)
@@ -140,6 +151,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     var res = ValidationResult.HasHttpError(response.StatusCode, 
                         $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
                     res.AvailableModels = discoveredModels;
+                    res.RawResponse = responseBody;
                     return res;
                 }
             }

@@ -87,13 +87,17 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         if (data.TryGetProperty("wallet", out var wallet))
                         {
                             var details = new List<string>();
+                            var walletData = new Dictionary<string, object>();
                             
-                            if (wallet.TryGetProperty("mj_remain", out var mj)) details.Add($"MJ: {mj}");
-                            if (wallet.TryGetProperty("llm_remain", out var llm)) details.Add($"LLM: {llm}");
-                            if (wallet.TryGetProperty("suno_remain", out var suno)) details.Add($"Suno: {suno}");
-                            if (wallet.TryGetProperty("luma_remain", out var luma)) details.Add($"Luma: {luma}");
-                            if (wallet.TryGetProperty("gpts_remain", out var gpts)) details.Add($"GPTs: {gpts}");
-                            if (wallet.TryGetProperty("point_remain", out var points)) details.Add($"Points: {points}");
+                            if (wallet.TryGetProperty("mj_remain", out var mj)) { details.Add($"MJ: {mj}"); walletData["mj_remain"] = mj.GetRawText(); }
+                            if (wallet.TryGetProperty("llm_remain", out var llm)) { details.Add($"LLM: {llm}"); walletData["llm_remain"] = llm.GetRawText(); }
+                            if (wallet.TryGetProperty("suno_remain", out var suno)) { details.Add($"Suno: {suno}"); walletData["suno_remain"] = suno.GetRawText(); }
+                            if (wallet.TryGetProperty("luma_remain", out var luma)) { details.Add($"Luma: {luma}"); walletData["luma_remain"] = luma.GetRawText(); }
+                            if (wallet.TryGetProperty("gpts_remain", out var gpts)) { details.Add($"GPTs: {gpts}"); walletData["gpts_remain"] = gpts.GetRawText(); }
+                            if (wallet.TryGetProperty("point_remain", out var points)) { details.Add($"Points: {points}"); walletData["point_remain"] = points.GetRawText(); }
+
+                            result.Metadata ??= new Dictionary<string, object>();
+                            result.Metadata["wallet"] = walletData;
 
                             if (details.Any())
                             {
@@ -107,12 +111,19 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                                 }
                             }
                         }
+
+                        // Structured capture for other fields
+                        result.Metadata ??= new Dictionary<string, object>();
+                        if (data.TryGetProperty("plan", out var p)) result.Metadata["plan"] = p.GetString() ?? "";
+                        if (data.TryGetProperty("name", out var n)) result.Metadata["name"] = n.GetString() ?? "";
+                        if (data.TryGetProperty("equivalent_in_usd", out var usd)) result.Metadata["equivalent_in_usd"] = usd.GetRawText();
                     }
                     catch (Exception ex)
                     {
                         _logger?.LogWarning(ex, "Error parsing PiAPI response");
                     }
 
+                    result.RawResponse = responseBody;
                     return result;
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
@@ -139,6 +150,10 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             catch (Exception ex)
             {
                 return ValidationResult.HasHttpError(HttpStatusCode.ServiceUnavailable, $"Connection failed: {ex.Message}");
+            }
+            finally
+            {
+                // Ensure raw response is captured even on some errors if possible
             }
         }
 
