@@ -52,7 +52,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 }
             }
             
-            using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.klingai.com/v1/user/info");
+            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var startMs = nowMs - (7 * 24 * 60 * 60 * 1000); // Look back 7 days for balance/costs
+            
+            string url = $"https://api-singapore.klingai.com/account/costs?start_time={startMs}&end_time={nowMs}";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authHeaderValue);
 
             try 
@@ -65,24 +69,30 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Valid KlingAI key (JWT Signed)");
+                    var result = ValidationResult.Success(response.StatusCode, "Valid KlingAI key");
 
                     try 
                     {
                         using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                        if (doc.RootElement.TryGetProperty("data", out var data) && 
-                            data.TryGetProperty("resource_pack_subscribe_infos", out var packs) && 
-                            packs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        if (doc.RootElement.TryGetProperty("data", out var data))
                         {
-                            double totalRemaining = 0;
-                            foreach (var pack in packs.EnumerateArray())
+                            // The new API returns a list of resource packages under 'resource_pack_subscribe_infos'
+                            if (data.TryGetProperty("resource_pack_subscribe_infos", out var packs) && 
+                                packs.ValueKind == System.Text.Json.JsonValueKind.Array)
                             {
-                                if (pack.TryGetProperty("remaining_quantity", out var rem) && rem.TryGetDouble(out double val))
+                                double totalRemaining = 0;
+                                foreach (var pack in packs.EnumerateArray())
                                 {
-                                    totalRemaining += val;
+                                    if (pack.TryGetProperty("remaining_quantity", out var rem))
+                                    {
+                                        if (rem.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                            totalRemaining += rem.GetDouble();
+                                        else if (rem.ValueKind == System.Text.Json.JsonValueKind.String && double.TryParse(rem.GetString(), out double val))
+                                            totalRemaining += val;
+                                    }
                                 }
+                                result.Balance = $"{totalRemaining} Credits";
                             }
-                            result.Balance = $"{totalRemaining} Credits";
                         }
                     }
                     catch { /* Best effort */ }

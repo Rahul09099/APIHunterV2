@@ -73,30 +73,13 @@ This feature is intended for **authorized security auditing and educational rese
 
 
 
-OpenAI
-Anthropic (Claude)
-Google (Gemini)
-Cohere
-Stability AI
-ElevenLabs
-OpenRouter
-DeepSeek
-Mistral AI
-Groq
-Together AI
-Hugging Face
-Replicate
-Perplexity (PPLX)
-Fireworks AI
 OctoAI
 AI21 Labs
 AssemblyAI (Speech)
 Deepgram (Speech)
-Voyage AI (Embeddings)
 Jina AI (Embeddings)
 Anyscale (Ray)
 Upstage (Solar)
 Leonardo.ai (Image)
 Fal.ai (Image/Video)
 RunPod (GPU)
-A2E AI (Vi)
