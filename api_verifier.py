@@ -178,13 +178,35 @@ class DeepSeekProvider(BaseProvider):
                 return ValidationResult(ValidationStatus.UNAUTHORIZED, "Invalid Key", http_status=bal_resp.status_code)
             
             if self._is_success(bal_resp.status_code):
-                data = bal_resp.json()
-                info = data.get('balance_infos', [{}])[0] if 'balance_infos' in data else data.get('data', {}).get('balance_infos', [{}])[0]
-                total = info.get('total_balance', '0')
-                currency = info.get('currency', 'USD')
-                is_available = data.get('is_available', data.get('data', {}).get('is_available', True))
-                status = ValidationStatus.VALID if is_available and float(total) > 0 else ValidationStatus.QUOTA_EXHAUSTED
-                return ValidationResult(status, balance=f"{total} {currency}", tier="Paid" if float(info.get('topped_up_balance', 0)) > 0 else "Free", models=models, http_status=bal_resp.status_code, raw_response=bal_resp.text)
+                root = bal_resp.json()
+                data = root.get('data', root)
+                
+                balance_infos = data.get('balance_infos', [])
+                if balance_infos:
+                    info = balance_infos[0]
+                    total = info.get('total_balance', '0')
+                    currency = info.get('currency', 'USD')
+                    granted = info.get('granted_balance', '0')
+                    topped_up = info.get('topped_up_balance', '0')
+                    
+                    balance = f"{total} {currency} (Grant: {granted}, Paid: {topped_up})"
+                    tier = "Paid Account" if float(topped_up) > 0 else "Free/Grant Account"
+                    
+                    is_available = data.get('is_available', True)
+                    status = ValidationStatus.VALID if is_available and float(total) > 0 else ValidationStatus.QUOTA_EXHAUSTED
+                    
+                    metadata = {
+                        "total_balance": total,
+                        "granted_balance": granted,
+                        "topped_up_balance": topped_up,
+                        "currency": currency,
+                        "is_available": is_available
+                    }
+                    
+                    return ValidationResult(status, balance=balance, tier=tier, models=models, metadata=metadata, http_status=bal_resp.status_code, raw_response=bal_resp.text)
+                
+                return ValidationResult(ValidationStatus.VALID, detail="Key valid but no balance info", models=models, http_status=bal_resp.status_code, raw_response=bal_resp.text)
+            
             return ValidationResult(ValidationStatus.ERROR, f"Status {bal_resp.status_code}", http_status=bal_resp.status_code, raw_response=bal_resp.text)
         except Exception as e:
             return ValidationResult(ValidationStatus.ERROR, str(e))
@@ -271,12 +293,73 @@ class PiAPIProvider(BaseProvider):
             resp = requests.get("https://api.piapi.ai/account/info", headers=headers, timeout=self.timeout)
             if resp.status_code == 401 or resp.status_code == 403:
                 return ValidationResult(ValidationStatus.UNAUTHORIZED, "Invalid Key", http_status=resp.status_code)
+            
             if self._is_success(resp.status_code):
-                data = resp.json().get('data', resp.json())
+                root = resp.json()
+                data = root.get('data', root)
+                
                 tier = data.get('plan', 'Free')
-                balance = data.get('equivalent_in_usd', f"{data.get('remaining_credits', '0')} credits")
-                if isinstance(balance, (int, float)): balance = f"${balance} USD"
-                return ValidationResult(ValidationStatus.VALID, balance=balance, tier=tier, http_status=resp.status_code, raw_response=resp.text)
+                name = data.get('name')
+                detail = f"Account: {name}" if name else ""
+                
+                # Balance extraction
+                usd = data.get('equivalent_in_usd')
+                credits = data.get('remaining_credits')
+                
+                balance = None
+                if usd is not None:
+                    balance = f"${usd} USD"
+                elif credits is not None:
+                    balance = f"{credits} Credits"
+                
+                # Wallet details
+                wallet = data.get('wallet', {})
+                wallet_details = []
+                metadata = {"wallet": {}}
+                
+                fields = {
+                    "mj_remain": "MJ",
+                    "llm_remain": "LLM",
+                    "suno_remain": "Suno",
+                    "luma_remain": "Luma",
+                    "gpts_remain": "GPTs",
+                    "point_remain": "Points"
+                }
+                
+                for key, label in fields.items():
+                    if key in wallet:
+                        val = wallet[key]
+                        wallet_details.append(f"{label}: {val}")
+                        metadata["wallet"][key] = val
+                
+                if wallet_details:
+                    wallet_str = ", ".join(wallet_details)
+                    if balance:
+                        balance = f"{balance} ({wallet_str})"
+                    else:
+                        balance = wallet_str
+                
+                metadata.update({
+                    "plan": tier,
+                    "name": name,
+                    "equivalent_in_usd": usd,
+                    "remaining_credits": credits
+                })
+                
+                return ValidationResult(
+                    ValidationStatus.VALID, 
+                    balance=balance, 
+                    tier=tier, 
+                    detail=detail,
+                    metadata=metadata,
+                    http_status=resp.status_code, 
+                    raw_response=resp.text
+                )
+            
+            # Check for common quota/limit messages in error body
+            if any(ind in resp.text.lower() for ind in self.QUOTA_INDICATORS):
+                return ValidationResult(ValidationStatus.QUOTA_EXHAUSTED, f"Valid key but access issue: {self._truncate(resp.text)}", http_status=resp.status_code, raw_response=resp.text)
+                
             return ValidationResult(ValidationStatus.ERROR, f"Status {resp.status_code}", http_status=resp.status_code, raw_response=resp.text)
         except Exception as e:
             return ValidationResult(ValidationStatus.ERROR, str(e))
@@ -457,12 +540,20 @@ class CohereProvider(BaseProvider):
             
             # Extract balance/tier from headers
             h = resp.headers
+            # Trial keys use x-trial-endpoint-call-remaining, fallback to ratelimit
             rem = h.get('x-trial-endpoint-call-remaining') or h.get('x-ratelimit-remaining')
-            limit = h.get('x-endpoint-monthly-call-limit')
+            # Extract limit: trial keys use x-trial-endpoint-call-limit, paid might use monthly
+            limit = h.get('x-trial-endpoint-call-limit') or h.get('x-endpoint-monthly-call-limit') or h.get('x-ratelimit-limit')
+            
             is_trial = 'x-trial-endpoint-call-limit' in h or "Trial key" in resp.text
             
             tier = f"Trial (Limit: {limit})" if is_trial else f"Paid (Limit: {limit})"
-            balance = f"{rem} calls remaining" if rem else None
+            # If both rem and limit exist, show '39/40' format
+            if rem and limit:
+                balance = f"{rem} / {limit} calls remaining"
+            else:
+                balance = f"{rem} calls remaining" if rem else None
+                
             detail = f"Org: {org_id}, Owner: {owner_id}" if org_id else ""
             
             if self._is_success(resp.status_code):

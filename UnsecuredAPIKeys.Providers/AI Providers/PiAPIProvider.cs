@@ -65,36 +65,41 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         // Extract Account Tier and Info
                         if (data.TryGetProperty("plan", out var plan))
                         {
-                            result.AccountTier = plan.GetString();
+                            result.AccountTier = plan.ValueKind == JsonValueKind.String ? plan.GetString() : plan.GetRawText();
                         }
 
                         if (data.TryGetProperty("name", out var name))
                         {
-                            result.Detail = $"Account: {name.GetString()}";
+                            result.Detail = $"Account: {(name.ValueKind == JsonValueKind.String ? name.GetString() : name.GetRawText())}";
                         }
 
                         // Extract Balance/Credits
                         if (data.TryGetProperty("equivalent_in_usd", out var usdBalance))
                         {
-                            result.Balance = $"${usdBalance} USD";
+                            result.Balance = $"${(usdBalance.ValueKind == JsonValueKind.String ? usdBalance.GetString() : usdBalance.GetRawText())} USD";
                         }
                         else if (data.TryGetProperty("remaining_credits", out var credits))
                         {
-                            result.Balance = $"{credits} Credits";
+                            result.Balance = $"{(credits.ValueKind == JsonValueKind.String ? credits.GetString() : credits.GetRawText())} Credits";
                         }
 
                         // Extract Detailed Wallet Info
-                        if (data.TryGetProperty("wallet", out var wallet))
+                        if (data.TryGetProperty("wallet", out var wallet) && wallet.ValueKind == JsonValueKind.Object)
                         {
                             var details = new List<string>();
                             var walletData = new Dictionary<string, object>();
                             
-                            if (wallet.TryGetProperty("mj_remain", out var mj)) { details.Add($"MJ: {mj}"); walletData["mj_remain"] = mj.GetRawText(); }
-                            if (wallet.TryGetProperty("llm_remain", out var llm)) { details.Add($"LLM: {llm}"); walletData["llm_remain"] = llm.GetRawText(); }
-                            if (wallet.TryGetProperty("suno_remain", out var suno)) { details.Add($"Suno: {suno}"); walletData["suno_remain"] = suno.GetRawText(); }
-                            if (wallet.TryGetProperty("luma_remain", out var luma)) { details.Add($"Luma: {luma}"); walletData["luma_remain"] = luma.GetRawText(); }
-                            if (wallet.TryGetProperty("gpts_remain", out var gpts)) { details.Add($"GPTs: {gpts}"); walletData["gpts_remain"] = gpts.GetRawText(); }
-                            if (wallet.TryGetProperty("point_remain", out var points)) { details.Add($"Points: {points}"); walletData["point_remain"] = points.GetRawText(); }
+                            string[] walletFields = ["mj_remain", "llm_remain", "suno_remain", "luma_remain", "gpts_remain", "point_remain"];
+                            foreach (var field in walletFields)
+                            {
+                                if (wallet.TryGetProperty(field, out var val))
+                                {
+                                    string label = field.Split('_')[0].ToUpper();
+                                    string valStr = val.ValueKind == JsonValueKind.String ? val.GetString()! : val.GetRawText();
+                                    details.Add($"{label}: {valStr}");
+                                    walletData[field] = valStr;
+                                }
+                            }
 
                             result.Metadata ??= new Dictionary<string, object>();
                             result.Metadata["wallet"] = walletData;
@@ -114,9 +119,10 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                         // Structured capture for other fields
                         result.Metadata ??= new Dictionary<string, object>();
-                        if (data.TryGetProperty("plan", out var p)) result.Metadata["plan"] = p.GetString() ?? "";
-                        if (data.TryGetProperty("name", out var n)) result.Metadata["name"] = n.GetString() ?? "";
-                        if (data.TryGetProperty("equivalent_in_usd", out var usd)) result.Metadata["equivalent_in_usd"] = usd.GetRawText();
+                        if (data.TryGetProperty("plan", out var p)) result.Metadata["plan"] = p.ValueKind == JsonValueKind.String ? p.GetString()! : p.GetRawText();
+                        if (data.TryGetProperty("name", out var n)) result.Metadata["name"] = n.ValueKind == JsonValueKind.String ? n.GetString()! : n.GetRawText();
+                        if (data.TryGetProperty("equivalent_in_usd", out var usd)) result.Metadata["equivalent_in_usd"] = usd.ValueKind == JsonValueKind.String ? usd.GetString()! : usd.GetRawText();
+                        if (data.TryGetProperty("remaining_credits", out var rem)) result.Metadata["remaining_credits"] = rem.ValueKind == JsonValueKind.String ? rem.GetString()! : rem.GetRawText();
                     }
                     catch (Exception ex)
                     {

@@ -90,10 +90,10 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         if (hasBalance && balanceInfos.ValueKind == System.Text.Json.JsonValueKind.Array && balanceInfos.GetArrayLength() > 0)
                         {
                             var firstBalance = balanceInfos[0];
-                            string total = firstBalance.TryGetProperty("total_balance", out var t) ? t.GetString() ?? "0" : "0";
-                            string granted = firstBalance.TryGetProperty("granted_balance", out var g) ? g.GetString() ?? "0" : "0";
-                            string toppedUp = firstBalance.TryGetProperty("topped_up_balance", out var tu) ? tu.GetString() ?? "0" : "0";
-                            string currency = firstBalance.TryGetProperty("currency", out var curr) ? curr.GetString() ?? "USD" : "USD";
+                            string total = firstBalance.TryGetProperty("total_balance", out var t) ? (t.ValueKind == JsonValueKind.String ? t.GetString() : t.GetRawText()) ?? "0" : "0";
+                            string granted = firstBalance.TryGetProperty("granted_balance", out var g) ? (g.ValueKind == JsonValueKind.String ? g.GetString() : g.GetRawText()) ?? "0" : "0";
+                            string toppedUp = firstBalance.TryGetProperty("topped_up_balance", out var tu) ? (tu.ValueKind == JsonValueKind.String ? tu.GetString() : tu.GetRawText()) ?? "0" : "0";
+                            string currency = firstBalance.TryGetProperty("currency", out var curr) && curr.ValueKind == JsonValueKind.String ? curr.GetString() ?? "USD" : "USD";
                             
                             result.Balance = $"{total} {currency} (Grant: {granted}, Paid: {toppedUp})";
                             
