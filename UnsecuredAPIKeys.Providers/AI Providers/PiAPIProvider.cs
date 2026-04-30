@@ -54,23 +54,64 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     {
                         using var doc = JsonDocument.Parse(responseBody);
                         var root = doc.RootElement;
-
-                        // Official docs say equivalent_in_usd or remaining_credits
-                        if (root.TryGetProperty("equivalent_in_usd", out var balance))
+                        
+                        // PiAPI often wraps the actual data in a "data" property
+                        JsonElement data;
+                        if (!root.TryGetProperty("data", out data))
                         {
-                            result.Balance = $"${balance} USD";
+                            data = root;
                         }
-                        else if (root.TryGetProperty("remaining_credits", out var credits))
+
+                        // Extract Account Tier and Info
+                        if (data.TryGetProperty("plan", out var plan))
+                        {
+                            result.AccountTier = plan.GetString();
+                        }
+
+                        if (data.TryGetProperty("name", out var name))
+                        {
+                            result.Detail = $"Account: {name.GetString()}";
+                        }
+
+                        // Extract Balance/Credits
+                        if (data.TryGetProperty("equivalent_in_usd", out var usdBalance))
+                        {
+                            result.Balance = $"${usdBalance} USD";
+                        }
+                        else if (data.TryGetProperty("remaining_credits", out var credits))
                         {
                             result.Balance = $"{credits} Credits";
                         }
-                        
-                        if (root.TryGetProperty("account_name", out var name))
+
+                        // Extract Detailed Wallet Info
+                        if (data.TryGetProperty("wallet", out var wallet))
                         {
-                            result.AccountTier = name.GetString();
+                            var details = new List<string>();
+                            
+                            if (wallet.TryGetProperty("mj_remain", out var mj)) details.Add($"MJ: {mj}");
+                            if (wallet.TryGetProperty("llm_remain", out var llm)) details.Add($"LLM: {llm}");
+                            if (wallet.TryGetProperty("suno_remain", out var suno)) details.Add($"Suno: {suno}");
+                            if (wallet.TryGetProperty("luma_remain", out var luma)) details.Add($"Luma: {luma}");
+                            if (wallet.TryGetProperty("gpts_remain", out var gpts)) details.Add($"GPTs: {gpts}");
+                            if (wallet.TryGetProperty("point_remain", out var points)) details.Add($"Points: {points}");
+
+                            if (details.Any())
+                            {
+                                if (string.IsNullOrEmpty(result.Balance))
+                                {
+                                    result.Balance = string.Join(", ", details);
+                                }
+                                else
+                                {
+                                    result.Balance += $" ({string.Join(", ", details)})";
+                                }
+                            }
                         }
                     }
-                    catch { /* Best effort parsing */ }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "Error parsing PiAPI response");
+                    }
 
                     return result;
                 }

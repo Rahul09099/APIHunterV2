@@ -28,12 +28,36 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(string apiKey, HttpClient httpClient)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.deepseek.com/user/balance");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            // 1. Fetch models first (standard OpenAI-compatible endpoint)
+            List<ModelInfo>? discoveredModels = null;
+            try
+            {
+                using var modelsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.deepseek.com/models");
+                modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                var modelsResponse = await httpClient.SendAsync(modelsRequest);
+                
+                if (modelsResponse.IsSuccessStatusCode)
+                {
+                    string modelsBody = await modelsResponse.Content.ReadAsStringAsync();
+                    discoveredModels = ParseDeepSeekModels(modelsBody);
+                }
+                else if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    return ValidationResult.IsUnauthorized(modelsResponse.StatusCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "DeepSeek model discovery failed");
+            }
+
+            // 2. Fetch balance
+            using var balanceRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.deepseek.com/user/balance");
+            balanceRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
             try 
             {
-                var response = await httpClient.SendAsync(request);
+                var response = await httpClient.SendAsync(balanceRequest);
                 string responseBody = await response.Content.ReadAsStringAsync();
 
                 _logger?.LogDebug("DeepSeek balance API response: Status={StatusCode}, Body={Body}",
@@ -42,23 +66,62 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
                     var result = ValidationResult.Success(response.StatusCode, "Valid DeepSeek key");
+                    result.AvailableModels = discoveredModels;
                     
                     try 
                     {
                         using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                        if (doc.RootElement.TryGetProperty("data", out var data) && 
-                            data.TryGetProperty("balance_infos", out var balanceInfos) && 
-                            balanceInfos.GetArrayLength() > 0)
+                        var root = doc.RootElement;
+                        
+                        // Handle balance info (can be at root or wrapped in 'data')
+                        JsonElement balanceInfos;
+                        bool hasBalance = false;
+                        
+                        if (root.TryGetProperty("balance_infos", out balanceInfos))
+                        {
+                            hasBalance = true;
+                        }
+                        else if (root.TryGetProperty("data", out var data) && data.TryGetProperty("balance_infos", out balanceInfos))
+                        {
+                            hasBalance = true;
+                        }
+
+                        if (hasBalance && balanceInfos.ValueKind == System.Text.Json.JsonValueKind.Array && balanceInfos.GetArrayLength() > 0)
                         {
                             var firstBalance = balanceInfos[0];
-                            if (firstBalance.TryGetProperty("total_balance", out var total))
+                            string total = firstBalance.TryGetProperty("total_balance", out var t) ? t.GetString() ?? "0" : "0";
+                            string granted = firstBalance.TryGetProperty("granted_balance", out var g) ? g.GetString() ?? "0" : "0";
+                            string toppedUp = firstBalance.TryGetProperty("topped_up_balance", out var tu) ? tu.GetString() ?? "0" : "0";
+                            string currency = firstBalance.TryGetProperty("currency", out var curr) ? curr.GetString() ?? "USD" : "USD";
+                            
+                            result.Balance = $"{total} {currency} (Grant: {granted}, Paid: {toppedUp})";
+                            
+                            // Determine tier
+                            if (decimal.TryParse(toppedUp, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out decimal paid) && paid > 0)
                             {
-                                string currency = firstBalance.TryGetProperty("currency", out var curr) ? curr.GetString() ?? "USD" : "USD";
-                                result.Balance = $"{total} {currency}";
+                                result.AccountTier = "Paid Account";
+                            }
+                            else
+                            {
+                                result.AccountTier = "Free/Grant Account";
+                            }
+                        }
+
+                        // Check availability
+                        if (root.TryGetProperty("is_available", out var isAvailable))
+                        {
+                            bool available = isAvailable.GetBoolean();
+                            if (!available)
+                            {
+                                result.Detail = "Key is valid but not currently available (insufficient balance/quota)";
+                                result.IsQuotaExceeded = true;
                             }
                         }
                     }
-                    catch { /* Best effort */ }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "Error parsing DeepSeek balance response");
+                    }
 
                     return result;
                 }
@@ -68,17 +131,50 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 }
                 else if ((int)response.StatusCode == 429)
                 {
-                    return ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
+                    var res = ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
+                    res.AvailableModels = discoveredModels;
+                    return res;
                 }
                 else
                 {
-                    return ValidationResult.HasHttpError(response.StatusCode, 
+                    var res = ValidationResult.HasHttpError(response.StatusCode, 
                         $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                    res.AvailableModels = discoveredModels;
+                    return res;
                 }
             }
             catch (Exception ex)
             {
                 return ValidationResult.HasHttpError(HttpStatusCode.ServiceUnavailable, $"Connection failed: {ex.Message}");
+            }
+        }
+
+        private List<ModelInfo>? ParseDeepSeekModels(string jsonResponse)
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(jsonResponse);
+                if (!doc.RootElement.TryGetProperty("data", out var dataArray))
+                    return null;
+
+                var models = new List<ModelInfo>();
+                foreach (var modelElement in dataArray.EnumerateArray())
+                {
+                    var modelId = modelElement.GetProperty("id").GetString() ?? "";
+
+                    models.Add(new ModelInfo
+                    {
+                        ModelId = modelId,
+                        DisplayName = modelId,
+                        ModelGroup = modelId.Contains("reasoner") ? "Reasoner" : "Chat"
+                    });
+                }
+
+                return models;
+            }
+            catch
+            {
+                return null;
             }
         }
 

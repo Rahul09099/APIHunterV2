@@ -90,6 +90,9 @@ public class StatusController : ControllerBase
                 k.Status,
                 k.FirstFoundUTC,
                 k.LastCheckedUTC,
+                k.Balance,
+                k.AccountTier,
+                k.ValidationResponse,
                 keyPreview = k.ApiKey.Length > 20 ? k.ApiKey.Substring(0, 20) + "..." : k.ApiKey
             })
             .ToListAsync();

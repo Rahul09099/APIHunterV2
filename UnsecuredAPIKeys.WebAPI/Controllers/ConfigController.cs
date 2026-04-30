@@ -203,6 +203,7 @@ public class ConfigController : ControllerBase
                 ApiTypeName = k.ApiType.ToString(),
                 k.Balance,
                 k.AccountTier,
+                k.ValidationResponse,
                 k.LastCheckedUTC,
                 k.FirstFoundUTC
             })
@@ -210,9 +211,9 @@ public class ConfigController : ControllerBase
 
         if (format.ToLower() == "csv")
         {
-            var csv = "Id,ApiKey,ApiType,ApiTypeName,Balance,Tier,LastVerifiedAt,CreatedAt\n";
+            var csv = "Id,ApiKey,ApiType,ApiTypeName,Balance,Tier,ValidationResponse,LastVerifiedAt,CreatedAt\n";
             csv += string.Join("\n", validKeys.Select(k => 
-                $"{k.Id},\"{k.ApiKey}\",{k.ApiType},{k.ApiTypeName},{k.Balance},{k.AccountTier},{k.LastCheckedUTC:O},{k.FirstFoundUTC:O}"));
+                $"{k.Id},\"{k.ApiKey}\",{k.ApiType},{k.ApiTypeName},\"{k.Balance}\",\"{k.AccountTier}\",\"{k.ValidationResponse}\",{k.LastCheckedUTC:O},{k.FirstFoundUTC:O}"));
             
             return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", "valid_keys.csv");
         }
