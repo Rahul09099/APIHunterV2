@@ -43,20 +43,39 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Valid A2E AI key");
-
                     try
                     {
                         using var doc = JsonDocument.Parse(responseBody);
-                        if (doc.RootElement.TryGetProperty("data", out var data) &&
+                        var root = doc.RootElement;
+
+                        // A2E returns 200 OK even for invalid tokens, check internal code
+                        if (root.TryGetProperty("code", out var code) && code.GetInt32() != 200)
+                        {
+                            return ValidationResult.IsUnauthorized(HttpStatusCode.Unauthorized, 
+                                root.TryGetProperty("msg", out var msg) ? msg.GetString() : "Invalid token (internal code)");
+                        }
+
+                        var result = ValidationResult.Success(response.StatusCode, "Valid A2E AI key");
+
+                        if (root.TryGetProperty("data", out var data) &&
                             data.TryGetProperty("coins", out var coins))
                         {
-                            result.Balance = $"{coins} Coins";
+                            var coinCount = coins.GetInt32();
+                            result.Balance = $"{coinCount} Coins";
+                            
+                            if (coinCount <= 0)
+                            {
+                                result.IsQuotaExceeded = true;
+                                result.Detail = "Valid key but 0 coins remaining.";
+                            }
                         }
-                    }
-                    catch { /* Best effort parsing */ }
 
-                    return result;
+                        return result;
+                    }
+                    catch 
+                    { 
+                        return ValidationResult.Success(response.StatusCode, "Valid A2E AI key (parsing failed)"); 
+                    }
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
                 {

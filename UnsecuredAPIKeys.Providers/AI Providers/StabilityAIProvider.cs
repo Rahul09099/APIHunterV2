@@ -47,10 +47,17 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
                         if (doc.RootElement.TryGetProperty("credits", out var credits))
                         {
-                            result.Balance = $"{credits} Credits";
+                            var creditVal = credits.GetDouble();
+                            result.Balance = $"{creditVal:N2} Credits";
+
+                            if (creditVal <= 0)
+                            {
+                                result.IsQuotaExceeded = true;
+                                result.Detail = "Valid key but 0 credits remaining.";
+                            }
                         }
                     }
-                    catch { /* Best effort */ }
+                    catch { /* Best effort parsing */ }
 
                     return result;
                 }

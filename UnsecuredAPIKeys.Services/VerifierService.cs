@@ -362,13 +362,14 @@ public class VerifierService(
                 {
                     case Providers.Common.ValidationAttemptStatus.Valid:
                         // Check if the response indicates quota/rate limit issues FIRST
-                        // even if provider marked it as "Valid"
-                        if (result.Detail?.Contains("quota", StringComparison.OrdinalIgnoreCase) == true ||
-                            result.Detail?.Contains("credit", StringComparison.OrdinalIgnoreCase) == true ||
-                            result.Detail?.Contains("billing", StringComparison.OrdinalIgnoreCase) == true ||
+                        // Priority 1: Explicit flag from provider
+                        // Priority 2: Keyword search (fallback for older providers)
+                        if (result.IsQuotaExceeded ||
+                            result.Detail?.Contains("quota", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("credit exhausted", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("insufficient quota", StringComparison.OrdinalIgnoreCase) == true ||
                             result.Detail?.Contains("rate limit", StringComparison.OrdinalIgnoreCase) == true ||
-                            result.Detail?.Contains("rate_limit", StringComparison.OrdinalIgnoreCase) == true ||
-                            result.Detail?.Contains("exceeded", StringComparison.OrdinalIgnoreCase) == true)
+                            result.Detail?.Contains("rate_limit", StringComparison.OrdinalIgnoreCase) == true)
                         {
                             // Update the key's API type if a different provider validated it
                             if (key.ApiType != provider.ApiType)
@@ -427,8 +428,10 @@ public class VerifierService(
 
                     case Providers.Common.ValidationAttemptStatus.HttpError:
                         // Check if it's a quota/credits issue based on detail
-                        if (result.Detail?.Contains("quota", StringComparison.OrdinalIgnoreCase) == true ||
-                            result.Detail?.Contains("credit", StringComparison.OrdinalIgnoreCase) == true ||
+                        if (result.IsQuotaExceeded ||
+                            result.Detail?.Contains("quota", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("credit exhausted", StringComparison.OrdinalIgnoreCase) == true ||
+                            result.Detail?.Contains("insufficient quota", StringComparison.OrdinalIgnoreCase) == true ||
                             result.Detail?.Contains("billing", StringComparison.OrdinalIgnoreCase) == true)
                         {
                             // Update the key's API type if a different provider validated it

@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
@@ -53,23 +54,47 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    return ValidationResult.Success(response.StatusCode, $"Key is valid and generation working.");
+                    var result = ValidationResult.Success(response.StatusCode, "Key is valid and generation working.");
+                    
+                    // Identify trial keys in success response headers or body if possible
+                    if (responseBody.Contains("Trial key", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.AccountTier = "Trial";
+                    }
+                    
+                    return result;
                 }
-                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
-                         response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                else if (response.StatusCode == HttpStatusCode.Unauthorized || 
+                         response.StatusCode == HttpStatusCode.Forbidden)
                 {
                     return ValidationResult.IsUnauthorized(response.StatusCode);
                 }
                 else
                 {
-                    // Check for quota/billing issues
+                    var result = ValidationResult.Success(response.StatusCode, $"Valid key but access issue: {TruncateResponse(responseBody)}");
+
+                    // Check for quota/billing/trial issues
                     if (ContainsAny(responseBody, new HashSet<string> { "quota", "billing", "limit", "insufficient", "trial" }))
                     {
-                        return ValidationResult.Success(response.StatusCode, $"Valid key but access issue: {TruncateResponse(responseBody)}");
+                        result.IsQuotaExceeded = true;
+                        
+                        if (responseBody.Contains("trial", StringComparison.OrdinalIgnoreCase))
+                        {
+                            result.AccountTier = "Trial";
+                            result.Detail = "Valid trial key but limit reached.";
+                        }
+                        else
+                        {
+                            result.Detail = "Valid key but quota/billing issue.";
+                        }
+                    }
+                    else
+                    {
+                        return ValidationResult.HasHttpError(response.StatusCode, 
+                            $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
                     }
 
-                    return ValidationResult.HasHttpError(response.StatusCode, 
-                        $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                    return result;
                 }
             }
             catch (Exception ex)

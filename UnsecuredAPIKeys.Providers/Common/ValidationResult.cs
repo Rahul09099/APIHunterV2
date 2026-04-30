@@ -48,6 +48,11 @@ namespace UnsecuredAPIKeys.Providers.Common
         public string? AwsRiskLevel { get; set; }
         public bool AwsIsRootAccount { get; set; }
 
+        /// <summary>
+        /// Explicitly indicates if the key is valid but has no credits/quota remaining.
+        /// </summary>
+        public bool IsQuotaExceeded { get; set; }
+
         // Helper factory methods for convenience
         public static ValidationResult Success(HttpStatusCode statusCode, List<ModelInfo>? models = null) =>
             new() { Status = ValidationAttemptStatus.Valid, HttpStatusCode = statusCode, AvailableModels = models };

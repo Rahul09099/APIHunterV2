@@ -58,8 +58,24 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         if (root.TryGetProperty("character_count", out var used) &&
                             root.TryGetProperty("character_limit", out var limit))
                         {
-                            var remaining = limit.GetInt64() - used.GetInt64();
-                            result.Balance = $"{remaining:N0} chars remaining";
+                            var usedVal = used.GetInt64();
+                            var limitVal = limit.GetInt64();
+                            var remaining = limitVal - usedVal;
+
+                            bool canExtend = false;
+                            if (root.TryGetProperty("allowed_to_extend_character_limit", out var extend))
+                                canExtend = extend.GetBoolean();
+
+                            if (remaining <= 0 && !canExtend)
+                            {
+                                result.Balance = "0 (Exhausted)";
+                                result.IsQuotaExceeded = true;
+                                result.Detail = "Key is valid but character limit reached.";
+                            }
+                            else
+                            {
+                                result.Balance = $"{remaining:N0} chars" + (canExtend ? " (Pay-As-You-Go)" : "");
+                            }
                         }
                     }
                     catch { /* Best effort parsing */ }

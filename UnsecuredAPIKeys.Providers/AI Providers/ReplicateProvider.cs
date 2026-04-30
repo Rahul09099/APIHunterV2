@@ -46,10 +46,15 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     {
                         using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
                         var root = doc.RootElement;
-                        if (root.TryGetProperty("username", out var username))
-                            result.AccountTier = username.GetString();
-                        if (root.TryGetProperty("type", out var type))
-                            result.Detail = $"Valid Replicate token ({type.GetString()})";
+                        
+                        string? username = root.TryGetProperty("username", out var u) ? u.GetString() : null;
+                        string? type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
+
+                        if (!string.IsNullOrEmpty(username))
+                            result.AccountTier = username;
+                        
+                        if (!string.IsNullOrEmpty(type))
+                            result.Detail = $"Valid {type} account";
                     }
                     catch { /* Best effort */ }
 
@@ -59,6 +64,13 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
                     return ValidationResult.IsUnauthorized(response.StatusCode);
+                }
+
+                if (response.StatusCode == System.Net.HttpStatusCode.PaymentRequired)
+                {
+                    var result = ValidationResult.Success(response.StatusCode, "Valid key but account has no funds (402 Payment Required)");
+                    result.IsQuotaExceeded = true;
+                    return result;
                 }
 
                 return ValidationResult.HasHttpError(response.StatusCode, $"Status: {response.StatusCode} Body: {TruncateResponse(responseBody)}");

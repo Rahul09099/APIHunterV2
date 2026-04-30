@@ -2,7 +2,7 @@
 -- 🚀 APIHunterV2 MASTER INITIALIZATION SCRIPT
 -- Target: Supabase / PostgreSQL
 -- Safe to run multiple times (fully idempotent).
--- Last updated: April 2026 — includes all 24 AI providers.
+-- Last updated: April 2026 — Schema parity restored for ApplicationSettings.
 -- =============================================================================
 
 -- =============================================================================
@@ -90,6 +90,10 @@ CREATE INDEX IF NOT EXISTS "IX_SearchProviderTokens_AddedByTelegramId"
 --   MistralAI     = 260   OpenRouter      = 270   Perplexity    = 280
 --   Cerebras      = 290   VoyageAI        = 300   AWSBedrock    = 310
 --   AzureOpenAI   = 320   AWSIAM          = 330
+--   OctoAI        = 340   AI21Labs        = 350   AssemblyAI    = 360
+--   Deepgram      = 370   JinaAI          = 380   Anyscale      = 390
+--   Upstage       = 400   LeonardoAI      = 405   FalAI         = 415
+--   RunPod        = 420
 --   SendGrid      = 410   Mailgun         = 425   Slack         = 430
 --   Mapbox        = 600
 --
@@ -231,6 +235,8 @@ CREATE TABLE IF NOT EXISTS "ApplicationSettings" (
     "Description" TEXT
 );
 
+ALTER TABLE "ApplicationSettings" ADD COLUMN IF NOT EXISTS "Description" TEXT;
+
 -- =============================================================================
 -- SECTION 8: SEED DEFAULT SEARCH QUERIES (Idempotent)
 -- These are the GitHub Code Search strings the scraper uses.
@@ -345,7 +351,47 @@ FROM (VALUES
     ('AWS_ACCESS_KEY_ID'),
     ('AWS_SECRET_ACCESS_KEY'),
     ('aws_access_key_id'),
-    ('aws_secret_access_key')
+    ('aws_secret_access_key'),
+
+    -- ── OctoAI ───────────────────────────────────────────────────────────────
+    ('OCTOAI_TOKEN'),
+    ('OCTOAI_API_KEY'),
+
+    -- ── AI21 Labs ─────────────────────────────────────────────────────────────
+    ('AI21_API_KEY'),
+    ('AI21LABS_API_KEY'),
+
+    -- ── AssemblyAI ────────────────────────────────────────────────────────────
+    ('ASSEMBLYAI_API_KEY'),
+    ('ASSEMBLY_AI_API_KEY'),
+
+    -- ── Deepgram ──────────────────────────────────────────────────────────────
+    ('DEEPGRAM_API_KEY'),
+    ('DG_API_KEY'),
+
+    -- ── Jina AI ───────────────────────────────────────────────────────────────
+    ('JINA_API_KEY'),
+    ('jina_'),
+
+    -- ── Anyscale ──────────────────────────────────────────────────────────────
+    ('ANYSCALE_API_KEY'),
+    ('esecret_'),
+
+    -- ── Upstage (Solar) ───────────────────────────────────────────────────────
+    ('UPSTAGE_API_KEY'),
+    ('SOLAR_API_KEY'),
+    ('up_'),
+
+    -- ── Leonardo.ai ───────────────────────────────────────────────────────────
+    ('LEONARDO_API_KEY'),
+    ('LEONARDO_AI_API_KEY'),
+
+    -- ── Fal.ai ────────────────────────────────────────────────────────────────
+    ('FAL_KEY'),
+    ('FAL_API_KEY'),
+
+    -- ── RunPod ────────────────────────────────────────────────────────────────
+    ('RUNPOD_API_KEY')
 
 ) AS v(q)
 WHERE NOT EXISTS (

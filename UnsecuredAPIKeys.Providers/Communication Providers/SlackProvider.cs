@@ -48,9 +48,11 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
                     {
                         var result = ValidationResult.Success(response.StatusCode, "Valid Slack token");
                         
-                        string teamName = root.TryGetProperty("team", out var team) ? team.GetString() ?? "" : "";
-                        string user = root.TryGetProperty("user", out var usr) ? usr.GetString() ?? "" : "";
-                        result.Detail = $"Workspace: {teamName}, User: {user}";
+                        string teamName = root.TryGetProperty("team", out var team) ? team.GetString() ?? "Unknown Team" : "Unknown Team";
+                        string user = root.TryGetProperty("user", out var usr) ? usr.GetString() ?? "Unknown User" : "Unknown User";
+                        
+                        result.AccountTier = teamName;
+                        result.Detail = $"User: {user}";
 
                         // Try to get billing plan type
                         try 
@@ -70,14 +72,17 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
 
                         return result;
                     }
-                    else if (responseBody.Contains("invalid_auth") || responseBody.Contains("account_inactive"))
-                    {
-                         return ValidationResult.IsUnauthorized(response.StatusCode, $"Slack rejected key: {TruncateResponse(responseBody)}");
-                    }
                     else
                     {
-                        // Some other error inside 200 OK
-                         return ValidationResult.Success(response.StatusCode, $"Technically valid request but error response: {TruncateResponse(responseBody)}");
+                        string error = root.TryGetProperty("error", out var err) ? err.GetString() ?? "unknown_error" : "unknown_error";
+                        
+                        if (error == "invalid_auth" || error == "token_revoked" || error == "token_expired" || error == "account_inactive")
+                        {
+                             return ValidationResult.IsUnauthorized(response.StatusCode, $"Slack rejected key: {error}");
+                        }
+                        
+                        // Some other error inside 200 OK (e.g. missing scopes for auth.test - rare)
+                        return ValidationResult.HasHttpError(response.StatusCode, $"Slack API error: {error}");
                     }
                 }
                 else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 

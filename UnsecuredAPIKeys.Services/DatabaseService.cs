@@ -711,7 +711,11 @@ public class DatabaseService(DBContext dbContext)
             ApiTypeEnum.A2E or ApiTypeEnum.PiAPI or ApiTypeEnum.Groq or
             ApiTypeEnum.MistralAI or ApiTypeEnum.OpenRouter or ApiTypeEnum.Perplexity or
             ApiTypeEnum.Cerebras or ApiTypeEnum.VoyageAI or ApiTypeEnum.AWSBedrock or
-            ApiTypeEnum.AzureOpenAI or ApiTypeEnum.AWSIAM
+            ApiTypeEnum.AzureOpenAI or ApiTypeEnum.AWSIAM or
+            ApiTypeEnum.OctoAI or ApiTypeEnum.AI21Labs or ApiTypeEnum.AssemblyAI or
+            ApiTypeEnum.Deepgram or ApiTypeEnum.JinaAI or ApiTypeEnum.Anyscale or
+            ApiTypeEnum.Upstage or ApiTypeEnum.LeonardoAI or ApiTypeEnum.FalAI or
+            ApiTypeEnum.RunPod
                 => ApiCategoryEnum.AIAndLLM,
 
             ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack

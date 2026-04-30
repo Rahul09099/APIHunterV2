@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
@@ -49,30 +50,50 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
                         if (root.TryGetProperty("remain", out var remain) && 
                             root.TryGetProperty("total", out var total))
                         {
-                            result.Balance = $"{remain} / {total} Credits Remaining";
+                            var remainVal = remain.GetInt64();
+                            result.Balance = $"{remainVal} / {total.GetInt64()} Credits Remaining";
+                            
+                            if (remainVal <= 0)
+                            {
+                                result.IsQuotaExceeded = true;
+                                result.Detail = "Valid key but 0 credits remaining.";
+                            }
                         }
                     }
                     catch { /* Best effort */ }
 
                     return result;
                 }
-                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
-                         response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                else if (response.StatusCode == HttpStatusCode.Unauthorized || 
+                         response.StatusCode == HttpStatusCode.Forbidden)
                 {
-                    return ValidationResult.IsUnauthorized(response.StatusCode);
-                }
-                else
-                {
-                    // Fallback to scopes check
+                    // Fallback to scopes check before giving up
                     using var scopesRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.sendgrid.com/v3/scopes");
                     scopesRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
                     var scopesResponse = await httpClient.SendAsync(scopesRequest);
                     
                     if (IsSuccessStatusCode(scopesResponse.StatusCode))
                     {
-                        return ValidationResult.Success(scopesResponse.StatusCode, "Valid SendGrid key (Scopes check passed)");
+                        var result = ValidationResult.Success(scopesResponse.StatusCode, "Valid SendGrid key (Scopes check passed)");
+                        var scopesBody = await scopesResponse.Content.ReadAsStringAsync();
+                        
+                        if (scopesBody.Contains("mail.send"))
+                        {
+                            result.AccountTier = "Can Send Mail";
+                            result.Detail = "Valid key with mail.send permission.";
+                        }
+                        else
+                        {
+                            result.Detail = "Valid key but restricted permissions.";
+                        }
+                        
+                        return result;
                     }
 
+                    return ValidationResult.IsUnauthorized(response.StatusCode);
+                }
+                else
+                {
                     return ValidationResult.HasHttpError(response.StatusCode, 
                         $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
                 }

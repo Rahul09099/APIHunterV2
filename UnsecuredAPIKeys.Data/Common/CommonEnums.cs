@@ -76,6 +76,18 @@ namespace UnsecuredAPIKeys.Data.Common
         AzureOpenAI = 320,
         AWSIAM = 330,
 
+        // New AI Providers
+        OctoAI = 340,
+        AI21Labs = 350,
+        AssemblyAI = 360,
+        Deepgram = 370,
+        JinaAI = 380,
+        Anyscale = 390,
+        Upstage = 400,
+        LeonardoAI = 405,
+        FalAI = 415,
+        RunPod = 420,
+
         // Communication Category (4)
         SendGrid = 410,
         Mailgun = 425,

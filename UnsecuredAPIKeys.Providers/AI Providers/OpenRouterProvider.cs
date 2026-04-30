@@ -76,7 +76,14 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     if (data.TryGetProperty("limit_remaining", out var limitRemaining) &&
                         limitRemaining.ValueKind == JsonValueKind.Number)
                     {
-                        result.Balance = $"${limitRemaining.GetDouble():F4} credits remaining";
+                        var remaining = limitRemaining.GetDouble();
+                        result.Balance = $"${remaining:F4} credits remaining";
+                        
+                        if (remaining <= 0)
+                        {
+                            result.IsQuotaExceeded = true;
+                            result.Detail = "Valid key but no credits remaining.";
+                        }
                     }
                     else if (data.TryGetProperty("limit", out var limit) &&
                              limit.ValueKind == JsonValueKind.Null)

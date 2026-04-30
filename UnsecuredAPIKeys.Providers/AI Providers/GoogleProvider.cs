@@ -68,7 +68,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             
             // DECIDE: Use v1 if available, otherwise v1beta
             string endpointBase = "v1beta";
-            List<ModelInfo> modelsToUse = betaModels;
+            List<ModelInfo>? modelsToUse = betaModels;
 
             if (listV1Response.IsSuccessStatusCode && v1Models != null && v1Models.Count > 0)
             {
