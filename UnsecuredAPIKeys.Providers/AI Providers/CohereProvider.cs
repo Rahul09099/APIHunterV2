@@ -28,18 +28,36 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // Use v2 chat endpoint (v1 is deprecated as of 2024)
+                // 1. Get account IDs using v1 check-api-key
+                string orgId = null;
+                string ownerId = null;
+                
+                using var checkRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.cohere.com/v1/check-api-key");
+                checkRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                
+                var checkResponse = await httpClient.SendAsync(checkRequest);
+                if (checkResponse.StatusCode == HttpStatusCode.Unauthorized || checkResponse.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return ValidationResult.IsUnauthorized(checkResponse.StatusCode);
+                }
+
+                if (IsSuccessStatusCode(checkResponse.StatusCode))
+                {
+                    var checkBody = await checkResponse.Content.ReadAsStringAsync();
+                    using var doc = System.Text.Json.JsonDocument.Parse(checkBody);
+                    if (doc.RootElement.TryGetProperty("organization_id", out var orgProp)) orgId = orgProp.GetString();
+                    if (doc.RootElement.TryGetProperty("owner_id", out var ownerProp)) ownerId = ownerProp.GetString();
+                }
+
+                // 2. Check chat capability and extract limits from headers
                 using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.cohere.com/v2/chat");
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
                 request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
                 var requestBody = new
                 {
-                    model = "command-r",
-                    messages = new[]
-                    {
-                        new { role = "user", content = "hi" }
-                    },
+                    model = "command-r-08-2024",
+                    messages = new[] { new { role = "user", content = "hi" } },
                     max_tokens = 1
                 };
 
@@ -52,46 +70,39 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 _logger?.LogDebug("Cohere API response: Status={StatusCode}, Body={Body}",
                     response.StatusCode, TruncateResponse(responseBody));
 
+                // Extract metadata from headers
+                string remaining = response.Headers.Contains("x-trial-endpoint-call-remaining") 
+                    ? response.Headers.GetValues("x-trial-endpoint-call-remaining").FirstOrDefault() 
+                    : null;
+                string limit = response.Headers.Contains("x-endpoint-monthly-call-limit") 
+                    ? response.Headers.GetValues("x-endpoint-monthly-call-limit").FirstOrDefault() 
+                    : null;
+                bool isTrial = response.Headers.Contains("x-trial-endpoint-call-limit") || responseBody.Contains("Trial key");
+
+                var detailStr = $"Org: {orgId}, Owner: {ownerId}";
+                var tierStr = isTrial ? $"Trial (Limit: {limit})" : $"Paid (Limit: {limit})";
+
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Key is valid and generation working.");
-                    
-                    // Identify trial keys in success response headers or body if possible
-                    if (responseBody.Contains("Trial key", StringComparison.OrdinalIgnoreCase))
-                    {
-                        result.AccountTier = "Trial";
-                    }
-                    
+                    var result = ValidationResult.Success(response.StatusCode, "Key is valid.");
+                    result.AccountTier = tierStr;
+                    result.Detail = string.IsNullOrEmpty(remaining) ? detailStr : $"{remaining} calls remaining. {detailStr}";
                     return result;
-                }
-                else if (response.StatusCode == HttpStatusCode.Unauthorized || 
-                         response.StatusCode == HttpStatusCode.Forbidden)
-                {
-                    return ValidationResult.IsUnauthorized(response.StatusCode);
                 }
                 else
                 {
                     var result = ValidationResult.Success(response.StatusCode, $"Valid key but access issue: {TruncateResponse(responseBody)}");
+                    result.AccountTier = tierStr;
 
-                    // Check for quota/billing/trial issues
-                    if (ContainsAny(responseBody, new HashSet<string> { "quota", "billing", "limit", "insufficient", "trial" }))
+                    if (response.StatusCode == (HttpStatusCode)429 || ContainsAny(responseBody, new HashSet<string> { "quota", "billing", "limit", "insufficient", "trial" }))
                     {
                         result.IsQuotaExceeded = true;
-                        
-                        if (responseBody.Contains("trial", StringComparison.OrdinalIgnoreCase))
-                        {
-                            result.AccountTier = "Trial";
-                            result.Detail = "Valid trial key but limit reached.";
-                        }
-                        else
-                        {
-                            result.Detail = "Valid key but quota/billing issue.";
-                        }
+                        result.Detail = $"Quota reached. {detailStr}";
                     }
                     else
                     {
                         return ValidationResult.HasHttpError(response.StatusCode, 
-                            $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                            $"API request failed with status {response.StatusCode}. {detailStr}");
                     }
 
                     return result;
