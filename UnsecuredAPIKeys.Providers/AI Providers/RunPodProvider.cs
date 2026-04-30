@@ -10,7 +10,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Provider for RunPod API keys — cloud GPU marketplace and serverless endpoints.
     /// Verification endpoint: POST https://api.runpod.io/graphql (GraphQL introspection with Bearer auth)
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class RunPodProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "RunPod";

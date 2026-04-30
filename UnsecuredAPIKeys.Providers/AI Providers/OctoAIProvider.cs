@@ -10,7 +10,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Provider for OctoAI API keys — inference platform for open-source AI models.
     /// Verification endpoint: GET https://text.octoai.run/v1/models (Bearer auth)
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class OctoAIProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "OctoAI";

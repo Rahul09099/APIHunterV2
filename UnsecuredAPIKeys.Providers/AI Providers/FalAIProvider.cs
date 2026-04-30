@@ -10,7 +10,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Provider for Fal.ai API keys — fast serverless image and video generation.
     /// Verification endpoint: GET https://rest.alpha.fal.ai/tokens (Key-Id auth header)
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class FalAIProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "Fal.ai";

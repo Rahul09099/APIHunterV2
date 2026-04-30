@@ -10,7 +10,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Provider for Upstage API keys — Solar LLM and Document AI.
     /// Verification endpoint: GET https://api.upstage.ai/v1/models (Bearer auth)
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class UpstageProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "Upstage (Solar)";

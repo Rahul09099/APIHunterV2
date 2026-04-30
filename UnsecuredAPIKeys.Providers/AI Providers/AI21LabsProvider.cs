@@ -10,7 +10,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Provider for AI21 Labs API keys — Jurassic and Jamba LLM family.
     /// Verification endpoint: GET https://api.ai21.com/studio/v1/models (Bearer auth)
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class AI21LabsProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "AI21 Labs";

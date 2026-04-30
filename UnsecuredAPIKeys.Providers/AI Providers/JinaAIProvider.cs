@@ -10,7 +10,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Provider for Jina AI API keys — embeddings and multimodal AI.
     /// Verification endpoint: GET https://api.jina.ai/v1/models (Bearer auth)
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class JinaAIProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "Jina AI";

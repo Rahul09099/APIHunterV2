@@ -12,7 +12,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Invalid response: 401 with { "error": "Authentication error, API token missing/invalid" }
     /// No balance endpoint available via API — usage tracked in dashboard only.
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class AssemblyAIProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "AssemblyAI";

@@ -10,7 +10,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Provider for Anyscale API keys — managed Ray platform and LLM endpoints.
     /// Verification endpoint: GET https://api.endpoints.anyscale.com/v1/models (Bearer auth)
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class AnyscaleProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "Anyscale";

@@ -13,7 +13,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Auth: Authorization: Token {apiKey}
     /// Balance JSON: { "balances": [{ "balance_id": "...", "amount": 1250.75, "units": "USD" }] }
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class DeepgramProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "Deepgram";

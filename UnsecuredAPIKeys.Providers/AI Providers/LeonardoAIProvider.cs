@@ -10,7 +10,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Provider for Leonardo.ai API keys — AI image generation platform.
     /// Verification endpoint: GET https://cloud.leonardo.ai/api/rest/v1/me (Bearer auth)
     /// </summary>
-    [ApiProvider]
+    [ApiProvider(false, false)]
     public class LeonardoAIProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "Leonardo.ai";
