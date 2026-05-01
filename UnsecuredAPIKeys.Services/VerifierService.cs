@@ -413,9 +413,18 @@ public class VerifierService(
                             metadataObj["available_models"] = result.AvailableModels;
                         }
 
-                        if (metadataObj.Any())
+                        // Special case: Remove metadata for DeepSeek to save space (per user request)
+                        if (provider.ApiType == ApiTypeEnum.DeepSeek)
+                        {
+                            key.Metadata = null;
+                        }
+                        else if (metadataObj.Any())
                         {
                             key.Metadata = JsonSerializer.Serialize(metadataObj, new JsonSerializerOptions { WriteIndented = true });
+                        }
+                        else
+                        {
+                            key.Metadata = null;
                         }
 
                         // Capture AWS metadata if applicable

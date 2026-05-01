@@ -29,30 +29,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(string apiKey, HttpClient httpClient)
         {
-            // 1. Fetch models first (standard OpenAI-compatible endpoint)
-            List<ModelInfo>? discoveredModels = null;
-            try
-            {
-                using var modelsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.deepseek.com/models");
-                modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                var modelsResponse = await httpClient.SendAsync(modelsRequest);
-                
-                if (modelsResponse.IsSuccessStatusCode)
-                {
-                    string modelsBody = await modelsResponse.Content.ReadAsStringAsync();
-                    discoveredModels = ParseDeepSeekModels(modelsBody);
-                }
-                else if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    return ValidationResult.IsUnauthorized(modelsResponse.StatusCode);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "DeepSeek model discovery failed");
-            }
-
-            // 2. Fetch balance
+            // Fetch balance
             using var balanceRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.deepseek.com/user/balance");
             balanceRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
@@ -67,7 +44,6 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
                     var result = ValidationResult.Success(response.StatusCode, "Valid DeepSeek key");
-                    result.AvailableModels = discoveredModels;
                     
                     try 
                     {
@@ -97,13 +73,6 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                             
                             result.Balance = $"{total} {currency} (Grant: {granted}, Paid: {toppedUp})";
                             
-                            // Structured capture
-                            result.Metadata ??= new Dictionary<string, object>();
-                            result.Metadata["currency"] = currency;
-                            result.Metadata["total_balance"] = total;
-                            result.Metadata["granted_balance"] = granted;
-                            result.Metadata["topped_up_balance"] = toppedUp;
-
                             // Determine tier
                             if (decimal.TryParse(toppedUp, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out decimal paid) && paid > 0)
                             {
@@ -119,8 +88,6 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         if (root.TryGetProperty("is_available", out var isAvailable))
                         {
                             bool available = isAvailable.GetBoolean();
-                            result.Metadata ??= new Dictionary<string, object>();
-                            result.Metadata["is_available"] = available;
                             
                             if (!available)
                             {
@@ -134,7 +101,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         _logger?.LogWarning(ex, "Error parsing DeepSeek balance response");
                     }
 
-                    result.RawResponse = responseBody;
+                    // Truncate RawResponse to save space as requested by user
+                    result.RawResponse = TruncateResponse(responseBody, 200);
                     return result;
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized)
@@ -143,16 +111,13 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 }
                 else if ((int)response.StatusCode == 429)
                 {
-                    var res = ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
-                    res.AvailableModels = discoveredModels;
-                    return res;
+                    return ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
                 }
                 else
                 {
                     var res = ValidationResult.HasHttpError(response.StatusCode, 
                         $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
-                    res.AvailableModels = discoveredModels;
-                    res.RawResponse = responseBody;
+                    res.RawResponse = TruncateResponse(responseBody, 200);
                     return res;
                 }
             }
@@ -162,34 +127,6 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             }
         }
 
-        private List<ModelInfo>? ParseDeepSeekModels(string jsonResponse)
-        {
-            try
-            {
-                using var doc = System.Text.Json.JsonDocument.Parse(jsonResponse);
-                if (!doc.RootElement.TryGetProperty("data", out var dataArray))
-                    return null;
-
-                var models = new List<ModelInfo>();
-                foreach (var modelElement in dataArray.EnumerateArray())
-                {
-                    var modelId = modelElement.GetProperty("id").GetString() ?? "";
-
-                    models.Add(new ModelInfo
-                    {
-                        ModelId = modelId,
-                        DisplayName = modelId,
-                        ModelGroup = modelId.Contains("reasoner") ? "Reasoner" : "Chat"
-                    });
-                }
-
-                return models;
-            }
-            catch
-            {
-                return null;
-            }
-        }
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
