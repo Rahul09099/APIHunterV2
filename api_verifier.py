@@ -524,11 +524,35 @@ class OpenRouterProvider(BaseProvider):
             if resp.status_code == 401 or resp.status_code == 403:
                 return ValidationResult(ValidationStatus.UNAUTHORIZED, "Invalid Key", http_status=resp.status_code)
             if self._is_success(resp.status_code):
-                data = resp.json().get('data', {})
+                root = resp.json()
+                data = root.get('data', {})
+                
+                usage = data.get('usage', 0)
+                is_free = data.get('is_free_tier', False)
                 rem = data.get('limit_remaining')
-                balance = f"${rem:.4f} credits" if rem is not None else "Unlimited"
-                status = ValidationStatus.VALID if rem is None or rem > 0 else ValidationStatus.QUOTA_EXHAUSTED
-                return ValidationResult(status, balance=balance, tier=data.get('label'), http_status=resp.status_code, raw_response=resp.text)
+                limit = data.get('limit')
+                label = data.get('label')
+                
+                # Balance formatting
+                if is_free:
+                    balance = f"Free Tier Access (Usage: ${usage:.4f})"
+                    status = ValidationStatus.VALID
+                elif rem is not None:
+                    limit_info = f" / ${limit:.4f}" if limit is not None else ""
+                    balance = f"${rem:.4f}{limit_info} remaining"
+                    status = ValidationStatus.VALID if rem > 0 else ValidationStatus.QUOTA_EXHAUSTED
+                else:
+                    balance = f"No key limit (Used: ${usage:.4f})"
+                    status = ValidationStatus.VALID
+                
+                # Tier formatting
+                tier_name = "Free Tier" if is_free else "Paid Tier"
+                if label and label not in api_key:
+                    tier = f"{tier_name} (Label: {label})"
+                else:
+                    tier = tier_name
+                
+                return ValidationResult(status, balance=balance, tier=tier, metadata=data, http_status=resp.status_code, raw_response=resp.text)
             return ValidationResult(ValidationStatus.ERROR, f"Status {resp.status_code}", http_status=resp.status_code, raw_response=resp.text)
         except Exception as e:
             return ValidationResult(ValidationStatus.ERROR, str(e))

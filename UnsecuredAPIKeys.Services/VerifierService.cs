@@ -413,8 +413,8 @@ public class VerifierService(
                             metadataObj["available_models"] = result.AvailableModels;
                         }
 
-                        // Special case: Remove metadata for DeepSeek to save space (per user request)
-                        if (provider.ApiType == ApiTypeEnum.DeepSeek)
+                        // Special case: Remove metadata for providers where standard fields are sufficient to save space
+                        if (provider.ApiType == ApiTypeEnum.DeepSeek || provider.ApiType == ApiTypeEnum.OpenRouter)
                         {
                             key.Metadata = null;
                         }

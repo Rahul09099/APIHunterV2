@@ -65,19 +65,41 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             }
 
             // Parse credits and usage from response
-            // Response shape: { "data": { "label": "...", "usage": 0.0, "limit": null, "limit_remaining": null } }
+            // Response shape: { "data": { "label": "...", "usage": 0.0, "limit": null, "limit_remaining": null, "is_free_tier": false } }
             var result = ValidationResult.Success(response.StatusCode, "Valid OpenRouter key");
             try
             {
                 using var doc = JsonDocument.Parse(body);
                 if (doc.RootElement.TryGetProperty("data", out var data))
                 {
-                    // limit_remaining = credits left (null = unlimited)
-                    if (data.TryGetProperty("limit_remaining", out var limitRemaining) &&
+                    double usage = 0;
+                    if (data.TryGetProperty("usage", out var usageProp) && usageProp.ValueKind == JsonValueKind.Number)
+                    {
+                        usage = usageProp.GetDouble();
+                    }
+
+                    bool isFreeTier = false;
+                    if (data.TryGetProperty("is_free_tier", out var freeProp) && freeProp.ValueKind == JsonValueKind.True)
+                    {
+                        isFreeTier = true;
+                    }
+
+                    double? limit = null;
+                    if (data.TryGetProperty("limit", out var limitProp) && limitProp.ValueKind == JsonValueKind.Number)
+                    {
+                        limit = limitProp.GetDouble();
+                    }
+
+                    if (isFreeTier)
+                    {
+                        result.Balance = $"Free Tier Access (Usage: ${usage:F4})";
+                    }
+                    else if (data.TryGetProperty("limit_remaining", out var limitRemaining) &&
                         limitRemaining.ValueKind == JsonValueKind.Number)
                     {
                         var remaining = limitRemaining.GetDouble();
-                        result.Balance = $"${remaining:F4} credits remaining";
+                        string limitInfo = limit.HasValue ? $" / ${limit.Value:F4}" : "";
+                        result.Balance = $"${remaining:F4}{limitInfo} remaining";
                         
                         if (remaining <= 0)
                         {
@@ -85,17 +107,46 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                             result.Detail = "Valid key but no credits remaining.";
                         }
                     }
-                    else if (data.TryGetProperty("limit", out var limit) &&
-                             limit.ValueKind == JsonValueKind.Null)
+                    else
                     {
-                        result.Balance = "Unlimited (no credit limit set)";
+                        // limit: null means the key inherits account limits
+                        result.Balance = $"No key limit (Used: ${usage:F4})";
                     }
 
-                    // label = key name set by the user
-                    if (data.TryGetProperty("label", out var label) &&
-                        label.ValueKind == JsonValueKind.String)
+                    // Account Tier
+                    string tier = isFreeTier ? "Free Tier" : "Paid Tier";
+                    string? labelStr = null;
+
+                    if (data.TryGetProperty("label", out var label) && label.ValueKind == JsonValueKind.String)
                     {
-                        result.AccountTier = label.GetString();
+                        labelStr = label.GetString();
+                        // If label is NOT the api key itself, include it
+                        if (!string.IsNullOrEmpty(labelStr) && !apiKey.Contains(labelStr))
+                        {
+                            result.AccountTier = $"{tier} (Label: {labelStr})";
+                        }
+                        else
+                        {
+                            result.AccountTier = tier;
+                        }
+                    }
+                    else
+                    {
+                        result.AccountTier = tier;
+                    }
+
+                    // Populate Metadata
+                    result.Metadata = new Dictionary<string, object>();
+                    foreach (var prop in data.EnumerateObject())
+                    {
+                        switch (prop.Value.ValueKind)
+                        {
+                            case JsonValueKind.String: result.Metadata[prop.Name] = prop.Value.GetString() ?? ""; break;
+                            case JsonValueKind.Number: result.Metadata[prop.Name] = prop.Value.GetDouble(); break;
+                            case JsonValueKind.True: result.Metadata[prop.Name] = true; break;
+                            case JsonValueKind.False: result.Metadata[prop.Name] = false; break;
+                            case JsonValueKind.Null: result.Metadata[prop.Name] = "null"; break;
+                        }
                     }
                 }
             }
