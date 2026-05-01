@@ -801,7 +801,7 @@ public class DatabaseService(DBContext dbContext)
         await InitializeDatabaseAsync();
     }
 
-    public async Task ExportKeysAsync(DBContext dbContext, string filePath, bool validOnly, string format, long? filterByTelegramId = null)
+    public async Task ExportKeysAsync(DBContext dbContext, string filePath, string format, ApiStatusEnum? statusFilter = null, long? filterByTelegramId = null)
     {
         var query = dbContext.APIKeys.AsQueryable();
 
@@ -810,9 +810,21 @@ public class DatabaseService(DBContext dbContext)
             query = query.Where(k => k.DiscoveredByTelegramId == filterByTelegramId.Value);
         }
 
-        if (validOnly)
+        if (statusFilter.HasValue)
         {
-            // Export all working keys (with credits and without credits)
+            if ((int)statusFilter.Value == -1)
+            {
+                // Export ALL (do nothing, no filter)
+            }
+            else
+            {
+                // Export specific status
+                query = query.Where(k => k.Status == statusFilter.Value);
+            }
+        }
+        else
+        {
+            // Default: Export all working keys (Valid and ValidNoCredits)
             query = query.Where(k => k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits);
         }
 
@@ -842,8 +854,8 @@ public class DatabaseService(DBContext dbContext)
             StatusName = k.Status.ToString(),
             k.Balance,
             k.AccountTier,
-            k.FirstFoundUTC,
-            k.LastCheckedUTC,
+            FirstFoundIST = k.FirstFoundUTC.ToIst().ToString("yyyy-MM-dd HH:mm:ss"),
+            LastCheckedIST = k.LastCheckedUTC?.ToIst().ToString("yyyy-MM-dd HH:mm:ss"),
             k.TimesDisplayed,
             k.ValidationResponse,
             k.Metadata,
@@ -880,7 +892,7 @@ public class DatabaseService(DBContext dbContext)
         {
             "Id,ApiKey,Type,TypeName,Status,StatusName,Balance,Tier,ValidationResponse," +
             "AwsAccountId,AwsUserArn,AwsCredentialType,AwsRiskLevel,AwsIsRootAccount,AwsAttachedPolicies," +
-            "FirstFoundUTC,LastCheckedUTC,Source,SourceFoundUTC"
+            "FirstFoundIST,LastCheckedIST,Source,SourceFoundIST"
         };
 
         foreach (var key in keys)
@@ -908,7 +920,7 @@ public class DatabaseService(DBContext dbContext)
                 lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\"," +
                           $"\"{key.AwsAccountId ?? ""}\",\"{key.AwsUserArn ?? ""}\",\"{key.AwsCredentialType ?? ""}\"," +
                           $"\"{key.AwsRiskLevel ?? ""}\",{key.AwsIsRootAccount},\"{policies}\"," +
-                          $"{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"\",");
+                          $"\"{key.FirstFoundUTC.ToIst():yyyy-MM-dd HH:mm:ss}\",\"{key.LastCheckedUTC?.ToIst():yyyy-MM-dd HH:mm:ss}\",\"\",");
             }
             else
             {
@@ -918,7 +930,7 @@ public class DatabaseService(DBContext dbContext)
                     lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\"," +
                               $"\"{key.AwsAccountId ?? ""}\",\"{key.AwsUserArn ?? ""}\",\"{key.AwsCredentialType ?? ""}\"," +
                               $"\"{key.AwsRiskLevel ?? ""}\",{key.AwsIsRootAccount},\"{policies}\"," +
-                              $"{key.FirstFoundUTC:O},{key.LastCheckedUTC:O},\"{source}\",{r.FoundUTC:O}");
+                              $"\"{key.FirstFoundUTC.ToIst():yyyy-MM-dd HH:mm:ss}\",\"{key.LastCheckedUTC?.ToIst():yyyy-MM-dd HH:mm:ss}\",\"{source}\",\"{r.FoundUTC.ToIst():yyyy-MM-dd HH:mm:ss}\"");
                 }
             }
         }

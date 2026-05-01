@@ -388,6 +388,42 @@ class GroqProvider(BaseProvider):
         except Exception as e:
             return ValidationResult(ValidationStatus.ERROR, str(e))
 
+class CerebrasProvider(BaseProvider):
+    provider_name = "Cerebras"
+    regex_patterns = [r"\bcsk-[A-Za-z0-9]{40,80}\b"]
+
+    def validate(self, api_key):
+        api_key = self.clean_key(api_key)
+        headers = {"Authorization": f"Bearer {api_key}"}
+        try:
+            # 1. Get models
+            resp = requests.get("https://api.cerebras.ai/v1/models", headers=headers, timeout=self.timeout)
+            if resp.status_code in [401, 403]:
+                return ValidationResult(ValidationStatus.UNAUTHORIZED, "Invalid Key", http_status=resp.status_code)
+            if not self._is_success(resp.status_code):
+                return ValidationResult(ValidationStatus.ERROR, f"Models fail: {resp.status_code}", http_status=resp.status_code)
+
+            models = [m['id'] for m in resp.json().get('data', [])]
+            
+            # 2. Test completion
+            payload = {
+                "model": "llama3.1-8b",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1
+            }
+            chat_resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+            
+            if self._is_success(chat_resp.status_code):
+                return ValidationResult(ValidationStatus.VALID, "Active key", models=models, http_status=chat_resp.status_code)
+            
+            if chat_resp.status_code == 429 or "quota" in chat_resp.text.lower():
+                return ValidationResult(ValidationStatus.QUOTA_EXHAUSTED, "Valid but no quota", models=models, http_status=chat_resp.status_code)
+                
+            return ValidationResult(ValidationStatus.VALID, "Valid but completion failed", models=models, http_status=chat_resp.status_code)
+        except Exception as e:
+            return ValidationResult(ValidationStatus.ERROR, str(e))
+
+
 class MistralProvider(BaseProvider):
     provider_name = "Mistral AI"
     regex_patterns = [r"(?i)MISTRAL[_-]?API[_-]?KEY.*?[:=].*?([A-Za-z0-9]{32})"]
@@ -768,7 +804,7 @@ class VerifierEngine:
             PerplexityProvider(), RunwayProvider(), A2EProvider(), OpenRouterProvider(),
             TogetherAIProvider(), CohereProvider(), VoyageAIProvider(), XAIProvider(),
             HuggingFaceProvider(), ReplicateProvider(), StabilityAIProvider(), PolloAIProvider(),
-            SendGridProvider(), SlackProvider()
+            SendGridProvider(), SlackProvider(), CerebrasProvider()
         ]
 
     def identify_provider(self, key_text):

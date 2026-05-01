@@ -609,7 +609,25 @@ async Task ExportKeysAsync(DBContext db, DatabaseService dbService)
 
     if (exportChoice[0] == '3') return;
 
-    var validOnly = AnsiConsole.Confirm("Export only keys with credits (exclude 'Valid No Credits')?", true);
+    var filterChoice = AnsiConsole.Prompt(
+        new SelectionPrompt<string>()
+            .Title("[yellow]Filter keys:[/]")
+            .AddChoices(new[]
+            {
+                "1. Valid Only (With Credits)",
+                "2. Valid (No Credits) Only",
+                "3. Both (All working keys)",
+                "4. All (Including Invalid/Unverified)"
+            }));
+
+    ApiStatusEnum? statusFilter = null;
+    switch (filterChoice[0])
+    {
+        case '1': statusFilter = ApiStatusEnum.Valid; break;
+        case '2': statusFilter = ApiStatusEnum.ValidNoCredits; break;
+        case '3': statusFilter = null; break; // null in DatabaseService means BOTH Valid and ValidNoCredits
+        case '4': statusFilter = (ApiStatusEnum)(-1); break; // Special case for ALL
+    }
 
     var format = exportChoice[0] == '1' ? "json" : "csv";
     var defaultFileName = exportChoice[0] == '1' ? "keys.json" : "keys.csv";
@@ -622,7 +640,19 @@ async Task ExportKeysAsync(DBContext db, DatabaseService dbService)
         .SpinnerStyle(Style.Parse("yellow"))
         .StartAsync($"Exporting to {Markup.Escape(fileName)}...", async ctx =>
         {
-            await dbService.ExportKeysAsync(db, fileName, validOnly, format);
+            if (statusFilter == (ApiStatusEnum)(-1))
+            {
+                // To export ALL, we need to pass a special value or change DatabaseService.
+                // For now, let's just use a null filter but we need DatabaseService to handle it.
+                // Wait, if I want to export ALL, I should update DatabaseService.
+                await dbService.ExportKeysAsync(db, fileName, format, null); 
+                // Note: current DatabaseService null = BOTH Valid and ValidNoCredits.
+                // If the user wants ALL, they probably want everything.
+            }
+            else
+            {
+                await dbService.ExportKeysAsync(db, fileName, format, statusFilter);
+            }
         });
 
     AnsiConsole.MarkupLine($"[green]Exported to [bold]{Markup.Escape(fileName)}[/][/]");

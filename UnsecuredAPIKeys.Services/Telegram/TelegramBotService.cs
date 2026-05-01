@@ -636,7 +636,7 @@ public class TelegramBotService : BackgroundService
             help.AppendLine();
             help.AppendLine("💾 <b>Data</b>");
             help.AppendLine("├ /valid_keys - Count of valid keys");
-            help.AppendLine("├ /export [csv|json] - Get keys file");
+            help.AppendLine("├ /export [csv|json] [--validNoCredit] - Get keys file");
             help.AppendLine("├ /purge - Clean junk records (Master)");
             help.AppendLine("├ /purge_junk - Purge references for invalid keys (Optimization)");
             help.AppendLine("└ /reset_database CONFIRM_RESET - Wipe DB");
@@ -1209,10 +1209,20 @@ public class TelegramBotService : BackgroundService
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
-    private async Task HandleExportCommand(long chatId, string format, bool isAdmin, CancellationToken ct, long? targetUserId = null)
+    private async Task HandleExportCommand(long chatId, string args, bool isAdmin, CancellationToken ct, long? targetUserId = null)
     {
-        string fmt = (format?.ToLower() == "json") ? "json" : "csv";
-        string fileName = $"valid_keys_{DateTime.Now:yyyyMMdd_HHmmss}.{fmt}";
+        string fmt = (args != null && args.Contains("json", StringComparison.OrdinalIgnoreCase)) ? "json" : "csv";
+        
+        ApiStatusEnum? status = ApiStatusEnum.Valid;
+        string statusLabel = "valid";
+        
+        if (args != null && args.Contains("--validNoCredit", StringComparison.OrdinalIgnoreCase))
+        {
+            status = ApiStatusEnum.ValidNoCredits;
+            statusLabel = "Valid No Credits";
+        }
+
+        string fileName = $"export_{statusLabel.Replace(" ", "_").ToLower()}_{DateTime.Now:yyyyMMdd_HHmmss}.{fmt}";
         string filePath = Path.Combine(Path.GetTempPath(), fileName);
 
         using var scope = _serviceProvider.CreateScope();
@@ -1220,14 +1230,14 @@ public class TelegramBotService : BackgroundService
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
         // Filter by chatId if not admin
-        long? filterBy = isAdmin ? null : chatId;
-        await dbService.ExportKeysAsync(dbContext, filePath, true, fmt, filterBy);
+        long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
+        await dbService.ExportKeysAsync(dbContext, filePath, fmt, status, filterBy);
 
         using var stream = System.IO.File.OpenRead(filePath);
         await _botClient.SendDocument(
             chatId: chatId,
             document: InputFile.FromStream(stream, fileName),
-            caption: $"📂 Exported valid keys in {fmt.ToUpper()} format.",
+            caption: $"📂 Exported {statusLabel} keys in {fmt.ToUpper()} format.",
             cancellationToken: ct);
 
         try { System.IO.File.Delete(filePath); } catch { }
