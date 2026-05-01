@@ -942,6 +942,20 @@ public class DatabaseService(DBContext dbContext)
     {
         return await PurgeJunkSourcesAsync(context);
     }
+
+    public async Task VacuumDatabaseAsync(DBContext context)
+    {
+        if (context.Database.IsNpgsql())
+        {
+            // PostgreSQL non-blocking vacuum
+            await context.Database.ExecuteSqlRawAsync("VACUUM ANALYZE;");
+        }
+        else if (context.Database.IsSqlite())
+        {
+            // SQLite full vacuum (reclaims file space)
+            await context.Database.ExecuteSqlRawAsync("VACUUM;");
+        }
+    }
 }
 
 public class Statistics

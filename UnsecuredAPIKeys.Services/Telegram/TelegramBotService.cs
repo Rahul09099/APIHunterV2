@@ -302,9 +302,6 @@ public class TelegramBotService : BackgroundService
                 case "/purge":
                     await HandlePurgeCommand(chatId, isAdmin, cancellationToken);
                     break;
-                case "/purge_junk":
-                    if (isAdmin) await HandlePurgeJunkCommand(chatId, cancellationToken);
-                    break;
                 case "/user_dash":
                     if (isAdmin)
                     {
@@ -345,6 +342,9 @@ public class TelegramBotService : BackgroundService
                     break;
                 case "/partition_status":
                     if (isAdmin) await HandlePartitionStatusCommand(chatId, cancellationToken);
+                    break;
+                case "/vacuum":
+                    if (isAdmin) await HandleVacuumCommand(chatId, cancellationToken);
                     break;
                 default:
                     if (messageText.StartsWith("/"))
@@ -431,11 +431,11 @@ public class TelegramBotService : BackgroundService
                     await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: cancellationToken);
                 }
             }
-            else if (callbackData == "purge_junk")
+            else if (callbackData == "purge_junk" || callbackData == "purge")
             {
                 if (isAdmin)
                 {
-                    await HandlePurgeJunkCommand(chatId, cancellationToken);
+                    await HandlePurgeCommand(chatId, true, cancellationToken);
                 }
             }
             else if (callbackData == "admin_list_subs")
@@ -629,6 +629,11 @@ public class TelegramBotService : BackgroundService
             help.AppendLine("├ /add_query &lt;query&gt; - Add search query");
             help.AppendLine("├ /delete_query &lt;id&gt; - Delete search query");
             help.AppendLine("└ /toggle_query &lt;id&gt; - Toggle a query");
+
+            help.AppendLine();
+            help.AppendLine("🧹 <b>Database Optimization</b>");
+            help.AppendLine("├ /purge - Clean junk source records");
+            help.AppendLine("└ /vacuum - Full DB optimization (Safe mode)");
         }
  
         if (isAdmin)
@@ -1707,9 +1712,46 @@ public class TelegramBotService : BackgroundService
         await _botClient.EditMessageText(chatId, statusMsg.MessageId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
-    private async Task HandlePurgeJunkCommand(long chatId, CancellationToken ct)
+    private async Task HandleVacuumCommand(long chatId, CancellationToken ct)
     {
-        await HandlePurgeCommand(chatId, true, ct);
+        var runningJobs = _jobManager.GetAllJobs().Where(j => j.Status == "Running").ToList();
+        
+        if (runningJobs.Any())
+        {
+            await _botClient.SendMessage(chatId, 
+                $"⚠️ <b>Cannot run vacuum!</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nThere are <code>{runningJobs.Count}</code> jobs currently running. Please wait for them to finish or stop them with /stop_all before running vacuum to avoid database locks.", 
+                parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        var statusMsg = await _botClient.SendMessage(chatId, "🧹 <b>Reclaiming database storage space...</b>\n<i>This may take a moment.</i>", parseMode: ParseMode.Html, cancellationToken: ct);
+
+        try 
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+            var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+
+            var beforeSize = await dbService.GetDatabaseSizeInBytesAsync();
+            await dbService.VacuumDatabaseAsync(dbContext);
+            var afterSize = await dbService.GetDatabaseSizeInBytesAsync();
+
+            double savedMb = (beforeSize - afterSize) / (1024.0 * 1024.0);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("<b>✅ DATABASE VACUUM COMPLETE</b>");
+            sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+            sb.AppendLine($"💾 <b>Space Reclaimed:</b> <code>~{Math.Max(0, savedMb):F2} MB</code>");
+            sb.AppendLine($"📊 <b>Current Size:</b> <code>{(afterSize / (1024.0 * 1024.0)):F2} MB</code>");
+            sb.AppendLine();
+            sb.AppendLine("<i>Database file has been optimized and unused space returned to the system.</i>");
+
+            await _botClient.EditMessageText(chatId, statusMsg.MessageId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+        }
+        catch (Exception ex)
+        {
+            await _botClient.EditMessageText(chatId, statusMsg.MessageId, $"❌ <b>Vacuum failed:</b> {ex.Message}", parseMode: ParseMode.Html, cancellationToken: ct);
+        }
     }
 
     // ── New Admin Commands ────────────────────────────────────────────────────
