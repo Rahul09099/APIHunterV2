@@ -450,25 +450,81 @@ class MistralProvider(BaseProvider):
 
 class PerplexityProvider(BaseProvider):
     provider_name = "Perplexity"
-    regex_patterns = [r"pplx-[A-Za-z0-9]{48}"]
+    regex_patterns = [r"pplx-[A-Za-z0-9]{40,64}"]
 
     def validate(self, api_key):
         api_key = self.clean_key(api_key)
         headers = {"Authorization": f"Bearer {api_key}"}
         try:
-            resp = requests.get("https://api.perplexity.ai/models", headers=headers, timeout=self.timeout)
-            if resp.status_code == 401:
-                return ValidationResult(ValidationStatus.UNAUTHORIZED, "Invalid Key", http_status=resp.status_code)
-            if self._is_success(resp.status_code):
-                models = [m['id'] for m in resp.json().get('data', [])]
-                model = models[0] if models else "llama-3.1-8b-instruct"
-                gen_resp = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}, timeout=self.timeout)
-                if self._is_success(gen_resp.status_code):
-                    return ValidationResult(ValidationStatus.VALID, "Active key", models=models, http_status=gen_resp.status_code, raw_response=gen_resp.text)
-                if gen_resp.status_code == 429:
-                    return ValidationResult(ValidationStatus.QUOTA_EXHAUSTED, "Quota exhausted", models=models, http_status=gen_resp.status_code, raw_response=gen_resp.text)
-                return ValidationResult(ValidationStatus.VALID, "Valid but completion failed", models=models, http_status=gen_resp.status_code, raw_response=gen_resp.text)
-            return ValidationResult(ValidationStatus.ERROR, f"Status {resp.status_code}", http_status=resp.status_code, raw_response=resp.text)
+            # 1. Get models (using /v1/models)
+            models = []
+            m_resp = requests.get("https://api.perplexity.ai/v1/models", headers=headers, timeout=self.timeout)
+            if self._is_success(m_resp.status_code):
+                models = [m['id'] for m in m_resp.json().get('data', [])]
+            elif m_resp.status_code in [401, 403]:
+                return ValidationResult(ValidationStatus.UNAUTHORIZED, "Invalid Key", http_status=m_resp.status_code)
+
+            # 2. Test completion
+            model = "sonar" # Default known good
+            if models:
+                # Prefer models that don't have a prefix like "openai/" or "anthropic/" if we are calling Perplexity directly
+                preferred = ["sonar", "sonar-pro", "llama-3.1-8b-instruct"]
+                for p in preferred:
+                    if any(p == m or f"perplexity/{p}" == m for m in models):
+                        model = p
+                        break
+                else:
+                    model = models[0]
+            
+            payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+            gen_resp = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+            
+            # Rate limit extraction (even if not always present in success)
+            h = gen_resp.headers
+            limit = h.get('x-ratelimit-limit') or h.get('x-ratelimit-limit-requests')
+            rem = h.get('x-ratelimit-remaining') or h.get('x-ratelimit-remaining-requests')
+            
+            metadata = {}
+            if limit: metadata["limit"] = limit
+            if rem: metadata["remaining"] = rem
+            
+            # Tier inference from limit if possible
+            tier = None
+            if limit:
+                try:
+                    l_val = int(limit)
+                    if l_val <= 50: tier = "Tier 0"
+                    elif l_val <= 150: tier = "Tier 1"
+                    elif l_val <= 500: tier = "Tier 2"
+                    elif l_val <= 1000: tier = "Tier 3"
+                    else: tier = "Tier 4+"
+                except: pass
+
+            if self._is_success(gen_resp.status_code):
+                data = gen_resp.json()
+                usage = data.get('usage', {})
+                cost = usage.get('cost', {})
+                if cost:
+                    metadata["last_request_cost"] = cost.get('total_cost')
+                
+                return ValidationResult(
+                    ValidationStatus.VALID, 
+                    "Active key", 
+                    models=models, 
+                    tier=tier,
+                    metadata=metadata,
+                    http_status=gen_resp.status_code, 
+                    raw_response=gen_resp.text
+                )
+            
+            if gen_resp.status_code == 429:
+                return ValidationResult(ValidationStatus.QUOTA_EXHAUSTED, "Quota exhausted", models=models, tier=tier, metadata=metadata, http_status=gen_resp.status_code, raw_response=gen_resp.text)
+            
+            # If models worked but chat failed for other reasons
+            if models:
+                return ValidationResult(ValidationStatus.VALID, f"Valid key but chat failed ({gen_resp.status_code})", models=models, tier=tier, metadata=metadata, http_status=gen_resp.status_code, raw_response=gen_resp.text)
+                
+            return ValidationResult(ValidationStatus.ERROR, f"Status {gen_resp.status_code}", http_status=gen_resp.status_code, raw_response=gen_resp.text)
         except Exception as e:
             return ValidationResult(ValidationStatus.ERROR, str(e))
 
