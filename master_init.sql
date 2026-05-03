@@ -90,7 +90,7 @@ CREATE INDEX IF NOT EXISTS "IX_SearchProviderTokens_AddedByTelegramId"
 --   MistralAI     = 260   OpenRouter      = 270   Perplexity    = 280
 --   Cerebras      = 290   VoyageAI        = 300   AWSBedrock    = 310
 --   AzureOpenAI   = 320   AWSIAM          = 330
---   OctoAI        = 340   AI21Labs        = 350   AssemblyAI    = 360
+--   AI21Labs      = 350   AssemblyAI      = 360
 --   Deepgram      = 370   JinaAI          = 380   Anyscale      = 390
 --   Upstage       = 400   LeonardoAI      = 405   FalAI         = 415
 --   RunPod        = 420
@@ -353,10 +353,6 @@ FROM (VALUES
     ('aws_access_key_id'),
     ('aws_secret_access_key'),
 
-    -- ── OctoAI ───────────────────────────────────────────────────────────────
-    ('OCTOAI_TOKEN'),
-    ('OCTOAI_API_KEY'),
-
     -- ── AI21 Labs ─────────────────────────────────────────────────────────────
     ('AI21_API_KEY'),
     ('AI21LABS_API_KEY'),
@@ -373,10 +369,6 @@ FROM (VALUES
     ('JINA_API_KEY'),
     ('jina_'),
 
-    -- ── Anyscale ──────────────────────────────────────────────────────────────
-    ('ANYSCALE_API_KEY'),
-    ('esecret_'),
-
     -- ── Upstage (Solar) ───────────────────────────────────────────────────────
     ('UPSTAGE_API_KEY'),
     ('SOLAR_API_KEY'),
@@ -391,7 +383,8 @@ FROM (VALUES
     ('FAL_API_KEY'),
 
     -- ── RunPod ────────────────────────────────────────────────────────────────
-    ('RUNPOD_API_KEY')
+    ('RUNPOD_API_KEY'),
+    ('rpa_')
 
 ) AS v(q)
 WHERE NOT EXISTS (

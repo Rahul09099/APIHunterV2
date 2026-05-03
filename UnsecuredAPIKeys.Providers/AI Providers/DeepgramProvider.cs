@@ -8,12 +8,30 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
     /// Provider for Deepgram API keys — real-time and batch speech-to-text.
-    /// Step 1: GET /v1/projects → get project_id
-    /// Step 2: GET /v1/projects/{project_id}/balances → get USD balance
-    /// Auth: Authorization: Token {apiKey}
-    /// Balance JSON: { "balances": [{ "balance_id": "...", "amount": 1250.75, "units": "USD" }] }
+    ///
+    /// Key format: plain alphanumeric string, NO fixed prefix.
+    ///   - GitGuardian confirms: Prefixed=False, High recall=False
+    ///   - RedHunt Labs example uses "dg.xxxxxxx" as a placeholder, NOT an actual prefix
+    ///   - Keys are typically 40 alphanumeric characters (a-z, A-Z, 0-9)
+    ///   - NOT hex-only — contains uppercase and mixed case characters
+    ///
+    /// Auth: Authorization: Token {apiKey}   (NOT Bearer — confirmed from official docs)
+    ///   curl: -H "Authorization: Token [API_KEY]"
+    ///
+    /// Verification strategy (two-step):
+    ///   Step 1: GET https://api.deepgram.com/v1/projects
+    ///     - User-specific endpoint — 401 without valid key
+    ///     - Response: { "projects": [{ "project_id": "...", "name": "..." }] }
+    ///     - Extracts project_id for Step 2
+    ///
+    ///   Step 2: GET https://api.deepgram.com/v1/projects/{project_id}/balances
+    ///     - Response: { "balances": [{ "amount": 1250.75, "units": "USD" }] }
+    ///     - Confirmed from official Deepgram API reference
+    ///
+    /// Common env var names (from RedHunt Labs research):
+    ///   DEEPGRAM_API_KEY, DG_API_KEY, DEEPGRAM_KEY, API_KEY_DEEPGRAM, DEEPGRAM_SECRET, DG_KEY
     /// </summary>
-    [ApiProvider(false, false)]
+    [ApiProvider]
     public class DeepgramProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "Deepgram";
@@ -21,10 +39,19 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"[a-f0-9]{40}",                         // Deepgram uses 40-char hex API keys
-            @"deepgram[_-]?[A-Za-z0-9]{20,}",
+            // Primary env var names — confirmed from RedHunt Labs and official docs
             @"DEEPGRAM_API_KEY",
-            @"DG_API_KEY"
+            @"DG_API_KEY",
+            @"DEEPGRAM_KEY",
+            @"API_KEY_DEEPGRAM",
+            @"DEEPGRAM_SECRET",
+            @"DG_KEY",
+
+            // Context-aware value extraction — only match alphanumeric values near Deepgram context
+            // Keys are plain alphanumeric, no fixed prefix (GitGuardian: Prefixed=False)
+            @"DEEPGRAM_API_KEY\s*[=:]\s*['""]?([A-Za-z0-9]{32,})['""]?",
+            @"DG_API_KEY\s*[=:]\s*['""]?([A-Za-z0-9]{32,})['""]?",
+            @"deepgram[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9]{32,})['""]?"
         ];
 
         public DeepgramProvider() : base() { }
@@ -34,8 +61,10 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // Step 1: list projects to confirm key is valid and get project_id
-                using var projectsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.deepgram.com/v1/projects");
+                // Step 1: GET /v1/projects — user-specific, always requires auth
+                // Confirmed from RedHunt Labs: "curl -X GET https://api.deepgram.com/v1/projects -H 'Authorization: Token [API_KEY]'"
+                using var projectsRequest = new HttpRequestMessage(HttpMethod.Get,
+                    "https://api.deepgram.com/v1/projects");
                 projectsRequest.Headers.Authorization = new AuthenticationHeaderValue("Token", apiKey);
 
                 var projectsResponse = await httpClient.SendAsync(projectsRequest);
@@ -71,12 +100,14 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         string? projectId = firstProject.TryGetProperty("project_id", out var pid)
                             ? pid.GetString() : null;
 
+                        // Project name as account identifier
                         if (firstProject.TryGetProperty("name", out var name))
                             result.AccountTier = name.GetString();
 
                         result.Detail = $"Valid Deepgram key — {projects.GetArrayLength()} project(s)";
 
-                        // Step 2: fetch balance for first project
+                        // Step 2: GET /v1/projects/{project_id}/balances — get USD balance
+                        // Confirmed response: { "balances": [{ "amount": 1250.75, "units": "USD" }] }
                         if (!string.IsNullOrEmpty(projectId))
                         {
                             using var balanceRequest = new HttpRequestMessage(HttpMethod.Get,
@@ -88,7 +119,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                             {
                                 string balanceBody = await balanceResponse.Content.ReadAsStringAsync();
                                 using var balDoc = System.Text.Json.JsonDocument.Parse(balanceBody);
-                                // Response: { "balances": [{ "amount": 1250.75, "units": "USD" }] }
+
                                 if (balDoc.RootElement.TryGetProperty("balances", out var balances) &&
                                     balances.GetArrayLength() > 0)
                                 {
@@ -97,11 +128,23 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                                     {
                                         string units = bal.TryGetProperty("units", out var u)
                                             ? u.GetString() ?? "USD" : "USD";
-                                        result.Balance = $"{amount.GetDouble():N2} {units}";
+                                        double amountVal = amount.GetDouble();
+                                        result.Balance = $"{amountVal:N2} {units}";
+
+                                        if (amountVal <= 0)
+                                        {
+                                            result.IsQuotaExceeded = true;
+                                            result.Detail += " — 0 balance remaining";
+                                        }
                                     }
                                 }
                             }
                         }
+                    }
+                    else
+                    {
+                        // Valid key but no projects yet (new account)
+                        result.Detail = "Valid Deepgram key — no projects yet";
                     }
                 }
                 catch { /* Best effort */ }
@@ -116,7 +159,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length >= 32;
+            // Deepgram keys: plain alphanumeric, no fixed prefix, typically ~40 chars
+            // GitGuardian: Prefixed=False — do NOT enforce any prefix
+            return !string.IsNullOrWhiteSpace(apiKey) &&
+                   apiKey.Length >= 32 &&
+                   System.Text.RegularExpressions.Regex.IsMatch(apiKey, @"^[A-Za-z0-9]+$");
         }
     }
 }

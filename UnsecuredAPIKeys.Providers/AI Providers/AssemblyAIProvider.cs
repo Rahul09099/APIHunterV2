@@ -6,13 +6,25 @@ using UnsecuredAPIKeys.Providers.Common;
 namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
-    /// Provider for AssemblyAI API keys — speech-to-text with advanced analysis.
-    /// Verification: GET /v2/transcript?limit=1 (Authorization: {apiKey}, no Bearer prefix)
-    /// Valid response: 200 with { "transcripts": [...], "page_details": {...} }
-    /// Invalid response: 401 with { "error": "Authentication error, API token missing/invalid" }
-    /// No balance endpoint available via API — usage tracked in dashboard only.
+    /// Provider for AssemblyAI API keys — speech-to-text with advanced audio intelligence.
+    ///
+    /// Key format: plain alphanumeric string, NO fixed prefix.
+    ///   - GitGuardian confirms: Prefixed=False, High recall=False
+    ///   - Keys are alphanumeric (a-z, A-Z, 0-9), NOT hex-only
+    ///   - Typical length: 32 characters
+    ///   - Official docs use placeholder: &lt;YOUR_API_KEY&gt;
+    ///
+    /// Auth: Authorization: {apiKey}   (plain header — NO "Bearer" prefix)
+    ///   Confirmed from official docs: headers = {"authorization": "&lt;YOUR_API_KEY&gt;"}
+    ///
+    /// Verification: GET https://api.assemblyai.com/v2/transcript?limit=1
+    ///   - User-specific endpoint — 401 without valid key
+    ///   - Valid response: 200 { "transcripts": [...], "page_details": { "result_count": N, ... } }
+    ///   - Invalid response: 401 { "error": "Authentication error, API token missing/invalid" }
+    ///
+    /// No balance/credits endpoint available via API — usage tracked in dashboard only.
     /// </summary>
-    [ApiProvider(false, false)]
+    [ApiProvider]
     public class AssemblyAIProvider : BaseApiKeyProvider
     {
         public override string ProviderName => "AssemblyAI";
@@ -20,10 +32,17 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"[a-f0-9]{32}",                         // AssemblyAI uses 32-char hex tokens
-            @"assemblyai[_-]?[A-Za-z0-9]{20,}",
+            // Primary env var names — confirmed from official docs and security research
             @"ASSEMBLYAI_API_KEY",
-            @"ASSEMBLY_AI_API_KEY"
+            @"ASSEMBLY_AI_API_KEY",
+            @"ASSEMBLYAI_KEY",
+            @"ASSEMBLY_API_KEY",
+
+            // Context-aware value extraction patterns
+            // Keys are plain alphanumeric, no fixed prefix (GitGuardian: Prefixed=False)
+            @"ASSEMBLYAI_API_KEY\s*[=:]\s*['""]?([A-Za-z0-9]{32,})['""]?",
+            @"ASSEMBLY_AI_API_KEY\s*[=:]\s*['""]?([A-Za-z0-9]{32,})['""]?",
+            @"assemblyai[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9]{32,})['""]?"
         ];
 
         public AssemblyAIProvider() : base() { }
@@ -33,8 +52,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // AssemblyAI uses plain "Authorization: <key>" (no Bearer prefix)
-                // GET /v2/transcript?limit=1 is the lightest read-only endpoint
+                // GET /v2/transcript?limit=1 — user-specific, always requires auth
+                // Confirmed from official docs: headers = {"authorization": "<YOUR_API_KEY>"}
+                // Plain Authorization header — NO "Bearer" prefix
                 using var request = new HttpRequestMessage(HttpMethod.Get,
                     "https://api.assemblyai.com/v2/transcript?limit=1");
                 request.Headers.Add("Authorization", apiKey);
@@ -52,27 +72,39 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     try
                     {
                         using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                        // Response: { "transcripts": [...], "page_details": { "result_count": N } }
+                        // Response: { "transcripts": [...], "page_details": { "result_count": N, "limit": 1, ... } }
                         if (doc.RootElement.TryGetProperty("page_details", out var pageDetails) &&
                             pageDetails.TryGetProperty("result_count", out var count))
                         {
-                            result.Detail = $"Valid AssemblyAI key — {count.GetInt32()} transcript(s) on account";
+                            int transcriptCount = count.GetInt32();
+                            result.Detail = transcriptCount > 0
+                                ? $"Valid AssemblyAI key — {transcriptCount} transcript(s) on account"
+                                : "Valid AssemblyAI key — no transcripts yet";
                         }
                         else
                         {
                             result.Detail = "Valid AssemblyAI key";
                         }
+
                         // No balance endpoint available via API
-                        result.Balance = "N/A (check dashboard)";
+                        result.Balance = "N/A (check assemblyai.com dashboard)";
                     }
-                    catch { /* Best effort */ }
+                    catch { result.Detail = "Valid AssemblyAI key"; }
 
                     return result;
                 }
 
+                // Check for AssemblyAI-specific error message in body
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                    responseBody.Contains("Authentication error") ||
+                    responseBody.Contains("API token missing"))
+                {
+                    return ValidationResult.IsUnauthorized(response.StatusCode,
+                        "Invalid AssemblyAI API key");
+                }
+
                 return response.StatusCode switch
                 {
-                    System.Net.HttpStatusCode.Unauthorized or
                     System.Net.HttpStatusCode.Forbidden =>
                         ValidationResult.IsUnauthorized(response.StatusCode),
                     (System.Net.HttpStatusCode)429 =>
@@ -89,7 +121,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length >= 32;
+            // AssemblyAI keys: plain alphanumeric, no fixed prefix, typically 32 chars
+            // GitGuardian: Prefixed=False — do NOT enforce any prefix
+            return !string.IsNullOrWhiteSpace(apiKey) &&
+                   apiKey.Length >= 32 &&
+                   System.Text.RegularExpressions.Regex.IsMatch(apiKey, @"^[A-Za-z0-9]+$");
         }
     }
 }
