@@ -30,6 +30,38 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             httpClient.Timeout = TimeSpan.FromSeconds(15);
 
+            // Attempt to extract JWT metadata if possible (A2E keys are often sk_ + JWT)
+            var metadata = new Dictionary<string, object>();
+            try
+            {
+                var tokenPart = apiKey.StartsWith("sk_") ? apiKey.Substring(3) : apiKey;
+                if (tokenPart.Contains("."))
+                {
+                    var parts = tokenPart.Split('.');
+                    if (parts.Length >= 2)
+                    {
+                        var payload = parts[1];
+                        // Normalize base64url to standard base64
+                        payload = payload.Replace('-', '+').Replace('_', '/');
+                        switch (payload.Length % 4)
+                        {
+                            case 2: payload += "=="; break;
+                            case 3: payload += "="; break;
+                        }
+                        var decodedBytes = Convert.FromBase64String(payload);
+                        var decodedJson = System.Text.Encoding.UTF8.GetString(decodedBytes);
+                        var jsonDoc = JsonDocument.Parse(decodedJson);
+                        var root = jsonDoc.RootElement;
+
+                        if (root.TryGetProperty("email", out var email)) metadata["email"] = email.GetString() ?? "";
+                        if (root.TryGetProperty("id", out var id)) metadata["user_id"] = id.GetString() ?? "";
+                        if (root.TryGetProperty("name", out var name)) metadata["name"] = name.GetString() ?? "";
+                        if (root.TryGetProperty("role", out var role)) metadata["role"] = role.GetString() ?? "";
+                    }
+                }
+            }
+            catch { /* Ignore JWT decoding errors */ }
+
             using var request = new HttpRequestMessage(HttpMethod.Get, "https://video.a2e.ai/api/v1/user/remainingCoins");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
@@ -56,13 +88,28 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         }
 
                         var result = ValidationResult.Success(response.StatusCode, "Valid A2E AI key");
+                        result.RawResponse = responseBody;
+                        if (metadata.Count > 0) result.Metadata = metadata;
 
-                        if (root.TryGetProperty("data", out var data) &&
-                            data.TryGetProperty("coins", out var coins))
+                        if (root.TryGetProperty("data", out var data))
                         {
-                            var coinCount = coins.GetInt32();
+                            int coinCount = 0;
+                            if (data.ValueKind == JsonValueKind.Object && data.TryGetProperty("coins", out var coins))
+                            {
+                                coinCount = coins.ValueKind == JsonValueKind.Number ? coins.GetInt32() : 0;
+                            }
+                            else if (data.ValueKind == JsonValueKind.Number)
+                            {
+                                coinCount = data.GetInt32();
+                            }
+
                             result.Balance = $"{coinCount} Coins";
                             
+                            // Infer tier from credits if possible (Free: 30, Pro: 60, Ultra: 90)
+                            if (coinCount == 30) result.AccountTier = "Free (Daily Bonus)";
+                            else if (coinCount == 60) result.AccountTier = "Pro (Daily Bonus)";
+                            else if (coinCount == 90) result.AccountTier = "Ultra (Daily Bonus)";
+
                             if (coinCount <= 0)
                             {
                                 result.IsQuotaExceeded = true;
