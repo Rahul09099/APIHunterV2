@@ -72,11 +72,13 @@ namespace UnsecuredAPIKeys.Providers.Search_Providers
                     {
                         var resetTime = ex.Reset.LocalDateTime.ToIst();
                         logger?.LogWarning("GitHub API rate limit exceeded for this token. Reset at: {ResetTime}", resetTime);
+                        Console.WriteLine($"[yellow]GitHub API rate limit exceeded for this token. Reset at: {resetTime:HH:mm:ss} IST[/]");
                         throw;
                     }
                     catch (ApiException apiEx)
                     {
                         logger?.LogError(apiEx, "GitHub API error during search on page {Page}. Status: {StatusCode}", page, apiEx.StatusCode);
+                        Console.WriteLine($"[red]GitHub API error during search on page {page}. Status: {apiEx.StatusCode}. Reason: {apiEx.Message}[/]");
                         break; 
                     }
 
@@ -128,6 +130,7 @@ namespace UnsecuredAPIKeys.Providers.Search_Providers
             catch (Exception ex)
             {
                 logger?.LogError(ex, "An unexpected error occurred during GitHub search for query: {Query}", query.Query);
+                Console.WriteLine($"[red]An unexpected error occurred during GitHub search for query '{query.Query}': {ex.Message}[/]");
             }
 
             logger?.LogInformation("Completed GitHub search for query '{Query}'. Found {Count}/{Total} match(es).", query.Query, results.Count, totalResultsCount);
