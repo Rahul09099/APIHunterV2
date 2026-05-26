@@ -82,8 +82,19 @@ public class DatabaseService(DBContext dbContext)
                     ""CreatedAtUtc"" DATETIME DEFAULT CURRENT_TIMESTAMP,
                     ""NodeToken"" TEXT,
                     ""NodeUrl"" TEXT,
-                    ""LastNodeHeartbeatUtc"" DATETIME
+                    ""LastNodeHeartbeatUtc"" DATETIME,
+                    ""DeployHook"" TEXT
                 );");
+
+            // Migration step for existing SQLite database
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""TelegramSubscribers"" ADD COLUMN ""DeployHook"" TEXT");
+            }
+            catch
+            {
+                // Already exists
+            }
 
             // 2. SearchQueries
             await context.Database.ExecuteSqlRawAsync(@"
@@ -217,6 +228,7 @@ public class DatabaseService(DBContext dbContext)
                 ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""NodeToken"" TEXT;
                 ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""NodeUrl"" TEXT;
                 ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""LastNodeHeartbeatUtc"" TIMESTAMP WITH TIME ZONE;
+                ALTER TABLE ""TelegramSubscribers"" ADD COLUMN IF NOT EXISTS ""DeployHook"" TEXT;
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_TelegramSubscribers_NodeToken"" ON ""TelegramSubscribers"" (""NodeToken"") WHERE ""NodeToken"" IS NOT NULL;");
 
             // 2. SearchQueries

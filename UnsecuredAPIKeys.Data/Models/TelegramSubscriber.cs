@@ -19,5 +19,6 @@ namespace UnsecuredAPIKeys.Data.Models
         public string? NodeToken { get; set; }
         public string? NodeUrl { get; set; }
         public DateTime? LastNodeHeartbeatUtc { get; set; }
+        public string? DeployHook { get; set; }
     }
 }

@@ -299,6 +299,19 @@ public class TelegramBotService : BackgroundService
                 case "/node_status":
                     await HandleNodeStatusCommand(chatId, isAdmin, cancellationToken);
                     break;
+                case "/set_deploy_hook":
+                    await HandleSetDeployHookCommand(chatId, args, cancellationToken);
+                    break;
+                case "/remove_deploy_hook":
+                    await HandleRemoveDeployHookCommand(chatId, cancellationToken);
+                    break;
+                case "/redeploy_node":
+                    await HandleRedeployNodeCommand(chatId, cancellationToken);
+                    break;
+                case "/redeploy_all":
+                case "/deploy_workers":
+                    if (isAdmin) await HandleRedeployAllCommand(chatId, cancellationToken);
+                    break;
                 case "/purge":
                     await HandlePurgeCommand(chatId, isAdmin, cancellationToken);
                     break;
@@ -602,8 +615,11 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("├ /node_token - Your personal access token");
         help.AppendLine("├ /tokens - List your GitHub tokens");
         help.AppendLine("├ /add_token &lt;token&gt; - Add GitHub token");
+        help.AppendLine("├ /delete_token &lt;id&gt; - Delete your token");
         help.AppendLine("├ /node_status - View your node status");
-        help.AppendLine("└ /delete_token &lt;id&gt; - Delete your token");
+        help.AppendLine("├ /set_deploy_hook &lt;url&gt; - Save Render Deploy Hook");
+        help.AppendLine("├ /remove_deploy_hook - Clear Deploy Hook");
+        help.AppendLine("└ /redeploy_node - Deploy your worker from Telegram");
 
         if (isAdmin)
         {
@@ -618,6 +634,7 @@ public class TelegramBotService : BackgroundService
             help.AppendLine("├ /add_token_for &lt;id&gt; &lt;token&gt; - Add token for user");
             help.AppendLine("├ /broadcast &lt;msg&gt; - Message all subscribers");
             help.AppendLine("├ /stop_all - Kill all running jobs");
+            help.AppendLine("├ /redeploy_all - Redeploy all subscriber nodes");
             help.AppendLine("└ /partition_status - Node query distribution");
         }
 
@@ -1609,6 +1626,183 @@ public class TelegramBotService : BackgroundService
             sb.AppendLine();
             sb.AppendLine("<i>Use /partition_status to see query distribution across nodes.</i>");
         }
+
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    private async Task HandleSetDeployHookCommand(long chatId, string args, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+
+        var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { chatId }, ct);
+        if (user == null)
+        {
+            await _botClient.SendMessage(chatId, "❌ You must be registered as a subscriber/admin to use this command.", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(args))
+        {
+            await _botClient.SendMessage(chatId, "❌ Usage: <code>/set_deploy_hook &lt;render_deploy_hook_url&gt;</code>\n\nExample:\n<code>/set_deploy_hook https://api.render.com/deploy/srv-xxxxxxxxxxxx?key=yyyyyyyyyyyy</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        var hookUrl = args.Trim();
+        if (!Uri.TryCreate(hookUrl, UriKind.Absolute, out var uriResult) ||
+            !(uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps) ||
+            !hookUrl.StartsWith("https://api.render.com/deploy/srv-"))
+        {
+            await _botClient.SendMessage(chatId, "❌ <b>Invalid URL format!</b>\n\nYour Render Deploy Hook must be a valid HTTPS URL starting with:\n<code>https://api.render.com/deploy/srv-</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        user.DeployHook = hookUrl;
+        await dbContext.SaveChangesAsync(ct);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("✅ <b>Render Deploy Hook Saved Successfully!</b>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine("Your private node is now integrated with the bot's automated deployment engine.");
+        sb.AppendLine();
+        sb.AppendLine("💡 You can now trigger a direct deployment of your node from Telegram anytime using:");
+        sb.AppendLine("👉 <code>/redeploy_node</code>");
+
+        await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    private async Task HandleRemoveDeployHookCommand(long chatId, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+
+        var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { chatId }, ct);
+        if (user == null)
+        {
+            await _botClient.SendMessage(chatId, "❌ You must be registered as a subscriber/admin to use this command.", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        user.DeployHook = null;
+        await dbContext.SaveChangesAsync(ct);
+
+        await _botClient.SendMessage(chatId, "🗑️ <b>Render Deploy Hook has been removed successfully.</b>", parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    private async Task HandleRedeployNodeCommand(long chatId, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+
+        var user = await dbContext.TelegramSubscribers.FindAsync(new object[] { chatId }, ct);
+        if (user == null || string.IsNullOrEmpty(user.DeployHook))
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("❌ <b>No Deploy Hook Registered!</b>");
+            sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+            sb.AppendLine("To trigger deployments from Telegram, you must first register your Render Deploy Hook:");
+            sb.AppendLine();
+            sb.AppendLine("<b>How to get your Deploy Hook URL:</b>");
+            sb.AppendLine("1. Log in to your <b>Render Dashboard</b>.");
+            sb.AppendLine("2. Select your Ghost Node <b>Web Service</b>.");
+            sb.AppendLine("3. Click on the <b>Settings</b> tab in the sidebar.");
+            sb.AppendLine("4. Scroll down to the <b>Deploy Hook</b> section.");
+            sb.AppendLine("5. Copy the unique URL.");
+            sb.AppendLine("6. Register it here using:");
+            sb.AppendLine("<code>/set_deploy_hook &lt;your_copied_url&gt;</code>");
+
+            await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        await _botClient.SendMessage(chatId, "📡 Sending trigger to Render...", parseMode: ParseMode.Html, cancellationToken: ct);
+
+        try
+        {
+            var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+            using var httpClient = httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(15);
+
+            var response = await httpClient.GetAsync(user.DeployHook, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("🚀 <b>Redeployment Triggered Successfully!</b>");
+                sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+                sb.AppendLine("Render has accepted the build request. It will now pull the latest Docker image (<code>rahul09099/apihunter-worker:latest</code>) and spin up your node.");
+                sb.AppendLine();
+                sb.AppendLine("📊 Check <code>/node_status</code> in about 1-2 minutes to verify your node is 🟢 <b>Online</b>.");
+
+                await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+            }
+            else
+            {
+                await _botClient.SendMessage(chatId, $"❌ <b>Redeployment trigger failed!</b>\n\nRender returned HTTP Status: <code>{(int)response.StatusCode} {response.ReasonPhrase}</code>.\n\nPlease verify your Deploy Hook URL is correct.", parseMode: ParseMode.Html, cancellationToken: ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            await _botClient.SendMessage(chatId, $"❌ <b>Redeployment trigger encountered an error!</b>\n\nError: <code>{ex.Message}</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+        }
+    }
+
+    private async Task HandleRedeployAllCommand(long chatId, CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+
+        // Find all active subscribers who have a registered deploy hook (excluding local Master)
+        var activeNodesWithHooks = await dbContext.TelegramSubscribers
+            .Where(s => s.NodeToken != null && s.DeployHook != null && s.TelegramId != _adminChatId)
+            .ToListAsync(ct);
+
+        if (!activeNodesWithHooks.Any())
+        {
+            await _botClient.SendMessage(chatId, "❌ <b>No worker nodes have registered Render Deploy Hooks in the database.</b>", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
+        }
+
+        await _botClient.SendMessage(chatId, $"⚡ <b>Initiating mass redeployment of {activeNodesWithHooks.Count} worker nodes...</b>", parseMode: ParseMode.Html, cancellationToken: ct);
+
+        var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+        var tasks = activeNodesWithHooks.Select(async node =>
+        {
+            try
+            {
+                using var httpClient = httpClientFactory.CreateClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(15);
+                var response = await httpClient.GetAsync(node.DeployHook!, ct);
+                return (node, Success: response.IsSuccessStatusCode, Detail: response.IsSuccessStatusCode ? "Triggered" : $"Failed (HTTP {(int)response.StatusCode})");
+            }
+            catch (Exception ex)
+            {
+                return (node, Success: false, Detail: $"Failed ({ex.Message})");
+            }
+        });
+
+        var results = await Task.WhenAll(tasks);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("🏁 <b>MASS DEPLOYMENT COMPLETE REPORT</b>");
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+
+        int successCount = 0;
+        int failCount = 0;
+
+        foreach (var (node, success, detail) in results)
+        {
+            var displayName = !string.IsNullOrEmpty(node.Username) ? $"@{node.Username}" : $"User {node.TelegramId}";
+            var statusIcon = success ? "🟢" : "🔴";
+            
+            if (success) successCount++;
+            else failCount++;
+
+            sb.AppendLine($"{statusIcon} <b>{displayName}</b>: <code>{detail}</code>");
+        }
+
+        sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine($"📊 <b>Total Nodes Triggered:</b> {successCount} succeeded, {failCount} failed.");
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }

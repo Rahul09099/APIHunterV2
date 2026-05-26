@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS "TelegramSubscribers" (
     "CreatedAtUtc"          TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     "NodeToken"             TEXT,
     "NodeUrl"               TEXT,
-    "LastNodeHeartbeatUtc"  TIMESTAMP WITH TIME ZONE
+    "LastNodeHeartbeatUtc"  TIMESTAMP WITH TIME ZONE,
+    "DeployHook"            TEXT
 );
 
 -- Idempotent column additions (safe on existing databases)
@@ -28,6 +29,7 @@ ALTER TABLE "TelegramSubscribers" ADD COLUMN IF NOT EXISTS "CreatedAtUtc"       
 ALTER TABLE "TelegramSubscribers" ADD COLUMN IF NOT EXISTS "NodeToken"             TEXT;
 ALTER TABLE "TelegramSubscribers" ADD COLUMN IF NOT EXISTS "NodeUrl"               TEXT;
 ALTER TABLE "TelegramSubscribers" ADD COLUMN IF NOT EXISTS "LastNodeHeartbeatUtc"  TIMESTAMP WITH TIME ZONE;
+ALTER TABLE "TelegramSubscribers" ADD COLUMN IF NOT EXISTS "DeployHook"            TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "IX_TelegramSubscribers_NodeToken"
     ON "TelegramSubscribers" ("NodeToken") WHERE "NodeToken" IS NOT NULL;

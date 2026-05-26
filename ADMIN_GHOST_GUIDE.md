@@ -31,7 +31,16 @@ Use these commands in your Telegram Bot to control the network:
 | `/remove_sub <id>` | Instantly revoke access (Node will stop syncing). |
 | `/list_subs` | View all subscribers and their node status. |
 | `/node_status` | See a detailed view of every node (Online/Offline). |
+| `/redeploy_all` | Trigger mass updates for all nodes with registered Deploy Hooks in parallel. |
 | `/export json` | Download all discovered keys in a clean JSON format. |
+
+---
+
+### ⚡ 5. Network Mass Redeployment (One-Click Auto-Updates)
+When you build and push a new worker Docker image (`rahul09099/apihunter-worker:latest` via `publish_worker.bat`), you can instantly update the entire decentralized network from Telegram:
+- Run **`/redeploy_all`** (or **`/deploy_workers`**): The Master Bot will execute parallel background HTTP calls to all registered subscriber Render Deploy Hooks.
+- Render will immediately pull the newest Docker image and redeploy every node.
+- Subscribers can register their deploy hook using **`/set_deploy_hook <url>`** and trigger their own node updates anytime using **`/redeploy_node`**.
 
 ---
 

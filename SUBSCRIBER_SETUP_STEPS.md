@@ -41,6 +41,15 @@ Wait for Render to show **"Live"** (it takes ~1 minute).
 
 ---
 
+### 🔄 Step 5: Setup One-Click Updates (Highly Recommended)
+You can update your node to the latest worker version directly from Telegram at any time:
+1.  Go to your **Render Dashboard** -> Open your Web Service -> Click **Settings**.
+2.  Scroll down to the **Deploy Hook** section and copy the URL.
+3.  In the Telegram bot, register it: **`/set_deploy_hook <your_url>`**
+4.  To update your node in the future, simply run: **`/redeploy_node`**
+
+---
+
 ### 🛡️ Why This Setup is Best:
 *   **No Deployment Hassle**: Just an image link and a few variables.
 *   **Automated Maintenance**: The Master node will automatically ping your node to keep it from sleeping.

@@ -57,6 +57,21 @@ Your node uses tokens to bypass scraping limits. You can add your own private Gi
 
 ---
 
+#### 🚀 One-Click Telegram Redeployment
+When the Admin updates the software, you can trigger your node to update itself directly from Telegram in 5 seconds:
+1. **Get Your Deploy Hook**:
+   - Go to your Render Dashboard.
+   - Open your Ghost Node web service.
+   - Click the **Settings** tab on the left.
+   - Scroll down to **Deploy Hook** and copy the private URL.
+2. **Register it in the Telegram Bot**:
+   - Run: **`/set_deploy_hook <your_copied_url>`**
+3. **Redeploy Anytime**:
+   - Run: **`/redeploy_node`** (Render will pull the newest image and deploy it immediately).
+   - Run: **`/remove_deploy_hook`** if you wish to clear it.
+
+---
+
 ### Step 5: Verify Your Connection
 Once Render shows "Live", go back to the Telegram Bot:
 - Run **`/node_status`** (if enabled) or **`/status`**.
