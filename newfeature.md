@@ -71,15 +71,3 @@ Implement a "safe verification" mode that ensures only ONE login attempt is made
 ## 8. Security & Ethics Note
 This feature is intended for **authorized security auditing and educational research** only. Users must ensure they have permission to scan the target infrastructure.
 
-
-
-OctoAI
-AI21 Labs
-AssemblyAI (Speech)
-Deepgram (Speech)
-Jina AI (Embeddings)
-Anyscale (Ray)
-Upstage (Solar)
-Leonardo.ai (Image)
-Fal.ai (Image/Video)
-RunPod (GPU)

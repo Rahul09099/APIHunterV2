@@ -56,6 +56,7 @@ public class VerifierService(
     DBContext dbContext,
     IHttpClientFactory httpClientFactory,
     HashSet<ApiTypeEnum>? selectedApiTypes = null,
+    bool reVerifyOnly = false,
     ILogger<VerifierService>? logger = null)
 {
     private readonly IReadOnlyList<IApiKeyProvider> _providers = ApiProviderRegistry.VerifierProviders;
@@ -154,7 +155,7 @@ public class VerifierService(
             Console.WriteLine($"[dim]Current valid keys: [yellow]{currentValidCount}[/] / [yellow]{LiteLimits.MAX_VALID_KEYS}[/][/]");
         }
 
-        if (currentValidCount >= LiteLimits.MAX_VALID_KEYS)
+        if (reVerifyOnly || currentValidCount >= LiteLimits.MAX_VALID_KEYS)
         {
             // Re-verify existing valid keys to ensure they're still valid
             await ReVerifyExistingKeysAsync();
@@ -190,7 +191,7 @@ public class VerifierService(
         Console.WriteLine("[dim]Re-verifying existing valid keys...[/]");
 
         // Get oldest verified keys first (filtered by selected types if applicable)
-        var query = dbContext.APIKeys.Where(k => k.Status == ApiStatusEnum.Valid);
+        var query = dbContext.APIKeys.Where(k => k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits);
         if (_selectedApiTypes != null && _selectedApiTypes.Count > 0)
         {
             query = query.Where(k => _selectedApiTypes.Contains(k.ApiType));

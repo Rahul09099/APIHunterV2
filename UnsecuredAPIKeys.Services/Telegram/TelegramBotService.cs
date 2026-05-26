@@ -927,14 +927,24 @@ public class TelegramBotService : BackgroundService
 
     private async Task HandleStartVerifierCommand(long chatId, string args, CancellationToken ct)
     {
+        bool reVerifyOnly = false;
         HashSet<ApiTypeEnum>? selectedTypes = null;
+        
         if (!string.IsNullOrWhiteSpace(args))
         {
-            selectedTypes = new HashSet<ApiTypeEnum>();
-            foreach (var typeName in args.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            reVerifyOnly = args.Contains("--reverify", StringComparison.OrdinalIgnoreCase);
+            
+            var cleanedArgs = args.Replace("--reverify", "", StringComparison.OrdinalIgnoreCase);
+            var parts = cleanedArgs.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length > 0)
             {
-                if (Enum.TryParse<ApiTypeEnum>(typeName.Trim(), true, out var apiType))
-                    selectedTypes.Add(apiType);
+                selectedTypes = new HashSet<ApiTypeEnum>();
+                foreach (var typeName in parts)
+                {
+                    if (Enum.TryParse<ApiTypeEnum>(typeName.Trim(), true, out var apiType))
+                        selectedTypes.Add(apiType);
+                }
+                if (selectedTypes.Count == 0) selectedTypes = null;
             }
         }
 
@@ -943,11 +953,12 @@ public class TelegramBotService : BackgroundService
             using var scope = _serviceProvider.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
             var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-            var verifier = new VerifierService(dbContext, httpClientFactory, selectedTypes);
+            var verifier = new VerifierService(dbContext, httpClientFactory, selectedTypes, reVerifyOnly);
             await verifier.RunAsync(cancellationToken);
         }, chatId);
 
-        await _botClient.SendMessage(chatId, $"✅ Verifier started! Job ID: <code>{System.Net.WebUtility.HtmlEncode(jobId)}</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+        var modeMsg = reVerifyOnly ? "Re-verification" : "Standard verification";
+        await _botClient.SendMessage(chatId, $"✅ Verifier ({modeMsg}) started! Job ID: <code>{System.Net.WebUtility.HtmlEncode(jobId)}</code>", parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
     private async Task HandleStopJobCommand(long chatId, string jobId, string type, bool isAdmin, CancellationToken ct)
@@ -1052,13 +1063,22 @@ public class TelegramBotService : BackgroundService
             return;
         }
 
+        var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+        var statusTasks = tokens.Select(async t =>
+        {
+            var status = await CheckTokenStatusAsync(t.Token, httpClientFactory);
+            return (t.Id, Status: status);
+        });
+        var statuses = (await Task.WhenAll(statusTasks)).ToDictionary(x => x.Id, x => x.Status);
+
         var sb = new StringBuilder();
         sb.AppendLine("<b>🔑 GitHub Tokens:</b>");
         foreach (var t in tokens)
         {
             var preview = System.Net.WebUtility.HtmlEncode(t.Token);
-            var owner = t.AddedByTelegramId.HasValue ? $"[Owner: {t.AddedByTelegramId}]" : "[System]";
-            sb.AppendLine($"- ID: <code>{t.Id}</code> | {preview} | Enabled: {t.IsEnabled} {(isAdmin ? owner : "")}");
+            var owner = t.AddedByTelegramId.HasValue ? $" [Owner: {t.AddedByTelegramId}]" : " [System]";
+            var status = statuses[t.Id];
+            sb.AppendLine($"- ID: <code>{t.Id}</code> | {preview} | Enabled: {t.IsEnabled}{(isAdmin ? owner : "")}   <b>{status}</b>");
         }
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
@@ -1787,13 +1807,20 @@ public class TelegramBotService : BackgroundService
         }
         else
         {
+            var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+            var statusTasks = tokens.Select(async t =>
+            {
+                var status = await CheckTokenStatusAsync(t.Token, httpClientFactory);
+                return (t.Id, Status: status);
+            });
+            var statuses = (await Task.WhenAll(statusTasks)).ToDictionary(x => x.Id, x => x.Status);
+
             foreach (var t in tokens)
             {
-                var masked = t.Token.Length > 12
-                    ? $"{t.Token[..4]}...{t.Token[^4..]}"
-                    : "****";
                 var status = t.IsEnabled ? "🟢" : "🔴";
-                sb.AppendLine($"{status} ID: <code>{t.Id}</code> | <code>{System.Net.WebUtility.HtmlEncode(masked)}</code>");
+                var statusText = statuses[t.Id];
+                var fullToken = System.Net.WebUtility.HtmlEncode(t.Token);
+                sb.AppendLine($"{status} ID: <code>{t.Id}</code> | <code>{fullToken}</code> | <b>{statusText}</b>");
             }
         }
 
@@ -1961,6 +1988,43 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine("<i>Nodes are considered active if heartbeat &lt; 10 min ago.</i>");
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    private async Task<string> CheckTokenStatusAsync(string token, IHttpClientFactory httpClientFactory)
+    {
+        try
+        {
+            using var client = httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("UnsecuredAPIKeys-Bot/1.1");
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            
+            var response = await client.GetAsync("https://api.github.com/rate_limit");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                if (response.Headers.Contains("X-RateLimit-Remaining"))
+                {
+                    var remainingStr = response.Headers.GetValues("X-RateLimit-Remaining").FirstOrDefault();
+                    if (int.TryParse(remainingStr, out int remaining) && remaining == 0)
+                    {
+                        return "Rate Limited";
+                    }
+                }
+                return "Valid";
+            }
+            else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                return "Invalid";
+            }
+            else
+            {
+                return $"Error ({response.StatusCode})";
+            }
+        }
+        catch
+        {
+            return "Connection Error";
+        }
     }
 
     #endregion

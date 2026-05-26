@@ -244,6 +244,18 @@ async Task RunVerifierAsync(DBContext db, IHttpClientFactory factory)
     }
 
     AnsiConsole.WriteLine();
+    var verifierMode = AnsiConsole.Prompt(
+        new SelectionPrompt<string>()
+            .Title("[yellow]Select verifier operation mode:[/]")
+            .AddChoices(new[]
+            {
+                "1. Verify Unverified Keys (Scan & find new valid keys)",
+                "2. Re-verify Valid Keys (Re-check if current valid keys still work/exist)"
+            }));
+
+    bool reVerifyOnly = verifierMode.StartsWith("2");
+
+    AnsiConsole.WriteLine();
     AnsiConsole.MarkupLine("[dim]Press [yellow]Ctrl+C[/] to stop.[/]");
     AnsiConsole.WriteLine();
 
@@ -258,7 +270,7 @@ async Task RunVerifierAsync(DBContext db, IHttpClientFactory factory)
     Console.CancelKeyPress += handler;
     try
     {
-        var verifier = new VerifierService(db, factory, selectedTypes);
+        var verifier = new VerifierService(db, factory, selectedTypes, reVerifyOnly);
         await verifier.RunAsync(cts.Token);
     }
     finally

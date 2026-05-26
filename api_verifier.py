@@ -39,6 +39,7 @@ import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from abc import ABC, abstractmethod
+import base64
 
 # --- Common Utilities ---
 
@@ -261,7 +262,7 @@ class GoogleProvider(BaseProvider):
 
 class ElevenLabsProvider(BaseProvider):
     provider_name = "ElevenLabs"
-    regex_patterns = [r"[A-Za-z0-9]{32}"]
+    regex_patterns = [r"\b(?<!sk_)[a-fA-F0-9]{32}\b"]
 
     def validate(self, api_key):
         api_key = self.clean_key(api_key)
@@ -553,17 +554,71 @@ class A2EProvider(BaseProvider):
     def validate(self, api_key):
         api_key = self.clean_key(api_key)
         headers = {"Authorization": f"Bearer {api_key}"}
+        
+        metadata = {}
+        # Try to decode JWT if possible (sk_header.payload.signature)
+        try:
+            token_part = api_key[3:] if api_key.startswith("sk_") else api_key
+            if "." in token_part:
+                parts = token_part.split(".")
+                if len(parts) >= 2:
+                    payload_b64 = parts[1]
+                    missing_padding = len(payload_b64) % 4
+                    if missing_padding:
+                        payload_b64 += "=" * (4 - missing_padding)
+                    payload_json = base64.b64decode(payload_b64).decode("utf-8", errors="ignore")
+                    payload = json.loads(payload_json)
+                    
+                    if "email" in payload: metadata["email"] = payload["email"]
+                    if "id" in payload: metadata["user_id"] = payload["id"]
+                    if "name" in payload: metadata["name"] = payload["name"]
+                    if "role" in payload: metadata["role"] = payload["role"]
+        except:
+            pass
+
         try:
             resp = requests.get("https://video.a2e.ai/api/v1/user/remainingCoins", headers=headers, timeout=15)
+            
+            # A2E sometimes returns 200 even for invalid keys, check internal code
+            if self._is_success(resp.status_code):
+                try:
+                    data = resp.json()
+                    internal_code = data.get("code")
+                    
+                    if internal_code == 401 or internal_code == 403:
+                        return ValidationResult(ValidationStatus.UNAUTHORIZED, data.get("msg", "Invalid Key"), http_status=resp.status_code)
+                    
+                    if internal_code == 200:
+                        # Extract coins robustly
+                        coins_data = data.get("data", {})
+                        coins = 0
+                        if isinstance(coins_data, dict):
+                            coins = coins_data.get("coins", 0)
+                        elif isinstance(coins_data, (int, float)):
+                            coins = coins_data
+                        
+                        # Infer tier from credits if possible (Free: 30, Pro: 60, Ultra: 90)
+                        tier = None
+                        if coins == 30: tier = "Free (Daily Bonus)"
+                        elif coins == 60: tier = "Pro (Daily Bonus)"
+                        elif coins == 90: tier = "Ultra (Daily Bonus)"
+                        
+                        status = ValidationStatus.VALID if coins > 0 else ValidationStatus.QUOTA_EXHAUSTED
+                        return ValidationResult(
+                            status, 
+                            balance=f"{coins} Coins", 
+                            account_tier=tier,
+                            metadata=metadata if metadata else None,
+                            http_status=resp.status_code, 
+                            raw_response=resp.text
+                        )
+                except:
+                    # If JSON parsing fails but status was 200, assume valid but restricted info
+                    return ValidationResult(ValidationStatus.VALID, "Valid Key (details unavailable)", http_status=resp.status_code)
+
             if resp.status_code == 401 or resp.status_code == 403:
                 return ValidationResult(ValidationStatus.UNAUTHORIZED, "Invalid Key", http_status=resp.status_code)
-            if self._is_success(resp.status_code):
-                data = resp.json()
-                if data.get('code') != 200:
-                    return ValidationResult(ValidationStatus.UNAUTHORIZED, data.get('msg', 'Invalid token'), http_status=resp.status_code)
-                coins = data.get('data', {}).get('coins', 0)
-                status = ValidationStatus.VALID if coins > 0 else ValidationStatus.QUOTA_EXHAUSTED
-                return ValidationResult(status, balance=f"{coins} Coins", http_status=resp.status_code, raw_response=resp.text)
+            
             return ValidationResult(ValidationStatus.ERROR, f"Status {resp.status_code}", http_status=resp.status_code, raw_response=resp.text)
         except Exception as e:
             return ValidationResult(ValidationStatus.ERROR, str(e))
@@ -880,8 +935,8 @@ class VerifierEngine:
     def __init__(self):
         self.providers = [
             OpenAIProvider(), DeepSeekProvider(), AnthropicProvider(), GoogleProvider(),
-            ElevenLabsProvider(), PiAPIProvider(), GroqProvider(), MistralProvider(),
-            PerplexityProvider(), RunwayProvider(), A2EProvider(), OpenRouterProvider(),
+            A2EProvider(), ElevenLabsProvider(), PiAPIProvider(), GroqProvider(), MistralProvider(),
+            PerplexityProvider(), RunwayProvider(), OpenRouterProvider(),
             TogetherAIProvider(), CohereProvider(), VoyageAIProvider(), XAIProvider(),
             HuggingFaceProvider(), ReplicateProvider(), StabilityAIProvider(), PolloAIProvider(),
             SendGridProvider(), SlackProvider(), CerebrasProvider()

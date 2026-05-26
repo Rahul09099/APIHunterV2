@@ -21,7 +21,7 @@ COPY --from=build /app/publish .
 # Environment Variables for Worker Mode
 # These are the ones the subscriber will fill in Render
 ENV IS_WORKER_MODE=true
-ENV MASTER_API_URL=""
+ENV MASTER_API_URL="https://unsecuredapikeys-api-aezg.onrender.com"
 ENV NODE_TOKEN=""
 ENV WORKER_GITHUB_TOKENS=""
 ENV TELEGRAM_BOT_TOKEN="DISABLED"
