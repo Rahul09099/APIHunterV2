@@ -32,8 +32,9 @@ public class VerifierController : ControllerBase
     /// Start the verifier service for all API types or specific types
     /// </summary>
     /// <param name="apiTypes">Optional comma-separated list of API types (e.g., "OpenAI,Anthropic")</param>
+    /// <param name="reverify">Set to true to only re-verify existing valid keys</param>
     [HttpPost("start")]
-    public async Task<IActionResult> StartVerifier([FromHeader(Name = "X-Node-Token")] string nodeToken, [FromQuery] string? apiTypes = null)
+    public async Task<IActionResult> StartVerifier([FromHeader(Name = "X-Node-Token")] string nodeToken, [FromQuery] string? apiTypes = null, [FromQuery] bool reverify = false)
     {
         var node = await _dbContext.TelegramSubscribers
             .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
@@ -58,7 +59,7 @@ public class VerifierController : ControllerBase
 
         var jobId = _jobManager.StartJob("Verifier", async (cancellationToken) =>
         {
-            var verifier = new VerifierService(_dbContext, _httpClientFactory, selectedTypes);
+            var verifier = new VerifierService(_dbContext, _httpClientFactory, selectedTypes, reverify);
             await verifier.RunAsync(cancellationToken);
         }, node.TelegramId);
 

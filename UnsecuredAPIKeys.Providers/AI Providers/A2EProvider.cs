@@ -126,7 +126,22 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
                 {
-                    return ValidationResult.IsUnauthorized(response.StatusCode);
+                    string detail = "Invalid Key";
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(responseBody);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("msg", out var msgProp) && msgProp.ValueKind == JsonValueKind.String)
+                        {
+                            detail = msgProp.GetString() ?? "Invalid Key";
+                        }
+                        else if (root.TryGetProperty("message", out var messageProp) && messageProp.ValueKind == JsonValueKind.String)
+                        {
+                            detail = messageProp.GetString() ?? "Invalid Key";
+                        }
+                    }
+                    catch { }
+                    return ValidationResult.IsUnauthorized(response.StatusCode, $"Unauthorized: {detail}");
                 }
                 else if ((int)response.StatusCode == 429)
                 {

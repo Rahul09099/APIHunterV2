@@ -407,20 +407,54 @@ class CerebrasProvider(BaseProvider):
             models = [m['id'] for m in resp.json().get('data', [])]
             
             # 2. Test completion
+            preferred = ["llama3.1-8b", "llama-3.3-70b", "llama3.3-70b"]
+            model_to_use = next((m for m in models if any(p in m for p in preferred)), models[0] if models else "llama3.1-8b")
+            
             payload = {
-                "model": "llama3.1-8b",
+                "model": model_to_use,
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 1
             }
             chat_resp = requests.post("https://api.cerebras.ai/v1/chat/completions", headers=headers, json=payload, timeout=self.timeout)
             
+            balance = None
+            tier = None
+            metadata = {}
+            
+            h = chat_resp.headers
+            reqs_rem = h.get('x-ratelimit-remaining-requests-day')
+            reqs_limit = h.get('x-ratelimit-limit-requests-day')
+            tokens_rem = h.get('x-ratelimit-remaining-tokens-day')
+            tokens_limit = h.get('x-ratelimit-limit-tokens-day')
+            
+            if reqs_rem is not None and reqs_limit is not None:
+                balance = f"{reqs_rem} / {reqs_limit} reqs today"
+                if tokens_rem is not None and tokens_limit is not None:
+                    balance += f" ({tokens_rem} / {tokens_limit} tokens remaining)"
+                
+                # Infer tier
+                try:
+                    if int(tokens_limit) == 1000000:
+                        tier = "Free Tier"
+                    else:
+                        tier = "Developer/Paid Tier"
+                except:
+                    tier = "Free Tier" if int(tokens_limit) <= 1000000 else "Developer/Paid Tier"
+                
+                metadata = {
+                    "ratelimit_remaining_requests_day": reqs_rem,
+                    "ratelimit_limit_requests_day": reqs_limit,
+                    "ratelimit_remaining_tokens_day": tokens_rem,
+                    "ratelimit_limit_tokens_day": tokens_limit
+                }
+
             if self._is_success(chat_resp.status_code):
-                return ValidationResult(ValidationStatus.VALID, "Active key", models=models, http_status=chat_resp.status_code)
+                return ValidationResult(ValidationStatus.VALID, "Active key", models=models, balance=balance, tier=tier, metadata=metadata, http_status=chat_resp.status_code)
             
             if chat_resp.status_code == 429 or "quota" in chat_resp.text.lower():
-                return ValidationResult(ValidationStatus.QUOTA_EXHAUSTED, "Valid but no quota", models=models, http_status=chat_resp.status_code)
+                return ValidationResult(ValidationStatus.QUOTA_EXHAUSTED, "Valid but no quota", models=models, balance=balance, tier=tier, metadata=metadata, http_status=chat_resp.status_code)
                 
-            return ValidationResult(ValidationStatus.VALID, "Valid but completion failed", models=models, http_status=chat_resp.status_code)
+            return ValidationResult(ValidationStatus.VALID, "Valid but completion failed", models=models, balance=balance, tier=tier, metadata=metadata, http_status=chat_resp.status_code)
         except Exception as e:
             return ValidationResult(ValidationStatus.ERROR, str(e))
 
@@ -617,7 +651,13 @@ class A2EProvider(BaseProvider):
                     return ValidationResult(ValidationStatus.VALID, "Valid Key (details unavailable)", http_status=resp.status_code)
 
             if resp.status_code == 401 or resp.status_code == 403:
-                return ValidationResult(ValidationStatus.UNAUTHORIZED, "Invalid Key", http_status=resp.status_code)
+                detail = "Invalid Key"
+                try:
+                    data = resp.json()
+                    detail = data.get("msg") or data.get("message") or "Invalid Key"
+                except:
+                    pass
+                return ValidationResult(ValidationStatus.UNAUTHORIZED, detail, http_status=resp.status_code)
             
             return ValidationResult(ValidationStatus.ERROR, f"Status {resp.status_code}", http_status=resp.status_code, raw_response=resp.text)
         except Exception as e:
@@ -655,6 +695,18 @@ class OpenRouterProvider(BaseProvider):
                 else:
                     balance = f"No key limit (Used: ${usage:.4f})"
                     status = ValidationStatus.VALID
+
+                # Additional check: If key status is valid and it is a paid key, verify if account has credits
+                if status == ValidationStatus.VALID and not is_free:
+                    try:
+                        # Use a cheap paid model to verify credits
+                        payload = {"model": "google/gemini-2.5-flash", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+                        gen_resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+                        if gen_resp.status_code == 402 or "Insufficient credits" in gen_resp.text:
+                            status = ValidationStatus.QUOTA_EXHAUSTED
+                            balance = f"Insufficient account credits (Used: ${usage:.4f})"
+                    except:
+                        pass
                 
                 # Tier formatting
                 tier_name = "Free Tier" if is_free else "Paid Tier"

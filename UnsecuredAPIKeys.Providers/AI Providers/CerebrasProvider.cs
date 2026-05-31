@@ -91,6 +91,52 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             {
                 var result = ValidationResult.Success(chatResponse.StatusCode, models);
                 result.AvailableModels = models;
+
+                try
+                {
+                    string? reqsRem = null;
+                    string? reqsLimit = null;
+                    string? tokensRem = null;
+                    string? tokensLimit = null;
+
+                    if (chatResponse.Headers.TryGetValues("x-ratelimit-remaining-requests-day", out var reqsRemVals))
+                        reqsRem = reqsRemVals.FirstOrDefault();
+                    if (chatResponse.Headers.TryGetValues("x-ratelimit-limit-requests-day", out var reqsLimitVals))
+                        reqsLimit = reqsLimitVals.FirstOrDefault();
+                    if (chatResponse.Headers.TryGetValues("x-ratelimit-remaining-tokens-day", out var tokensRemVals))
+                        tokensRem = tokensRemVals.FirstOrDefault();
+                    if (chatResponse.Headers.TryGetValues("x-ratelimit-limit-tokens-day", out var tokensLimitVals))
+                        tokensLimit = tokensLimitVals.FirstOrDefault();
+
+                    if (!string.IsNullOrEmpty(reqsRem) && !string.IsNullOrEmpty(reqsLimit))
+                    {
+                        var balance = $"{reqsRem} / {reqsLimit} reqs today";
+                        if (!string.IsNullOrEmpty(tokensRem) && !string.IsNullOrEmpty(tokensLimit))
+                        {
+                            balance += $" ({tokensRem} / {tokensLimit} tokens remaining)";
+                        }
+                        result.Balance = balance;
+
+                        // Infer Account Tier
+                        if (!string.IsNullOrEmpty(tokensLimit) && int.TryParse(tokensLimit, out var limitVal) && limitVal == 1000000)
+                        {
+                            result.AccountTier = "Free Tier";
+                        }
+                        else
+                        {
+                            result.AccountTier = "Developer/Paid Tier";
+                        }
+
+                        // Populate Metadata
+                        result.Metadata ??= new Dictionary<string, object>();
+                        if (!string.IsNullOrEmpty(reqsRem)) result.Metadata["ratelimit_remaining_requests_day"] = reqsRem;
+                        if (!string.IsNullOrEmpty(reqsLimit)) result.Metadata["ratelimit_limit_requests_day"] = reqsLimit;
+                        if (!string.IsNullOrEmpty(tokensRem)) result.Metadata["ratelimit_remaining_tokens_day"] = tokensRem;
+                        if (!string.IsNullOrEmpty(tokensLimit)) result.Metadata["ratelimit_limit_tokens_day"] = tokensLimit;
+                    }
+                }
+                catch { /* Best effort parsing */ }
+
                 return result;
             }
 

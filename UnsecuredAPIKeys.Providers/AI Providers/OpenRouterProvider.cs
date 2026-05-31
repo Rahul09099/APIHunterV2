@@ -113,6 +113,30 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         result.Balance = $"No key limit (Used: ${usage:F4})";
                     }
 
+                    // Additional check: If key is valid and paid tier, verify if the account actually has credits
+                    if (!isFreeTier && !result.IsQuotaExceeded)
+                    {
+                        try
+                        {
+                            using var checkRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
+                            checkRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                            
+                            var jsonPayload = "{\"model\":\"google/gemini-2.5-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}";
+                            checkRequest.Content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
+                            
+                            using var checkResponse = await httpClient.SendAsync(checkRequest);
+                            var checkBody = await checkResponse.Content.ReadAsStringAsync();
+                            
+                            if ((int)checkResponse.StatusCode == 402 || checkBody.Contains("Insufficient credits", StringComparison.OrdinalIgnoreCase))
+                            {
+                                result.IsQuotaExceeded = true;
+                                result.Detail = "Valid key but insufficient account credits.";
+                                result.Balance = $"Insufficient account credits (Used: ${usage:F4})";
+                            }
+                        }
+                        catch { /* Best effort account credit check */ }
+                    }
+
                     // Account Tier
                     string tier = isFreeTier ? "Free Tier" : "Paid Tier";
                     string? labelStr = null;

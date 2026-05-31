@@ -55,10 +55,21 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                                 {
                                     credits += $" / {total}";
                                 }
+
+                                if (available.ValueKind == System.Text.Json.JsonValueKind.Number && available.GetDouble() <= 0)
+                                {
+                                    result.IsQuotaExceeded = true;
+                                    result.Detail = "Valid key but no credits remaining.";
+                                }
                             }
                             else if (data.TryGetProperty("balance", out var balance))
                             {
                                 credits = balance.ToString();
+                                if (balance.ValueKind == System.Text.Json.JsonValueKind.Number && balance.GetDouble() <= 0)
+                                {
+                                    result.IsQuotaExceeded = true;
+                                    result.Detail = "Valid key but no credits remaining.";
+                                }
                             }
 
                             if (credits != null)
