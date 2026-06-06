@@ -212,6 +212,9 @@ public class TelegramBotService : BackgroundService
                 case "/help":
                     await HandleHelpCommand(chatId, isAdmin, cancellationToken);
                     break;
+                case "/dashboard":
+                    await HandleDashboardCommand(chatId, cancellationToken);
+                    break;
                 case "/status":
                     await HandleStatusCommand(chatId, isAdmin, cancellationToken);
                     break;
@@ -600,6 +603,7 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("📊 <b>General</b>");
         help.AppendLine("├ /status - Overall status &amp; active jobs");
         help.AppendLine("├ /stats - Detailed statistics");
+        help.AppendLine("├ /dashboard - Launch visual control center");
         help.AppendLine("└ /help - Show this message");
         help.AppendLine();
         help.AppendLine("🔍 <b>Scraper</b>");
@@ -682,6 +686,27 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("<i>Use the menu button for quick access.</i>");
 
         await _botClient.SendMessage(chatId, help.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    private async Task HandleDashboardCommand(long chatId, CancellationToken ct)
+    {
+        var dashboardUrl = "https://unsecuredapikeys-api-aezg.onrender.com/dashboard";
+        
+        var inlineKeyboard = new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithWebApp("📊 Open Dashboard", new WebAppInfo { Url = dashboardUrl })
+            }
+        });
+
+        await _botClient.SendMessage(
+            chatId,
+            "📊 <b>APIHunter Control Center</b>\nClick the button below to open the visual dashboard directly in Telegram.",
+            parseMode: ParseMode.Html,
+            replyMarkup: inlineKeyboard,
+            cancellationToken: ct
+        );
     }
 
     private async Task HandleStatusCommand(long chatId, bool isAdmin, CancellationToken ct)
