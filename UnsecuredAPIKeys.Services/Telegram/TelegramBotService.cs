@@ -75,6 +75,7 @@ public class TelegramBotService : BackgroundService
         // Set bot commands menu
         await _botClient.SetMyCommands(new[]
         {
+            new BotCommand { Command = "dashboard", Description = "Open Visual Dashboard" },
             new BotCommand { Command = "status", Description = "Mission Control" },
             new BotCommand { Command = "stats", Description = "Statistics" },
             new BotCommand { Command = "start_scraper", Description = "Start Scraper" },

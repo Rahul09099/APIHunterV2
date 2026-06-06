@@ -6,15 +6,17 @@ const STATE = {
     token: localStorage.getItem('X-Node-Token') || 'default_admin_token_2026',
     isAdmin: false,
     activeTab: 'dashboard-tab',
-    keys: [],
+    keys: [], // In-memory database cache
     filteredKeys: [],
+    keysAreUnmasked: false,
     queries: [],
     tokens: [],
     workers: [],
     currentPage: 1,
     pageSize: 15,
     refreshIntervalId: null,
-    apiTypes: []
+    apiTypes: [],
+    isRawConsoleVisible: false
 };
 
 // UI Element Cache
@@ -25,23 +27,12 @@ const UI = {
     tabContents: document.querySelectorAll('.tab-content'),
     pageTitleText: document.getElementById('page-title-text'),
     
-    // Stats Cards
-    activeWorkersVal: document.getElementById('stat-active-workers'),
-    totalKeysVal: document.getElementById('stat-total-keys'),
-    activeQueriesVal: document.getElementById('stat-active-queries'),
-    githubTokensVal: document.getElementById('stat-github-tokens'),
+    // Category Cards
+    catValAi: document.getElementById('cat-val-ai'),
+    catValDb: document.getElementById('cat-val-db'),
+    catValServers: document.getElementById('cat-val-servers'),
+    catValCloud: document.getElementById('cat-val-cloud'),
     lastSignalVal: document.getElementById('stat-last-signal'),
-    
-    // Charts (Bars)
-    barValidCredits: document.getElementById('bar-valid-credits'),
-    barValidNoCredits: document.getElementById('bar-valid-nocredits'),
-    barUnverified: document.getElementById('bar-unverified'),
-    barInvalid: document.getElementById('bar-invalid'),
-    
-    countValidCredits: document.getElementById('count-valid-credits'),
-    countValidNoCredits: document.getElementById('count-valid-nocredits'),
-    countUnverified: document.getElementById('count-unverified'),
-    countInvalid: document.getElementById('count-invalid'),
     
     // Job Runner Elements
     startScraperBtn: document.getElementById('start-scraper-btn'),
@@ -54,12 +45,19 @@ const UI = {
     keySearchInput: document.getElementById('key-search'),
     filterStatusSelect: document.getElementById('filter-status'),
     filterTypeSelect: document.getElementById('filter-type'),
+    revealNakedKeysCheck: document.getElementById('reveal-naked-keys-check'),
+    toggleRawConsoleBtn: document.getElementById('toggle-raw-console-btn'),
     resetFiltersBtn: document.getElementById('reset-filters-btn'),
     keysTbody: document.getElementById('keys-tbody'),
     keysTotalCountText: document.getElementById('keys-total-count'),
     prevPageBtn: document.getElementById('prev-page-btn'),
     nextPageBtn: document.getElementById('next-page-btn'),
     pageNumDisplay: document.getElementById('page-num-display'),
+    
+    // Raw Console elements
+    rawExportConsole: document.getElementById('raw-export-console'),
+    rawExportTextarea: document.getElementById('raw-export-textarea'),
+    copyRawTextBtn: document.getElementById('copy-raw-text-btn'),
     
     // Workers Elements
     workersTbody: document.getElementById('workers-tbody'),
@@ -91,18 +89,51 @@ const UI = {
     modalKeyResponse: document.getElementById('modal-key-response')
 };
 
+// Auto-detect Telegram WebApp User & Token
+async function autoDetectTelegramUser() {
+    if (window.Telegram && window.Telegram.WebApp) {
+        const webApp = window.Telegram.WebApp;
+        webApp.ready();
+        
+        // Retrieve telegram user object from initData
+        const user = webApp.initDataUnsafe?.user;
+        if (user && user.id) {
+            const telegramId = user.id;
+            console.log(`Telegram WebApp detected. User ID: ${telegramId}`);
+            try {
+                const response = await fetch(`/api/Status/token-by-telegram/${telegramId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.token) {
+                        STATE.token = data.token;
+                        localStorage.setItem('X-Node-Token', data.token);
+                        showNotification(`Auto-detected Telegram session (ID: ${telegramId})`, 'success');
+                    }
+                } else {
+                    console.warn(`Could not resolve token for Telegram ID ${telegramId}`);
+                }
+            } catch (err) {
+                console.error('Error auto-logging via Telegram:', err);
+            }
+        }
+    }
+}
+
 // Initialize Application
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Attempt auto login via Telegram WebApp context first
+    await autoDetectTelegramUser();
+
     // Populate saved token
     if (STATE.token) {
         UI.tokenInput.value = STATE.token;
     }
     
     setupEventListeners();
-    validateSession();
+    await validateSession();
     fetchApiTypes();
     
-    // Start auto polling loop (every 10 seconds)
+    // Start auto polling loop (every 10 seconds for jobs/heartbeats, key data loads on tab switch)
     STATE.refreshIntervalId = setInterval(runPollingCycle, 10000);
 });
 
@@ -145,10 +176,41 @@ function setupEventListeners() {
     UI.keySearchInput.addEventListener('input', applyKeysFilters);
     UI.filterStatusSelect.addEventListener('change', applyKeysFilters);
     UI.filterTypeSelect.addEventListener('change', applyKeysFilters);
+    
+    // Reveal Naked Keys Toggle
+    UI.revealNakedKeysCheck.addEventListener('change', async () => {
+        if (UI.revealNakedKeysCheck.checked && !STATE.keysAreUnmasked) {
+            showNotification('Fetching unmasked key details...', 'info');
+            await loadUnmaskedKeysCache();
+        }
+        applyKeysFilters();
+    });
+
+    // Raw Console Toggle
+    UI.toggleRawConsoleBtn.addEventListener('click', () => {
+        STATE.isRawConsoleVisible = !STATE.isRawConsoleVisible;
+        if (STATE.isRawConsoleVisible) {
+            UI.rawExportConsole.classList.remove('hidden');
+            UI.toggleRawConsoleBtn.innerText = 'Hide Raw Text';
+            updateRawConsole();
+        } else {
+            UI.rawExportConsole.classList.add('hidden');
+            UI.toggleRawConsoleBtn.innerText = 'Show Raw Text';
+        }
+    });
+
+    // Copy Raw Console Button
+    UI.copyRawTextBtn.addEventListener('click', () => {
+        UI.rawExportTextarea.select();
+        document.execCommand('copy');
+        showNotification('Raw credentials copied to clipboard!', 'success');
+    });
+
     UI.resetFiltersBtn.addEventListener('click', () => {
         UI.keySearchInput.value = '';
         UI.filterStatusSelect.value = 'All';
         UI.filterTypeSelect.value = 'All';
+        UI.revealNakedKeysCheck.checked = false;
         applyKeysFilters();
     });
 
@@ -183,7 +245,7 @@ function setupEventListeners() {
         if (e.key === 'Enter') addGitHubToken();
     });
 
-    // Export keys redirections
+    // Export keys file download redirections
     UI.exportJsonBtn.addEventListener('click', () => {
         window.open(`/api/Config/export-keys?format=json&nodeToken=${encodeURIComponent(STATE.token)}`, '_blank');
     });
@@ -216,7 +278,7 @@ function switchTab(tabId) {
         // Update Title text
         const titles = {
             'dashboard-tab': 'Dashboard Overview',
-            'keys-tab': 'Keys Inspector',
+            'keys-tab': 'Keys Explorer',
             'workers-tab': 'Workers Network Monitor',
             'config-tab': 'Settings & Controls'
         };
@@ -251,7 +313,14 @@ function runTabLoadingLogic(tabId) {
 
 // Core loop refreshing active views
 function runPollingCycle() {
-    runTabLoadingLogic(STATE.activeTab);
+    // Poll running jobs & heartbeats every 10 seconds
+    if (STATE.token) {
+        if (STATE.activeTab === 'dashboard-tab') {
+            fetchBackgroundJobs();
+        } else if (STATE.activeTab === 'workers-tab') {
+            fetchWorkerNodes();
+        }
+    }
 }
 
 // Request Helper wrapping auth header
@@ -308,7 +377,6 @@ async function validateSession() {
     try {
         // Try getting github tokens as user authentication check
         const response = await apiCall('/api/Status/github-tokens');
-        // If successful, user is authorized
         setAuthorizedUI(true);
         
         // Check if user is Admin by querying admin configuration endpoint (will fail if not admin)
@@ -323,6 +391,9 @@ async function validateSession() {
                 switchTab('dashboard-tab');
             }
         }
+        
+        // Prefetch keys once into memory to initialize counts and avoid redundant DB hits
+        await initKeysCache();
         
         // Fetch current active tab data
         runTabLoadingLogic(STATE.activeTab);
@@ -378,14 +449,103 @@ async function fetchApiTypes() {
     }
 }
 
+// Optimized Cache Loaders to prevent database load
+async function initKeysCache() {
+    try {
+        // Try calling export endpoint first (gets us raw unmasked keys and all valid keys)
+        const unmaskedData = await apiCall('/api/Config/export-keys?format=json');
+        STATE.keys = unmaskedData;
+        STATE.keysAreUnmasked = true;
+    } catch (err) {
+        // Fallback for non-admins to load preview summaries
+        const previewData = await apiCall('/api/Status/recent-keys?limit=300');
+        STATE.keys = previewData;
+        STATE.keysAreUnmasked = false;
+    }
+    
+    // Calculate and render categories card values immediately from the in-memory cache
+    calculateCategoriesSummary();
+}
+
+// Load full unmasked keys if requested
+async function loadUnmaskedKeysCache() {
+    try {
+        const unmaskedData = await apiCall('/api/Config/export-keys?format=json');
+        
+        // Merge unmasked keys with existing preview list to retain unverified key records
+        unmaskedData.forEach(unmasked => {
+            const index = STATE.keys.findIndex(k => k.id === unmasked.id);
+            if (index !== -1) {
+                STATE.keys[index] = { ...STATE.keys[index], ...unmasked };
+            } else {
+                STATE.keys.push(unmasked);
+            }
+        });
+        
+        STATE.keysAreUnmasked = true;
+    } catch (err) {
+        showNotification('Failed to fetch full unmasked keys. Admin role required.', 'danger');
+        UI.revealNakedKeysCheck.checked = false;
+    }
+}
+
+// Client Side Category Calculations - Grouping and Counting without Database Queries
+function calculateCategoriesSummary() {
+    let aiCount = 0;
+    let dbCount = 0;
+    let serverCount = 0;
+    let cloudCount = 0;
+    
+    // Classify valid/validnocredits keys into categories
+    STATE.keys.forEach(key => {
+        const status = key.status;
+        if (status !== 'Valid' && status !== 'ValidNoCredits') return;
+        
+        const type = (key.apiType || '').toLowerCase();
+        
+        // AI Categories
+        if (['openai', 'anthropic', 'google', 'deepseek', 'cohere', 'elevenlabs', 'stabilityai', 'togetherai', 'xai', 'mistral', 'groq', 'perplexity'].includes(type)) {
+            aiCount++;
+        }
+        // Database Categories
+        else if (['redis', 'mysql', 'postgresql', 'mongodb', 'couchdb', 'dynamodb'].includes(type)) {
+            dbCount++;
+        }
+        // Server login formats
+        else if (['ssh', 'ftp', 'sftp'].includes(type)) {
+            serverCount++;
+        }
+        // Cloud providers
+        else if (['aws', 'azure', 'gcp', 'aws bedrock', 'aws iam', 'azure openai'].includes(type)) {
+            cloudCount++;
+        }
+        else {
+            // Default fallback based on category name returned by registry if available
+            const apiDef = STATE.apiTypes.find(t => t.name.toLowerCase() === type);
+            if (apiDef) {
+                const catName = apiDef.category.toLowerCase();
+                if (catName.includes('ai') || catName.includes('llm')) aiCount++;
+                else if (catName.includes('db') || catName.includes('database')) dbCount++;
+                else if (catName.includes('server') || catName.includes('ssh')) serverCount++;
+                else if (catName.includes('cloud')) cloudCount++;
+            } else {
+                // Default to AI
+                aiCount++;
+            }
+        }
+    });
+    
+    // Write values to cards
+    UI.catValAi.innerText = aiCount;
+    UI.catValDb.innerText = dbCount;
+    UI.catValServers.innerText = serverCount;
+    UI.catValCloud.innerText = cloudCount;
+}
+
 // Tab: Dashboard Stats Fetch
 async function fetchDashboardStats() {
     try {
-        // Stats Overview (Public data but contains key totals)
         const nodeStats = await apiCall('/api/v1/Nodes/stats');
-        UI.activeWorkersVal.innerText = nodeStats.activeNodes;
-        UI.totalKeysVal.innerText = nodeStats.totalKeys;
-        UI.activeQueriesVal.innerText = nodeStats.activeQueries;
         
         if (nodeStats.lastDiscoveryAt) {
             const date = new Date(nodeStats.lastDiscoveryAt);
@@ -394,34 +554,8 @@ async function fetchDashboardStats() {
             UI.lastSignalVal.innerText = 'NO ACTIVITY RECORDED';
         }
         
-        // Detailed Status
-        const stats = await apiCall('/api/Status');
-        UI.githubTokensVal.innerText = stats.gitHubTokensCount;
-        
-        // Render bar chart percentages
-        const total = stats.totalKeys || 0;
-        
-        const validCredsCount = stats.validKeys || 0;
-        const validNoCredsCount = stats.quotaExhaustedKeys || 0;
-        const unverifiedCount = stats.unverifiedKeys || 0;
-        const invalidCount = stats.invalidKeys || 0;
-        
-        const validCredsPct = total > 0 ? (validCredsCount / total * 100).toFixed(1) : 0;
-        const validNoCredsPct = total > 0 ? (validNoCredsCount / total * 100).toFixed(1) : 0;
-        const unverifiedPct = total > 0 ? (unverifiedCount / total * 100).toFixed(1) : 0;
-        const invalidPct = total > 0 ? (invalidCount / total * 100).toFixed(1) : 0;
-        
-        UI.barValidCredits.style.width = `${validCredsPct}%`;
-        UI.countValidCredits.innerText = `${validCredsCount} (${validCredsPct}%)`;
-        
-        UI.barValidNoCredits.style.width = `${validNoCredsPct}%`;
-        UI.countValidNoCredits.innerText = `${validNoCredsCount} (${validNoCredsPct}%)`;
-        
-        UI.barUnverified.style.width = `${unverifiedPct}%`;
-        UI.countUnverified.innerText = `${unverifiedCount} (${unverifiedPct}%)`;
-        
-        UI.barInvalid.style.width = `${invalidPct}%`;
-        UI.countInvalid.innerText = `${invalidCount} (${invalidPct}%)`;
+        // Re-read memory cache to update categories summary without hitting database
+        calculateCategoriesSummary();
         
     } catch (err) {
         console.error('Failed to load dashboard statistics:', err);
@@ -435,14 +569,12 @@ async function fetchBackgroundJobs() {
         const verifierJobs = await apiCall('/api/Verifier/jobs');
         
         const allJobs = [...scraperJobs, ...verifierJobs];
-        
-        // Filter jobs to running and recent ones
         UI.jobsTbody.innerHTML = '';
         
         if (allJobs.length === 0) {
             UI.jobsTbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="text-center text-muted">No active background jobs running.</td>
+                    <td colspan="6" class="text-center text-muted">No active background jobs running.</td>
                 </tr>
             `;
             return;
@@ -451,7 +583,6 @@ async function fetchBackgroundJobs() {
         allJobs.forEach(job => {
             const tr = document.createElement('tr');
             
-            // Format status class
             let badgeClass = 'badge-muted';
             if (job.status === 'Running') badgeClass = 'badge-cyan animate-pulse';
             else if (job.status === 'Completed') badgeClass = 'badge-emerald';
@@ -467,19 +598,17 @@ async function fetchBackgroundJobs() {
             const s = diffSec % 60;
             const durationStr = `${m}m ${s}s`;
             
-            // Stop button if running
             let actionBtn = '';
             if (job.status === 'Running') {
-                actionBtn = `<button class="btn btn-sm btn-danger py-1 px-2" onclick="stopJob('${job.jobId}', '${job.jobType}')">Stop</button>`;
+                actionBtn = `<button class="btn btn-sm btn-danger py-1 px-2" style="font-size: 11px; padding: 2px 6px;" onclick="stopJob('${job.jobId}', '${job.jobType}')">Stop</button>`;
             } else {
                 actionBtn = `<span class="text-muted">-</span>`;
             }
             
             tr.innerHTML = `
-                <td><code class="key-preview" style="max-width: 100px;">${job.jobId.substring(0, 8)}...</code></td>
+                <td><code class="key-preview" style="max-width: 90px; padding: 2px 6px;">${job.jobId.substring(0, 8)}...</code></td>
                 <td><span class="badge ${job.jobType === 'Scraper' ? 'badge-blue' : 'badge-emerald'}">${job.jobType}</span></td>
                 <td><span class="badge ${badgeClass}">${job.status}</span></td>
-                <td>${started.toLocaleString()}</td>
                 <td>${durationStr}</td>
                 <td><code>${job.ownerTelegramId || 'System'}</code></td>
                 <td>${actionBtn}</td>
@@ -493,7 +622,7 @@ async function fetchBackgroundJobs() {
     }
 }
 
-// Stop a running job
+// Stop running job
 async function stopJob(jobId, jobType) {
     const route = jobType === 'Scraper' ? `/api/Scraper/stop/${jobId}` : `/api/Verifier/stop/${jobId}`;
     try {
@@ -504,12 +633,12 @@ async function stopJob(jobId, jobType) {
         showNotification(`Failed to stop job: ${err.message}`, 'danger');
     }
 }
-window.stopJob = stopJob; // Expose to HTML inline listener
+window.stopJob = stopJob;
 
 // Trigger Scraper Job
 async function triggerScraperJob() {
     UI.startScraperBtn.disabled = true;
-    UI.startScraperBtn.querySelector('.btn-spinner').classList.remove('hidden');
+    UI.startScraperBtn.innerText = 'Launching...';
     
     try {
         const response = await apiCall('/api/Scraper/start', 'POST');
@@ -519,14 +648,14 @@ async function triggerScraperJob() {
         showNotification(`Failed to start scraper: ${err.message}`, 'danger');
     } finally {
         UI.startScraperBtn.disabled = false;
-        UI.startScraperBtn.querySelector('.btn-spinner').classList.add('hidden');
+        UI.startScraperBtn.innerText = '🚀 Start Scraper Daemon';
     }
 }
 
 // Trigger Verifier Job
 async function triggerVerifierJob() {
     UI.startVerifierBtn.disabled = true;
-    UI.startVerifierBtn.querySelector('.btn-spinner').classList.remove('hidden');
+    UI.startVerifierBtn.innerText = 'Launching...';
     
     const apiTypes = UI.verifierTypesInput.value.trim();
     const reverify = UI.verifierReverifyCheck.checked;
@@ -543,11 +672,11 @@ async function triggerVerifierJob() {
         showNotification(`Failed to start verifier: ${err.message}`, 'danger');
     } finally {
         UI.startVerifierBtn.disabled = false;
-        UI.startVerifierBtn.querySelector('.btn-spinner').classList.add('hidden');
+        UI.startVerifierBtn.innerText = '🔍 Run Verifier';
     }
 }
 
-// Tab: Keys Explorer Fetch
+// Tab: Keys Explorer Fetch (Use local cache when possible to minimize database load)
 async function fetchRecentKeys() {
     UI.keysTbody.innerHTML = `
         <tr>
@@ -556,8 +685,20 @@ async function fetchRecentKeys() {
     `;
     
     try {
+        // Pull latest list from DB once, update memory cache
         const data = await apiCall('/api/Status/recent-keys?limit=300');
-        STATE.keys = data;
+        
+        // Merge with existing cache to keep unmasked values if we have them
+        data.forEach(freshKey => {
+            const cachedIdx = STATE.keys.findIndex(k => k.id === freshKey.id);
+            if (cachedIdx !== -1) {
+                // Keep the raw unmasked key if we already fetched it previously
+                STATE.keys[cachedIdx] = { ...freshKey, ...STATE.keys[cachedIdx] };
+            } else {
+                STATE.keys.push(freshKey);
+            }
+        });
+        
         applyKeysFilters();
     } catch(err) {
         console.error('Failed to fetch recent keys:', err);
@@ -590,7 +731,9 @@ function applyKeysFilters() {
         
         // Keyword text matching
         if (searchVal) {
-            const inPreview = key.keyPreview && key.keyPreview.toLowerCase().includes(searchVal);
+            const rawKey = key.apiKey || '';
+            const keyText = STATE.revealKeys ? rawKey : (key.keyPreview || '');
+            const inPreview = keyText.toLowerCase().includes(searchVal);
             const inType = key.apiType && key.apiType.toLowerCase().includes(searchVal);
             const inStatus = key.status && key.status.toLowerCase().includes(searchVal);
             const inTier = key.accountTier && key.accountTier.toLowerCase().includes(searchVal);
@@ -603,6 +746,7 @@ function applyKeysFilters() {
     
     STATE.currentPage = 1;
     renderKeysTable();
+    updateRawConsole();
 }
 
 // Render paginated keys list
@@ -635,17 +779,17 @@ function renderKeysTable() {
     UI.nextPageBtn.disabled = (STATE.currentPage === maxPage);
     UI.pageNumDisplay.innerText = `Page ${STATE.currentPage} of ${maxPage}`;
     
+    const reveal = UI.revealNakedKeysCheck.checked;
+    
     pageKeys.forEach(key => {
         const tr = document.createElement('tr');
         
-        // API Type badge styling
         let typeBadgeClass = 'badge-muted';
         if (key.apiType === 'OpenAI') typeBadgeClass = 'badge-emerald';
         else if (key.apiType === 'Anthropic') typeBadgeClass = 'badge-cyan';
         else if (key.apiType === 'Google') typeBadgeClass = 'badge-blue';
         else if (key.apiType === 'DeepSeek') typeBadgeClass = 'badge-amber';
         
-        // Status badge styling
         let statusBadgeClass = 'badge-muted';
         if (key.status === 'Valid') statusBadgeClass = 'badge-emerald';
         else if (key.status === 'ValidNoCredits') statusBadgeClass = 'badge-amber';
@@ -653,17 +797,19 @@ function renderKeysTable() {
         else if (key.status === 'Unverified') statusBadgeClass = 'badge-blue';
         else if (key.status === 'Error') statusBadgeClass = 'badge-red';
         
-        // Date formats
         const foundDate = new Date(key.firstFoundUTC).toLocaleDateString();
         const lastCheck = key.lastCheckedUTC ? new Date(key.lastCheckedUTC).toLocaleDateString() : 'Never';
+        
+        // Show unmasked key if reveal checked and unmasked key string is loaded, else show preview
+        const displayKeyString = (reveal && key.apiKey) ? key.apiKey : (key.keyPreview || '***');
         
         tr.innerHTML = `
             <td><span class="badge ${typeBadgeClass}">${key.apiType}</span></td>
             <td><span class="badge ${statusBadgeClass}">${key.status}</span></td>
             <td>
                 <div class="key-preview-container">
-                    <code class="key-preview">${key.keyPreview}</code>
-                    <button class="btn btn-secondary btn-sm p-1" style="height:24px;width:24px;" onclick="copySnippet('${key.keyPreview.replace('...', '')}')">📋</button>
+                    <code class="key-preview" style="max-width: 320px;">${displayKeyString}</code>
+                    <button class="btn btn-secondary btn-sm p-1" style="height:24px;width:24px; padding: 0;" onclick="copySnippet('${displayKeyString}')">📋</button>
                 </div>
             </td>
             <td><code class="text-muted">${key.balance || '-'}</code></td>
@@ -671,7 +817,7 @@ function renderKeysTable() {
             <td>${foundDate}</td>
             <td>${lastCheck}</td>
             <td>
-                <button class="btn btn-secondary btn-sm" onclick="inspectKeyDetails('${key.id}')">Inspect</button>
+                <button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="inspectKeyDetails('${key.id}')">Inspect</button>
             </td>
         `;
         
@@ -679,10 +825,10 @@ function renderKeysTable() {
     });
 }
 
-// Copy a snippet text helper
+// Copy helper
 function copySnippet(text) {
     navigator.clipboard.writeText(text);
-    showNotification('Key snippet copied!', 'info');
+    showNotification('Credential copied!', 'info');
 }
 window.copySnippet = copySnippet;
 
@@ -691,17 +837,20 @@ async function inspectKeyDetails(keyId) {
     const key = STATE.keys.find(k => k.id == keyId);
     if (!key) return;
     
-    UI.modalFullKey.innerText = 'Click copy button to copy full key details';
+    // Check if we have unmasked key, else try to load it first
+    if (!key.apiKey && STATE.keysAreUnmasked) {
+        // If we are marked as unmasked but don't have it, try reloading
+        await loadUnmaskedKeysCache();
+    }
     
-    // Retrieve full unmasked key if available via CSV/JSON exporter (or use keyPreview if protected)
-    UI.modalFullKey.innerText = key.keyPreview;
+    const displayKey = key.apiKey || key.keyPreview;
     
+    UI.modalFullKey.innerText = displayKey;
     UI.modalKeyType.innerText = key.apiType;
     UI.modalKeyStatus.innerText = key.status;
-    UI.modalKeyBalance.innerText = key.balance || 'No balance data available';
+    UI.modalKeyBalance.innerText = key.balance || 'No balance data';
     UI.modalKeyTier.innerText = key.accountTier || 'Unknown Tier';
     
-    // Process response JSON format
     let rawResponse = key.validationResponse || '{}';
     try {
         const parsed = JSON.parse(rawResponse);
@@ -711,19 +860,26 @@ async function inspectKeyDetails(keyId) {
     }
     
     UI.keyModal.classList.remove('hidden');
-    
-    // Attempt to retrieve full token value by fetching export details
-    try {
-        const fullData = await apiCall(`/api/Config/export-keys?format=json`);
-        const matchingKey = fullData.find(k => k.id == keyId);
-        if (matchingKey) {
-            UI.modalFullKey.innerText = matchingKey.apiKey;
-        }
-    } catch(err) {
-        console.warn('Failed to retrieve full unmasked key, displaying preview. Admin authentication required for exports.');
-    }
 }
 window.inspectKeyDetails = inspectKeyDetails;
+
+// Update Raw Text Export Area (Minimizes Database load by reading directly from JavaScript state)
+function updateRawConsole() {
+    if (!STATE.isRawConsoleVisible) return;
+    
+    const reveal = UI.revealNakedKeysCheck.checked;
+    let rawText = '';
+    
+    STATE.filteredKeys.forEach(k => {
+        const keyString = (reveal && k.apiKey) ? k.apiKey : (k.keyPreview || '***');
+        const balanceStr = k.balance ? ` [Balance: ${k.balance}]` : '';
+        const tierStr = k.accountTier ? ` [Tier: ${k.accountTier}]` : '';
+        
+        rawText += `${k.apiType} | ${keyString} | Status: ${k.status}${balanceStr}${tierStr}\n`;
+    });
+    
+    UI.rawExportTextarea.value = rawText || 'No credentials matching current filters.';
+}
 
 // Tab: Worker Nodes Fetch
 async function fetchWorkerNodes() {
@@ -807,7 +963,7 @@ async function fetchQueries() {
                         <input type="checkbox" ${q.isEnabled ? 'checked' : ''} onchange="toggleQuery('${q.id}')">
                         <span class="slider"></span>
                     </label>
-                    <button class="btn btn-sm btn-danger py-1 px-2" onclick="deleteQuery('${q.id}')">Delete</button>
+                    <button class="btn btn-sm btn-danger py-1 px-2" style="font-size: 11px; padding: 2px 6px;" onclick="deleteQuery('${q.id}')">Delete</button>
                 </div>
             `;
             UI.queriesList.appendChild(div);
@@ -829,7 +985,7 @@ async function addSearchQuery() {
     try {
         await apiCall('/api/Config/search-query', 'POST', { query: val });
         UI.newQueryInput.value = '';
-        showNotification('Search query added successfully.', 'success');
+        showNotification('Search query added.', 'success');
         fetchQueries();
     } catch(err) {
         showNotification(`Failed to add query: ${err.message}`, 'danger');
@@ -852,7 +1008,7 @@ window.toggleQuery = toggleQuery;
 
 // Config: Delete Search Query
 async function deleteQuery(id) {
-    if (!confirm('Are you sure you want to delete this search query? Workers will stop scanning this pattern.')) return;
+    if (!confirm('Are you sure you want to delete this search query?')) return;
     
     try {
         const response = await apiCall(`/api/Config/search-query/${id}`, 'DELETE');
@@ -874,7 +1030,7 @@ async function fetchGitHubTokens() {
         UI.tokensList.innerHTML = '';
         
         if (data.length === 0) {
-            UI.tokensList.innerHTML = '<div class="text-center text-muted p-3">No GitHub tokens registered. Scrapers might not function.</div>';
+            UI.tokensList.innerHTML = '<div class="text-center text-muted p-3">No GitHub tokens registered.</div>';
             return;
         }
         
@@ -883,7 +1039,7 @@ async function fetchGitHubTokens() {
             div.className = 'config-item-row animate-fade-in';
             
             const lastUsedStr = t.lastUsedUTC 
-                ? `Last used: ${new Date(t.lastUsedUTC).toLocaleString()}` 
+                ? `Used: ${new Date(t.lastUsedUTC).toLocaleString()}` 
                 : 'Never used';
                 
             div.innerHTML = `
@@ -892,7 +1048,7 @@ async function fetchGitHubTokens() {
                     <small class="text-muted" style="font-size:11px;">${lastUsedStr}</small>
                 </div>
                 <div class="config-item-controls">
-                    <button class="btn btn-sm btn-danger py-1 px-2" onclick="deleteGitHubToken('${t.id}')">Delete</button>
+                    <button class="btn btn-sm btn-danger py-1 px-2" style="font-size: 11px; padding: 2px 6px;" onclick="deleteGitHubToken('${t.id}')">Delete</button>
                 </div>
             `;
             UI.tokensList.appendChild(div);
@@ -914,7 +1070,7 @@ async function addGitHubToken() {
     try {
         await apiCall('/api/Config/github-token', 'POST', { token: val });
         UI.newTokenInput.value = '';
-        showNotification('GitHub scraping token added successfully.', 'success');
+        showNotification('GitHub token added.', 'success');
         fetchGitHubTokens();
     } catch(err) {
         showNotification(`Failed to add token: ${err.message}`, 'danger');
@@ -925,11 +1081,11 @@ async function addGitHubToken() {
 
 // Config: Delete GitHub Token
 async function deleteGitHubToken(id) {
-    if (!confirm('Are you sure you want to delete this GitHub API token? Scrapers will lose quota.')) return;
+    if (!confirm('Are you sure you want to delete this GitHub API token?')) return;
     
     try {
         const response = await apiCall(`/api/Config/github-token/${id}`, 'DELETE');
-        showNotification(response.message || 'GitHub token deleted successfully.', 'success');
+        showNotification(response.message || 'GitHub token deleted.', 'success');
         fetchGitHubTokens();
     } catch(err) {
         showNotification(`Failed to delete token: ${err.message}`, 'danger');
@@ -942,7 +1098,7 @@ async function resetDatabase() {
     const confirmText = UI.resetConfirmInput.value.trim();
     if (confirmText !== 'CONFIRM_RESET') return;
     
-    if (!confirm('🚨 WARNING! This will completely format the SQLite database, erasing all configurations, keys, tokens, nodes, and job logs. This action CANNOT BE UNDONE. Are you absolutely sure?')) return;
+    if (!confirm('🚨 WARNING! This will completely format the SQLite database. Are you absolutely sure?')) return;
     
     UI.resetDbBtn.disabled = true;
     UI.resetDbBtn.innerText = 'Resetting Database...';
@@ -966,12 +1122,10 @@ async function resetDatabase() {
 
 // Custom Premium Toast Notifications
 function showNotification(msg, type = 'info') {
-    // Check if notification container exists
     let container = document.getElementById('toast-container');
     if (!container) {
         container = document.createElement('div');
         container.id = 'toast-container';
-        // Add container styling directly to simplify CSS file changes
         Object.assign(container.style, {
             position: 'fixed',
             bottom: '25px',
@@ -987,7 +1141,6 @@ function showNotification(msg, type = 'info') {
     const toast = document.createElement('div');
     toast.className = 'glass animate-slide-up';
     
-    // Apply styling to individual toast
     Object.assign(toast.style, {
         padding: '14px 24px',
         borderRadius: '12px',
@@ -1003,7 +1156,6 @@ function showNotification(msg, type = 'info') {
         boxShadow: '0 10px 25px rgba(0,0,0,0.3)'
     });
     
-    // Choose side-border color based on type
     const colors = {
         'info': 'var(--accent-cyan)',
         'success': 'var(--accent-emerald)',
@@ -1019,7 +1171,6 @@ function showNotification(msg, type = 'info') {
     
     container.appendChild(toast);
     
-    // Auto remove after 5 seconds
     setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transform = 'translateY(10px)';

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>APIHunter | Control Center</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="/css/dashboard.css">
 </head>
 <body>
@@ -32,7 +33,7 @@
                     <svg viewBox="0 0 24 24" class="nav-icon"><path d="M7 14c-1.103 0-2-.897-2-2s.897-2 2-2 2 .897 2 2-.897 2-2 2zm15-2c0-4.411-3.589-8-8-8H6c-3.309 0-6 2.691-6 6v4c0 3.309 2.691 6 6 6h8c4.411 0 8-3.589 8-8zm-8 6H6c-2.206 0-4-1.794-4-4v-4c0-2.206 1.794-4 4-4h8c3.309 0 6 2.691 6 6s-2.691 6-6 6zm-1-8h2v2h-2zm-3 0h2v2h-2zm6 4h2v2h-2zm-3 0h2v2h-2z"/></svg>
                     Keys Explorer
                 </button>
-                <button class="nav-item" data-tab="workers-tab">
+                <button class="nav-item admin-only" data-tab="workers-tab">
                     <svg viewBox="0 0 24 24" class="nav-icon"><path d="M19 14c1.103 0 2-.897 2-2V4c0-1.103-.897-2-2-2H5c-1.103 0-2 .897-2 2v8c0 1.103.897 2 2 2h4l-1.6 2.4A.993.993 0 0 0 7 17v1c0 1.103.897 2 2 2h6c1.103 0 2-.897 2-2v-1a.993.993 0 0 0-.4-1.6L15 14h4zM5 4h14v8H5V4zm10 14H9v-1l1.333-2h3.333L15 17v1z"/></svg>
                     Workers Network
                 </button>
@@ -56,7 +57,7 @@
             <!-- TOP BAR -->
             <header class="top-bar">
                 <div class="search-box">
-                    <h1 class="page-title" id="page-title-text">Dashboard Overview</h1>
+                    <h1 class="page-title" id="page-title-text">Dashboard</h1>
                 </div>
                 
                 <div class="user-controls">
@@ -72,144 +73,109 @@
             <!-- TAB: DASHBOARD -->
             <section id="dashboard-tab" class="tab-content active">
                 
-                <!-- SUMMARY CARDS GRID -->
-                <div class="stats-grid">
-                    <div class="stat-card glass animate-fade-in">
-                        <div class="card-icon blue">📡</div>
-                        <div class="card-data">
-                            <span class="card-title">Active Workers</span>
-                            <span class="card-val" id="stat-active-workers">0</span>
+                <!-- CATEGORY SUMMARY DECK -->
+                <div class="category-header-row animate-fade-in">
+                    <h2 class="category-main-title">Valid Credentials Overview</h2>
+                    <p class="category-sub-title">Live categorized summary of active credentials found inside public logs.</p>
+                </div>
+
+                <div class="category-grid animate-fade-in">
+                    <!-- AI & LLM CATEGORY -->
+                    <div class="category-card glass cyan-card">
+                        <div class="category-card-header">
+                            <span class="category-card-icon">🧠</span>
+                            <span class="category-card-label">AI & LLM Keys</span>
                         </div>
-                    </div>
-                    
-                    <div class="stat-card glass animate-fade-in">
-                        <div class="card-icon emerald">🔑</div>
-                        <div class="card-data">
-                            <span class="card-title">Total Keys</span>
-                            <span class="card-val" id="stat-total-keys">0</span>
-                        </div>
+                        <div class="category-card-value" id="cat-val-ai">0</div>
+                        <div class="category-card-desc">Active OpenAI, Anthropic, Gemini tokens</div>
                     </div>
 
-                    <div class="stat-card glass animate-fade-in">
-                        <div class="card-icon amber">🔍</div>
-                        <div class="card-data">
-                            <span class="card-title">Active Queries</span>
-                            <span class="card-val" id="stat-active-queries">0</span>
+                    <!-- DATABASES CATEGORY -->
+                    <div class="category-card glass emerald-card">
+                        <div class="category-card-header">
+                            <span class="category-card-icon">💾</span>
+                            <span class="category-card-label">Database Access</span>
                         </div>
+                        <div class="category-card-value" id="cat-val-db">0</div>
+                        <div class="category-card-desc">MySQL, Postgres, Redis connections</div>
                     </div>
 
-                    <div class="stat-card glass animate-fade-in">
-                        <div class="card-icon pink">⚡</div>
-                        <div class="card-data">
-                            <span class="card-title">GitHub Tokens</span>
-                            <span class="card-val" id="stat-github-tokens">0</span>
+                    <!-- SERVERS CATEGORY -->
+                    <div class="category-card glass pink-card">
+                        <div class="category-card-header">
+                            <span class="category-card-icon">🖥️</span>
+                            <span class="category-card-label">Server Terminals</span>
                         </div>
+                        <div class="category-card-value" id="cat-val-servers">0</div>
+                        <div class="category-card-desc">SSH logins, SFTP and FTP credentials</div>
+                    </div>
+
+                    <!-- CLOUD PROVIDERS CATEGORY -->
+                    <div class="category-card glass amber-card">
+                        <div class="category-card-header">
+                            <span class="category-card-icon">☁️</span>
+                            <span class="category-card-label">Cloud Infrastructure</span>
+                        </div>
+                        <div class="category-card-value" id="cat-val-cloud">0</div>
+                        <div class="category-card-desc">AWS Bedrock, Azure, GCP accounts</div>
                     </div>
                 </div>
 
-                <!-- DETAILED STATS (CHARTS & GRAPHS) -->
-                <div class="dashboard-charts-row">
-                    <!-- KEY STATUS DISTRIBUTION -->
-                    <div class="chart-card glass animate-slide-up">
-                        <h3 class="chart-title">Key Verification Distribution</h3>
-                        <div class="bar-chart-container">
-                            <div class="chart-bar-row">
-                                <span class="bar-label">Valid (Credits)</span>
-                                <div class="bar-outer">
-                                    <div class="bar-inner bg-emerald" id="bar-valid-credits" style="width: 0%;"></div>
-                                </div>
-                                <span class="bar-count" id="count-valid-credits">0</span>
-                            </div>
-                            
-                            <div class="chart-bar-row">
-                                <span class="bar-label">Quota Exhausted</span>
-                                <div class="bar-outer">
-                                    <div class="bar-inner bg-amber" id="bar-valid-nocredits" style="width: 0%;"></div>
-                                </div>
-                                <span class="bar-count" id="count-valid-nocredits">0</span>
-                            </div>
-
-                            <div class="chart-bar-row">
-                                <span class="bar-label">Unverified</span>
-                                <div class="bar-outer">
-                                    <div class="bar-inner bg-blue" id="bar-unverified" style="width: 0%;"></div>
-                                </div>
-                                <span class="bar-count" id="count-unverified">0</span>
-                            </div>
-
-                            <div class="chart-bar-row">
-                                <span class="bar-label">Invalid</span>
-                                <div class="bar-outer">
-                                    <div class="bar-inner bg-red" id="bar-invalid" style="width: 0%;"></div>
-                                </div>
-                                <span class="bar-count" id="count-invalid">0</span>
-                            </div>
+                <!-- CONTROLLERS AND JOBS SUMMARY split -->
+                <div class="dashboard-split-row">
+                    <!-- RUNNING BACKGROUND JOBS (60% width) -->
+                    <div class="section-card glass main-jobs-card animate-slide-up">
+                        <h3 class="section-title">Active Job Logs</h3>
+                        <div class="table-container">
+                            <table class="data-table" id="jobs-table">
+                                <thead>
+                                    <tr>
+                                        <th>Job ID</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>Runtime</th>
+                                        <th>Owner</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="jobs-tbody">
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted">No active background jobs running.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
-                    <!-- JOB RUNNER PANEL -->
-                    <div class="chart-card glass animate-slide-up">
-                        <h3 class="chart-title">Job Control Center</h3>
-                        <div class="job-runner-tabs">
-                            <div class="job-runner-controls">
-                                <h4 class="control-section-header">Start Scraper Job</h4>
-                                <p class="control-description">Scrapes GitHub/sources for new keys based on configured queries.</p>
-                                <button id="start-scraper-btn" class="btn btn-primary btn-block">
-                                    <span class="btn-spinner hidden"></span> Start Scraper
-                                </button>
-                            </div>
+                    <!-- QUICK TRIGGER PANEL (40% width) -->
+                    <div class="chart-card glass control-runner-card animate-slide-up">
+                        <h3 class="chart-title">Trigger Hunter Cycle</h3>
+                        <div class="job-runner-controls">
+                            <button id="start-scraper-btn" class="btn btn-primary btn-block mb-3">
+                                🚀 Start Scraper Daemon
+                            </button>
                             <hr class="separator">
-                            <div class="job-runner-controls">
-                                <h4 class="control-section-header">Start Verifier Job</h4>
-                                <p class="control-description">Validates unverified keys. Select options below.</p>
-                                
-                                <div class="form-row">
-                                    <div class="form-group col-6">
-                                        <label for="verifier-types-select" class="form-label-small">API Types (CSV, optional)</label>
-                                        <input type="text" id="verifier-types-select" class="form-input-sm" placeholder="e.g. OpenAI,Anthropic">
-                                    </div>
-                                    <div class="form-group col-6 flex-align-center">
-                                        <input type="checkbox" id="verifier-reverify-check" class="form-checkbox">
-                                        <label for="verifier-reverify-check" class="form-label-small checkbox-label">Re-verify Valid Keys Only</label>
-                                    </div>
+                            <h4 class="control-section-header">Start Verifier Job</h4>
+                            <div class="form-row">
+                                <div class="form-group col-12 mb-2">
+                                    <label for="verifier-types-select" class="form-label-small">API Type filter (optional)</label>
+                                    <input type="text" id="verifier-types-select" class="form-input-sm" placeholder="e.g. OpenAI,DeepSeek">
                                 </div>
-
-                                <button id="start-verifier-btn" class="btn btn-success btn-block">
-                                    <span class="btn-spinner hidden"></span> Start Verifier
-                                </button>
+                                <div class="form-group col-12 flex-align-center mb-3">
+                                    <input type="checkbox" id="verifier-reverify-check" class="form-checkbox">
+                                    <label for="verifier-reverify-check" class="form-label-small checkbox-label">Re-verify existing keys only</label>
+                                </div>
                             </div>
+                            <button id="start-verifier-btn" class="btn btn-success btn-block">
+                                🔍 Run Verifier
+                            </button>
                         </div>
                     </div>
                 </div>
 
-                <!-- RUNNING BACKGROUND JOBS -->
-                <div class="section-card glass animate-slide-up">
-                    <h3 class="section-title">Running Jobs</h3>
-                    <div class="table-container">
-                        <table class="data-table" id="jobs-table">
-                            <thead>
-                                <tr>
-                                    <th>Job ID</th>
-                                    <th>Job Type</th>
-                                    <th>Status</th>
-                                    <th>Started At</th>
-                                    <th>Duration</th>
-                                    <th>Owner</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="jobs-tbody">
-                                <tr>
-                                    <td colspan="7" class="text-center text-muted">No active background jobs running.</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- LAST SIGNAL & QUICK LOG -->
+                <!-- LAST SIGNAL -->
                 <div class="status-summary-card glass animate-fade-in">
-                    <span>🛰️ Last Database Signal Detected: <strong id="stat-last-signal" class="accent-glow">Waiting...</strong></span>
+                    <span>🛰️ Last Database Signal: <strong id="stat-last-signal" class="accent-glow">Waiting...</strong></span>
                 </div>
 
             </section>
@@ -219,7 +185,7 @@
                 <div class="filter-bar-card glass">
                     <div class="filter-inputs">
                         <div class="filter-group">
-                            <label for="key-search" class="filter-label">Search</label>
+                            <label for="key-search" class="filter-label">Search Key</label>
                             <input type="text" id="key-search" class="filter-input" placeholder="Search keys...">
                         </div>
                         <div class="filter-group">
@@ -239,15 +205,36 @@
                                 <option value="All">All API Types</option>
                             </select>
                         </div>
+                        <!-- REVEAL SWITCHES -->
+                        <div class="filter-group flex-row-align">
+                            <div class="switch-row">
+                                <label class="switch">
+                                    <input type="checkbox" id="reveal-naked-keys-check">
+                                    <span class="slider"></span>
+                                </label>
+                                <label for="reveal-naked-keys-check" class="filter-label clickable">👁️ Reveal Naked Keys</label>
+                            </div>
+                        </div>
                         <div class="filter-group flex-end">
+                            <button id="toggle-raw-console-btn" class="btn btn-secondary mr-2">📋 Show Raw Text</button>
                             <button id="reset-filters-btn" class="btn btn-secondary">Clear</button>
                         </div>
                     </div>
                 </div>
 
+                <!-- RAW TEXT EXPORT CONSOLE PANEL (COLLAPSIBLE) -->
+                <div id="raw-export-console" class="section-card glass animate-slide-up hidden" style="border-color: var(--accent-cyan); margin-bottom: 25px;">
+                    <div class="table-header-row">
+                        <h3 class="section-title accent-glow">Raw Credentials Console</h3>
+                        <button class="btn btn-secondary btn-sm" id="copy-raw-text-btn">📋 Copy Console</button>
+                    </div>
+                    <p class="section-desc">Fully unmasked credentials based on current search filters. Copy-paste directly into your configuration files.</p>
+                    <textarea id="raw-export-textarea" readonly class="form-input" style="font-family: monospace; height: 180px; font-size: 13px; color: #a7f3d0; background: #000; border: 1px solid rgba(0, 242, 255, 0.2); resize: vertical;"></textarea>
+                </div>
+
                 <div class="section-card glass">
                     <div class="table-header-row">
-                        <h3 class="section-title">Discovered API Keys</h3>
+                        <h3 class="section-title">Credentials Log</h3>
                         <div class="table-actions">
                             <span class="results-count" id="keys-total-count">Showing 0 keys</span>
                         </div>
@@ -259,7 +246,7 @@
                                 <tr>
                                     <th>API Type</th>
                                     <th>Status</th>
-                                    <th>API Key Snippet</th>
+                                    <th>API Key String</th>
                                     <th>Balance</th>
                                     <th>Tier</th>
                                     <th>Discovered</th>
@@ -286,8 +273,8 @@
             <!-- TAB: WORKERS NETWORK -->
             <section id="workers-tab" class="tab-content">
                 <div class="section-card glass animate-slide-up">
-                    <h3 class="section-title">Registered Hunter Nodes</h3>
-                    <p class="section-desc">Active instances scraping or reporting credentials to this Master. Heartbeats are updated every 10 seconds.</p>
+                    <h3 class="section-title">Active Hunter Workers</h3>
+                    <p class="section-desc">Instances currently reporting to this Master node. Partition maps are updated upon heartbeat synchronization.</p>
                     <div class="table-container">
                         <table class="data-table" id="workers-table">
                             <thead>
@@ -296,7 +283,7 @@
                                     <th>Username</th>
                                     <th>Node URL</th>
                                     <th>Last Heartbeat</th>
-                                    <th>Network Role</th>
+                                    <th>Role</th>
                                     <th>Status</th>
                                 </tr>
                             </thead>
@@ -316,12 +303,12 @@
                     
                     <!-- SEARCH QUERIES -->
                     <div class="section-card glass">
-                        <h3 class="section-title">Search Spectrum Queries</h3>
-                        <p class="section-desc">Add/remove target search queries distributed across workers.</p>
+                        <h3 class="section-title">Search Queries</h3>
+                        <p class="section-desc">Hardcoded strings distributed round-robin to scraping workers.</p>
                         
                         <div class="config-add-form">
-                            <input type="text" id="new-query-input" class="form-input" placeholder="e.g. sk-ant-api OR claude_api_key">
-                            <button id="add-query-btn" class="btn btn-primary">Add Target</button>
+                            <input type="text" id="new-query-input" class="form-input" placeholder="e.g. sk-proj- OR filename:.env">
+                            <button id="add-query-btn" class="btn btn-primary">Add</button>
                         </div>
                         
                         <div class="queries-list-container" id="queries-list">
@@ -331,12 +318,12 @@
 
                     <!-- GITHUB TOKENS -->
                     <div class="section-card glass">
-                        <h3 class="section-title">GitHub Scraping Tokens</h3>
-                        <p class="section-desc">Manage API keys used to query GitHub Search endpoints.</p>
+                        <h3 class="section-title">GitHub Scraping Quota Keys</h3>
+                        <p class="section-desc">API tokens used to bypass search rate limiting.</p>
 
                         <div class="config-add-form">
                             <input type="password" id="new-token-input" class="form-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxx">
-                            <button id="add-token-btn" class="btn btn-success">Add Token</button>
+                            <button id="add-token-btn" class="btn btn-success">Add</button>
                         </div>
 
                         <div class="tokens-list-container" id="tokens-list">
@@ -348,22 +335,22 @@
                 <!-- EXPORT & UTILITIES -->
                 <div class="config-grid grid-2-col">
                     <div class="section-card glass">
-                        <h3 class="section-title">Export Valid Credentials</h3>
-                        <p class="section-desc">Download verified active credentials in standard formats for integration.</p>
+                        <h3 class="section-title">Direct File Exports</h3>
+                        <p class="section-desc">Download complete database exports. All credentials will be fully unmasked.</p>
                         <div class="export-actions">
                             <button id="export-json-btn" class="btn btn-primary">
-                                📥 Export JSON Data
+                                📥 Export JSON
                             </button>
                             <button id="export-csv-btn" class="btn btn-success">
-                                📊 Export CSV Spreadsheet
+                                📊 Export CSV
                             </button>
                         </div>
                     </div>
 
                     <!-- DATABASE RESET (DANGER ZONE) -->
                     <div class="section-card glass border-danger">
-                        <h3 class="section-title text-danger">System Reset (Danger Zone)</h3>
-                        <p class="section-desc">Completely clear database credentials, worker records, configurations, and logs.</p>
+                        <h3 class="section-title text-danger">Database Format (Danger)</h3>
+                        <p class="section-desc">Clear credentials history. Wipe everything permanently.</p>
                         
                         <div class="danger-confirm-row">
                             <input type="text" id="reset-confirm-input" class="form-input input-danger" placeholder="Type CONFIRM_RESET">
@@ -380,12 +367,12 @@
     <div class="modal-backdrop hidden" id="key-modal">
         <div class="modal glass animate-slide-up">
             <div class="modal-header">
-                <h3 class="modal-title" id="modal-key-title">API Key Details</h3>
+                <h3 class="modal-title" id="modal-key-title">Credential Inspector</h3>
                 <button class="modal-close" id="modal-close-btn">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-info-row">
-                    <span class="info-label">Full Key:</span>
+                    <span class="info-label">Full Key String:</span>
                     <div class="code-block-container">
                         <code id="modal-full-key">loading...</code>
                         <button id="modal-copy-btn" class="btn btn-sm btn-secondary">Copy</button>
