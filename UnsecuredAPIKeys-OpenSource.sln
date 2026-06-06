@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UnsecuredAPIKeys.Services",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UnsecuredAPIKeys.WebAPI", "UnsecuredAPIKeys.WebAPI\UnsecuredAPIKeys.WebAPI.csproj", "{9D8B3F6E-4C5A-5B7D-0E9F-2A3B4C5D6E7F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UnsecuredAPIKeys.Tests", "UnsecuredAPIKeys.Tests\UnsecuredAPIKeys.Tests.csproj", "{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -59,6 +61,18 @@ Global
 		{1F7908B2-B234-4D58-A0B8-8D4F2AA130A4}.Release|x64.Build.0 = Release|Any CPU
 		{1F7908B2-B234-4D58-A0B8-8D4F2AA130A4}.Release|x86.ActiveCfg = Release|Any CPU
 		{1F7908B2-B234-4D58-A0B8-8D4F2AA130A4}.Release|x86.Build.0 = Release|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Debug|x64.Build.0 = Debug|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Debug|x86.Build.0 = Debug|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Release|x64.ActiveCfg = Release|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Release|x64.Build.0 = Release|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Release|x86.ActiveCfg = Release|Any CPU
+		{2B84596F-4D33-43C4-8F15-78E2B5E40DB8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

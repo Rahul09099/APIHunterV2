@@ -266,6 +266,9 @@ public class TelegramBotService : BackgroundService
                 case "/export":
                     await HandleExportCommand(chatId, args, isAdmin, cancellationToken);
                     break;
+                case "/export_creds":
+                    await HandleExportCredsCommand(chatId, args, isAdmin, cancellationToken);
+                    break;
                 case "/my_sub":
                     await HandleMySubCommand(chatId, user, cancellationToken);
                     break;
@@ -1280,6 +1283,34 @@ public class TelegramBotService : BackgroundService
             chatId: chatId,
             document: InputFile.FromStream(stream, fileName),
             caption: $"📂 Exported {statusLabel} keys in {fmt.ToUpper()} format.",
+            cancellationToken: ct);
+
+        try { System.IO.File.Delete(filePath); } catch { }
+    }
+
+    private async Task HandleExportCredsCommand(long chatId, string args, bool isAdmin, CancellationToken ct)
+    {
+        if (!isAdmin)
+        {
+            await _botClient.SendMessage(chatId, "❌ You must be an administrator to export server credentials.", cancellationToken: ct);
+            return;
+        }
+
+        string fmt = (args != null && args.Contains("json", StringComparison.OrdinalIgnoreCase)) ? "json" : "csv";
+        string fileName = $"server_credentials_{DateTime.Now:yyyyMMdd_HHmmss}.{fmt}";
+        string filePath = Path.Combine(Path.GetTempPath(), fileName);
+
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+
+        await dbService.ExportServerCredentialsAsync(dbContext, filePath, fmt);
+
+        using var stream = System.IO.File.OpenRead(filePath);
+        await _botClient.SendDocument(
+            chatId: chatId,
+            document: InputFile.FromStream(stream, fileName),
+            caption: $"📂 Exported server credentials in {fmt.ToUpper()} format.",
             cancellationToken: ct);
 
         try { System.IO.File.Delete(filePath); } catch { }

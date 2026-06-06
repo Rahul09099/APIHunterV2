@@ -386,7 +386,34 @@ FROM (VALUES
 
     -- ── RunPod ────────────────────────────────────────────────────────────────
     ('RUNPOD_API_KEY'),
-    ('rpa_')
+    ('rpa_'),
+
+    -- ── Server Credentials (Requirement 17) ──────────────────────────────────
+    ('ssh '),
+    ('ftp://'),
+    ('mysql://'),
+    ('postgresql://'),
+    ('mongodb://'),
+    ('redis://'),
+    ('-----BEGIN RSA PRIVATE KEY-----'),
+    ('KUBERNETES_SERVICE_HOST'),
+    ('DOCKER_HOST'),
+    ('rdp://'),
+    ('vnc://'),
+    ('mstsc'),
+    ('TeamViewer'),
+    ('filename:.rdp'),
+    ('WinRM'),
+    ('smtp://'),
+    ('SMTP_HOST'),
+    ('imap://'),
+    ('pop3://'),
+    ('cPanel'),
+    ('WHM_USER'),
+    ('PLESK_'),
+    ('filename:.bash_history'),
+    ('filename:id_rsa'),
+    ('extension:env')
 
 ) AS v(q)
 WHERE NOT EXISTS (
@@ -419,6 +446,60 @@ BEGIN
             FOREIGN KEY ("SearchQueryId") REFERENCES "SearchQueries" ("Id") ON DELETE CASCADE;
     END IF;
 END $$;
+
+-- =============================================================================
+-- SECTION 10: SERVER CREDENTIALS
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS "ServerCredentials" (
+    "Id"                   SERIAL PRIMARY KEY,
+    "CredentialType"       VARCHAR(50)  NOT NULL,
+    "Host"                 VARCHAR(255) NOT NULL,
+    "Port"                 INTEGER      NOT NULL DEFAULT 0,
+    "Username"             VARCHAR(255),
+    "PasswordHash"         VARCHAR(64),
+    "Domain"               VARCHAR(255),
+    "NetworkStatus"        VARCHAR(50)  NOT NULL DEFAULT 'Unknown',
+    "AuthenticationStatus" VARCHAR(50)  NOT NULL DEFAULT 'Untested',
+    "ServerMetadata"       JSONB        NOT NULL DEFAULT '{}',
+    "GeolocationData"      JSONB        NOT NULL DEFAULT '{}',
+    "OSINTData"            JSONB        NOT NULL DEFAULT '{}',
+    "RiskLevel"            VARCHAR(20)  NOT NULL DEFAULT 'Low',
+    "IsHoneypot"           BOOLEAN      NOT NULL DEFAULT FALSE,
+    "SourceRepository"     VARCHAR(500),
+    "SourceFilePath"       VARCHAR(500),
+    "SurroundingContext"   TEXT,
+    "EntropyScore"         DOUBLE PRECISION DEFAULT 0,
+    "DiscoveredAt"         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    "LastVerifiedAt"       TIMESTAMPTZ,
+    CONSTRAINT "uq_server_cred" UNIQUE ("Host", "Port", "Username", "CredentialType")
+);
+
+-- Idempotent column additions
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "CredentialType"       VARCHAR(50)  NOT NULL DEFAULT 'Unknown';
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Host"                 VARCHAR(255) NOT NULL DEFAULT 'Unknown';
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Port"                 INTEGER      NOT NULL DEFAULT 0;
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Username"             VARCHAR(255);
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "PasswordHash"         VARCHAR(64);
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Domain"               VARCHAR(255);
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "NetworkStatus"        VARCHAR(50)  NOT NULL DEFAULT 'Unknown';
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "AuthenticationStatus" VARCHAR(50)  NOT NULL DEFAULT 'Untested';
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "ServerMetadata"       JSONB        NOT NULL DEFAULT '{}';
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "GeolocationData"      JSONB        NOT NULL DEFAULT '{}';
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "OSINTData"            JSONB        NOT NULL DEFAULT '{}';
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "RiskLevel"            VARCHAR(20)  NOT NULL DEFAULT 'Low';
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "IsHoneypot"           BOOLEAN      NOT NULL DEFAULT FALSE;
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "SourceRepository"     VARCHAR(500);
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "SourceFilePath"       VARCHAR(500);
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "SurroundingContext"   TEXT;
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "EntropyScore"         DOUBLE PRECISION DEFAULT 0;
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "DiscoveredAt"         TIMESTAMPTZ  NOT NULL DEFAULT NOW();
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "LastVerifiedAt"       TIMESTAMPTZ;
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS "idx_sc_type"        ON "ServerCredentials" ("CredentialType");
+CREATE INDEX IF NOT EXISTS "idx_sc_risk"        ON "ServerCredentials" ("RiskLevel");
+CREATE INDEX IF NOT EXISTS "idx_sc_auth_status" ON "ServerCredentials" ("AuthenticationStatus");
+CREATE INDEX IF NOT EXISTS "idx_sc_honeypot"    ON "ServerCredentials" ("IsHoneypot");
 
 -- =============================================================================
 -- DONE ✅

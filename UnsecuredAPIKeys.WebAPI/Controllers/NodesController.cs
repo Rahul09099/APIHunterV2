@@ -229,4 +229,34 @@ public class NodesController : ControllerBase
             serverUtc = DateTime.UtcNow
         });
     }
+
+    /// <summary>
+    /// Get all registered worker nodes (Admins only)
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> GetNodes([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    {
+        if (string.IsNullOrEmpty(nodeToken)) return Unauthorized("Missing Node Token");
+
+        var adminNode = await _dbContext.TelegramSubscribers
+            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
+
+        if (adminNode == null || !adminNode.IsAdmin) return Unauthorized("Admin access required");
+
+        var tenMinutesAgo = DateTime.UtcNow.AddMinutes(-10);
+        var nodes = await _dbContext.TelegramSubscribers
+            .Where(s => s.NodeToken != null)
+            .Select(s => new
+            {
+                s.TelegramId,
+                s.Username,
+                s.IsAdmin,
+                s.NodeUrl,
+                s.LastNodeHeartbeatUtc,
+                isActive = s.LastNodeHeartbeatUtc != null && s.LastNodeHeartbeatUtc > tenMinutesAgo
+            })
+            .ToListAsync();
+
+        return Ok(nodes);
+    }
 }

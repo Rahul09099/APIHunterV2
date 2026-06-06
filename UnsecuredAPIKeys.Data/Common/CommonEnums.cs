@@ -38,6 +38,7 @@ namespace UnsecuredAPIKeys.Data.Common
         Unknown = -99,
         AIAndLLM = 1,
         Communication = 4,
+        ServerCredentials = 5,
         MapsAndLocation = 6
     }
 
@@ -90,6 +91,9 @@ namespace UnsecuredAPIKeys.Data.Common
         SendGrid = 410,
         Mailgun = 425,
         Slack = 430,
+
+        // Server Credentials Category (5)
+        ServerCredential = 500,
 
         // Maps & Location Category (6)
         Mapbox = 600

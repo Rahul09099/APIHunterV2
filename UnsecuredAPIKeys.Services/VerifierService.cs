@@ -67,6 +67,7 @@ public class VerifierService(
     private int _invalidCount;
     private int _verifiedCount;
     private bool _isIdle;
+    private DateTime _serviceStartTime;
     
     public bool IsWorkerMode { get; set; } = string.Equals(Environment.GetEnvironmentVariable("IS_WORKER_MODE"), "true", StringComparison.OrdinalIgnoreCase);
 
@@ -79,6 +80,7 @@ public class VerifierService(
         }
 
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _serviceStartTime = DateTime.UtcNow;
 
         Console.WriteLine("[green]Starting verifier service...[/]");
         Console.WriteLine($"[dim]Target valid keys: [yellow]{LiteLimits.MAX_VALID_KEYS}[/][/]");
@@ -109,6 +111,12 @@ public class VerifierService(
 
                 if (_cancellationTokenSource.Token.IsCancellationRequested)
                     break;
+
+                if (_isIdle)
+                {
+                    Console.WriteLine("[green]Verifier has completed all pending work. Stopping service.[/]");
+                    break;
+                }
 
                 // Flush metrics to DB periodically (best-effort, non-blocking)
                 _ = Task.Run(() => MetricsService.Instance.FlushIfDueAsync(dbContext));
@@ -191,7 +199,9 @@ public class VerifierService(
         Console.WriteLine("[dim]Re-verifying existing valid keys...[/]");
 
         // Get oldest verified keys first (filtered by selected types if applicable)
-        var query = dbContext.APIKeys.Where(k => k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits);
+        var query = dbContext.APIKeys.Where(k => (k.Status == ApiStatusEnum.Valid || k.Status == ApiStatusEnum.ValidNoCredits)
+            && (k.LastCheckedUTC == null || k.LastCheckedUTC < _serviceStartTime));
+            
         if (_selectedApiTypes != null && _selectedApiTypes.Count > 0)
         {
             query = query.Where(k => _selectedApiTypes.Contains(k.ApiType));
@@ -200,6 +210,16 @@ public class VerifierService(
             .OrderBy(k => k.LastCheckedUTC)
             .Take(LiteLimits.VERIFICATION_BATCH_SIZE)
             .ToListAsync(_cancellationTokenSource!.Token);
+
+        if (keysToReVerify.Count == 0)
+        {
+            if (!_isIdle)
+            {
+                Console.WriteLine("[yellow]All existing valid keys have been re-verified in this run.[/]");
+                _isIdle = true;
+            }
+            return;
+        }
 
         _isIdle = false;
 

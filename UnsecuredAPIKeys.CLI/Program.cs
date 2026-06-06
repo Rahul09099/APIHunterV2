@@ -15,6 +15,19 @@ services.AddLogging(builder => builder
     .SetMinimumLevel(LogLevel.Warning)
     .AddConsole());
 services.AddHttpClient();
+services.AddMemoryCache();
+
+// Server Credential Services
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.IContextExtractor, UnsecuredAPIKeys.Providers.ServerProviders.Services.ContextExtractor>();
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.IEntropyAnalyzer, UnsecuredAPIKeys.Providers.ServerProviders.Services.EntropyAnalyzer>();
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.INetworkVerifier, UnsecuredAPIKeys.Providers.ServerProviders.Services.NetworkVerifier>();
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.IAuthenticationVerifier, UnsecuredAPIKeys.Providers.ServerProviders.Services.AuthenticationVerifier>();
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.IOSINTService, UnsecuredAPIKeys.Providers.ServerProviders.Services.OSINTService>();
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.IGeolocationService, UnsecuredAPIKeys.Providers.ServerProviders.Services.GeolocationService>();
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.AdaptiveIOManager>();
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.RenderOptimizer>();
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.VerificationQueue>();
+services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.HostCircuitBreaker>();
 
 await using var serviceProvider = services.BuildServiceProvider();
 var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
@@ -65,7 +78,7 @@ while (running)
             await RunVerifierAsync(dbContext, httpClientFactory);
             break;
         case '3':
-            await ShowStatusAsync(dbContext, dbService);
+            await ShowStatusMenuAsync(dbContext, dbService);
             break;
         case '4':
 
@@ -304,10 +317,38 @@ async Task ShowStatusAsync(DBContext db, DatabaseService dbService)
     summaryTable.AddRow("Invalid Keys", $"[red]{catStats.InvalidKeys}[/]");
     summaryTable.AddRow("Pending Verification", $"[blue]{catStats.UnverifiedKeys}[/]");
     summaryTable.AddRow(new Rule().RuleStyle("dim"));
+
+    // Server Credentials counts
+    var totalCreds = await db.ServerCredentials.CountAsync();
+    var validCreds = await db.ServerCredentials.CountAsync(c => c.AuthenticationStatus == "Valid");
+    var invalidCreds = await db.ServerCredentials.CountAsync(c => c.AuthenticationStatus == "Invalid");
+    var untestedCreds = await db.ServerCredentials.CountAsync(c => c.AuthenticationStatus == "Untested");
+    var honeypotsCount = await db.ServerCredentials.CountAsync(c => c.IsHoneypot);
+
+    summaryTable.AddRow("Total Server Credentials", totalCreds.ToString());
+    summaryTable.AddRow("  Valid Credentials", $"[green]{validCreds}[/]");
+    summaryTable.AddRow("  Invalid Credentials", $"[red]{invalidCreds}[/]");
+    summaryTable.AddRow("  Untested Credentials", $"[blue]{untestedCreds}[/]");
+    summaryTable.AddRow("  Flagged Honeypots", $"[yellow]{honeypotsCount}[/]");
+    summaryTable.AddRow(new Rule().RuleStyle("dim"));
+
     summaryTable.AddRow("Database", $"[dim]{Markup.Escape(AppInfo.DatabaseName)}[/]");
     summaryTable.AddRow("GitHub Tokens", catStats.GitHubTokensCount > 0 ? $"[green]{catStats.GitHubTokensCount} Configured[/]" : "[red]Not configured[/]");
 
     AnsiConsole.Write(summaryTable);
+
+    // Show recent server credentials
+    var recentCreds = await db.ServerCredentials
+        .OrderByDescending(c => c.DiscoveredAt)
+        .Take(20)
+        .ToListAsync();
+
+    if (recentCreds.Any())
+    {
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(new Rule("[cyan]Recent Server Credentials[/]").LeftJustified().RuleStyle("cyan"));
+        DisplayServerCredentials(recentCreds);
+    }
 
     // Show valid keys list
     var validKeysList = await db.APIKeys
@@ -607,19 +648,57 @@ async Task<bool> ConfirmResetAsync()
 
 async Task ExportKeysAsync(DBContext db, DatabaseService dbService)
 {
-    AnsiConsole.Write(new Rule("[yellow]Export Keys[/]").RuleStyle("yellow"));
+    AnsiConsole.Write(new Rule("[yellow]Export Data[/]").RuleStyle("yellow"));
 
     var exportChoice = AnsiConsole.Prompt(
         new SelectionPrompt<string>()
-            .Title("[yellow]Export format:[/]")
+            .Title("[yellow]Select what and how to export:[/]")
             .AddChoices(new[]
             {
-                "1. JSON",
-                "2. CSV",
-                "3. Back to Main Menu"
+                "1. API Keys (JSON)",
+                "2. API Keys (CSV)",
+                "3. Server Credentials (CSV)",
+                "4. Server Credentials (JSON)",
+                "5. Back to Main Menu"
             }));
 
-    if (exportChoice[0] == '3') return;
+    if (exportChoice.StartsWith("5")) return;
+
+    if (exportChoice.StartsWith("3") || exportChoice.StartsWith("4"))
+    {
+        var format = exportChoice.StartsWith("3") ? "csv" : "json";
+        var defaultFileName = exportChoice.StartsWith("3") ? "credentials.csv" : "credentials.json";
+
+        var filterType = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[yellow]Filter by Credential Type:[/]")
+                .AddChoices(new[] { "All", "SSH", "FTP", "SFTP", "RDP", "SMTP", "MySQL", "PostgreSQL", "MongoDB", "Redis", "MSSQL", "cPanel_HTTPS", "WHM_HTTPS", "Plesk" }));
+
+        var filterRisk = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[yellow]Filter by Risk Level:[/]")
+                .AddChoices(new[] { "All", "Critical", "High", "Medium", "Low" }));
+
+        var filterAuth = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[yellow]Filter by Auth Status:[/]")
+                .AddChoices(new[] { "All", "Valid", "Invalid", "RateLimited", "Untested" }));
+
+        var fileName = AnsiConsole.Prompt(
+            new TextPrompt<string>("[green]Output file name:[/]")
+                .DefaultValue(defaultFileName));
+
+        await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Dots)
+            .SpinnerStyle(Style.Parse("yellow"))
+            .StartAsync($"Exporting to {Markup.Escape(fileName)}...", async ctx =>
+            {
+                await dbService.ExportServerCredentialsAsync(db, fileName, format, filterType, filterRisk, filterAuth);
+            });
+
+        AnsiConsole.MarkupLine($"[green]Exported to [bold]{Markup.Escape(fileName)}[/][/]");
+        return;
+    }
 
     var filterChoice = AnsiConsole.Prompt(
         new SelectionPrompt<string>()
@@ -641,33 +720,28 @@ async Task ExportKeysAsync(DBContext db, DatabaseService dbService)
         case '4': statusFilter = (ApiStatusEnum)(-1); break; // Special case for ALL
     }
 
-    var format = exportChoice[0] == '1' ? "json" : "csv";
-    var defaultFileName = exportChoice[0] == '1' ? "keys.json" : "keys.csv";
-    var fileName = AnsiConsole.Prompt(
+    var formatKeys = exportChoice.StartsWith("1") ? "json" : "csv";
+    var defaultFileNameKeys = exportChoice.StartsWith("1") ? "keys.json" : "keys.csv";
+    var fileNameKeys = AnsiConsole.Prompt(
         new TextPrompt<string>("[green]Output file name:[/]")
-            .DefaultValue(defaultFileName));
+            .DefaultValue(defaultFileNameKeys));
 
     await AnsiConsole.Status()
         .Spinner(Spinner.Known.Dots)
         .SpinnerStyle(Style.Parse("yellow"))
-        .StartAsync($"Exporting to {Markup.Escape(fileName)}...", async ctx =>
+        .StartAsync($"Exporting to {Markup.Escape(fileNameKeys)}...", async ctx =>
         {
             if (statusFilter == (ApiStatusEnum)(-1))
             {
-                // To export ALL, we need to pass a special value or change DatabaseService.
-                // For now, let's just use a null filter but we need DatabaseService to handle it.
-                // Wait, if I want to export ALL, I should update DatabaseService.
-                await dbService.ExportKeysAsync(db, fileName, format, null); 
-                // Note: current DatabaseService null = BOTH Valid and ValidNoCredits.
-                // If the user wants ALL, they probably want everything.
+                await dbService.ExportKeysAsync(db, fileNameKeys, formatKeys, null); 
             }
             else
             {
-                await dbService.ExportKeysAsync(db, fileName, format, statusFilter);
+                await dbService.ExportKeysAsync(db, fileNameKeys, formatKeys, statusFilter);
             }
         });
 
-    AnsiConsole.MarkupLine($"[green]Exported to [bold]{Markup.Escape(fileName)}[/][/]");
+    AnsiConsole.MarkupLine($"[green]Exported to [bold]{Markup.Escape(fileNameKeys)}[/][/]");
 }
 
 // === Display Helpers ===
@@ -821,4 +895,166 @@ static string MaskKey(string apiKey)
     if (string.IsNullOrEmpty(apiKey) || apiKey.Length <= 8)
         return "****";
     return $"{apiKey[..4]}...{apiKey[^4..]}";
+}
+
+async Task ShowStatusMenuAsync(DBContext db, DatabaseService dbService)
+{
+    var statusChoice = AnsiConsole.Prompt(
+        new SelectionPrompt<string>()
+            .Title("[yellow]Select Status View:[/]")
+            .AddChoices(new[]
+            {
+                "1. General API Keys Status",
+                "2. Server Credentials Status (With Filtering)",
+                "3. Back to Main Menu"
+            }));
+
+    if (statusChoice.StartsWith("1"))
+    {
+        await ShowStatusAsync(db, dbService);
+    }
+    else if (statusChoice.StartsWith("2"))
+    {
+        await ShowServerCredentialsStatusAsync(db);
+    }
+}
+
+async Task ShowServerCredentialsStatusAsync(DBContext db)
+{
+    AnsiConsole.Clear();
+    AnsiConsole.Write(new Rule("[cyan]Server Credentials Status[/]").RuleStyle("cyan"));
+
+    var total = await db.ServerCredentials.CountAsync();
+    if (total == 0)
+    {
+        AnsiConsole.MarkupLine("[yellow]No server credentials discovered yet.[/]");
+        return;
+    }
+
+    var filterChoice = AnsiConsole.Prompt(
+        new SelectionPrompt<string>()
+            .Title("[yellow]Select Filter Option:[/]")
+            .AddChoices(new[]
+            {
+                "1. View All",
+                "2. Filter by Credential Type",
+                "3. Filter by Risk Level",
+                "4. Filter by Auth Status",
+                "5. Back"
+            }));
+
+    if (filterChoice.StartsWith("5")) return;
+
+    var query = db.ServerCredentials.AsQueryable();
+
+    if (filterChoice.StartsWith("2"))
+    {
+        var types = await db.ServerCredentials.Select(c => c.CredentialType).Distinct().ToListAsync();
+        var selectedType = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Select Credential Type:")
+                .AddChoices(types));
+        query = query.Where(c => c.CredentialType == selectedType);
+    }
+    else if (filterChoice.StartsWith("3"))
+    {
+        var selectedRisk = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Select Risk Level:")
+                .AddChoices(new[] { "Critical", "High", "Medium", "Low" }));
+        query = query.Where(c => c.RiskLevel == selectedRisk);
+    }
+    else if (filterChoice.StartsWith("4"))
+    {
+        var selectedStatus = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Select Auth Status:")
+                .AddChoices(new[] { "Valid", "Invalid", "RateLimited", "Untested" }));
+        query = query.Where(c => c.AuthenticationStatus == selectedStatus);
+    }
+
+    var results = await query.OrderByDescending(c => c.DiscoveredAt).Take(50).ToListAsync();
+    AnsiConsole.WriteLine();
+    AnsiConsole.MarkupLine($"[green]Found {results.Count} matching server credentials:[/]");
+    DisplayServerCredentials(results);
+}
+
+static void DisplayServerCredentials(IEnumerable<ServerCredential> credentials)
+{
+    var table = new Table()
+        .Border(TableBorder.Rounded)
+        .BorderColor(Color.Cyan1)
+        .AddColumn(new TableColumn("[bold]ID[/]").RightAligned())
+        .AddColumn(new TableColumn("[bold]Type[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Host:Port[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Username[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Network Status[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Auth Status[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Risk Level[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Honeypot[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Country / ISP[/]").LeftAligned())
+        .AddColumn(new TableColumn("[bold]Discovered[/]").LeftAligned());
+
+    foreach (var cred in credentials)
+    {
+        var netMarkup = cred.NetworkStatus switch
+        {
+            "Accessible" => "[green]Accessible[/]",
+            "Unreachable" => "[red]Unreachable[/]",
+            "Timeout" => "[yellow]Timeout[/]",
+            _ => $"[dim]{Markup.Escape(cred.NetworkStatus)}[/]"
+        };
+
+        var authMarkup = cred.AuthenticationStatus switch
+        {
+            "Valid" => "[green]Valid[/]",
+            "Invalid" => "[red]Invalid[/]",
+            "RateLimited" => "[yellow]RateLimited[/]",
+            "Untested" => "[grey]Untested[/]",
+            _ => $"[dim]{Markup.Escape(cred.AuthenticationStatus)}[/]"
+        };
+
+        var riskMarkup = cred.RiskLevel switch
+        {
+            "Critical" => "[red]Critical[/]",
+            "High" => "[darkorange]High[/]",
+            "Medium" => "[yellow]Medium[/]",
+            "Low" => "[green]Low[/]",
+            _ => $"[dim]{Markup.Escape(cred.RiskLevel)}[/]"
+        };
+
+        var honeypotMarkup = cred.IsHoneypot ? "[yellow]⚠ HONEYPOT[/]" : "[dim]No[/]";
+
+        var countryIsp = "N/A";
+        try
+        {
+            if (!string.IsNullOrEmpty(cred.GeolocationData) && cred.GeolocationData != "{}")
+            {
+                var geo = JsonSerializer.Deserialize<UnsecuredAPIKeys.Providers.ServerProviders.Services.GeolocationResult>(cred.GeolocationData);
+                if (geo != null)
+                {
+                    countryIsp = $"{geo.Country} ({geo.ISP})";
+                }
+            }
+        }
+        catch
+        {
+            countryIsp = "N/A";
+        }
+
+        table.AddRow(
+            cred.Id.ToString(),
+            $"[cyan]{cred.CredentialType}[/]",
+            $"{cred.Host}:{cred.Port}",
+            string.IsNullOrEmpty(cred.Username) ? "[dim]N/A[/]" : cred.Username,
+            netMarkup,
+            authMarkup,
+            riskMarkup,
+            honeypotMarkup,
+            countryIsp,
+            cred.DiscoveredAt.ToString("yyyy-MM-dd HH:mm")
+        );
+    }
+
+    AnsiConsole.Write(table);
 }

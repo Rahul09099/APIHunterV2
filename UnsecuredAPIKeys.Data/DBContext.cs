@@ -40,6 +40,7 @@ namespace UnsecuredAPIKeys.Data
 
         // Core entities
         public DbSet<APIKey> APIKeys { get; set; } = null!;
+        public DbSet<ServerCredential> ServerCredentials { get; set; } = null!;
         public DbSet<RepoReference> RepoReferences { get; set; } = null!;
         public DbSet<SearchQuery> SearchQueries { get; set; } = null!;
         public DbSet<SearchProviderToken> SearchProviderTokens { get; set; } = null!;
@@ -174,6 +175,28 @@ namespace UnsecuredAPIKeys.Data
                 .WithMany()
                 .HasForeignKey(p => p.SearchQueryId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // ServerCredential Entity Configurations
+            modelBuilder.Entity<ServerCredential>()
+                .HasIndex(s => new { s.Host, s.Port, s.Username, s.CredentialType })
+                .IsUnique()
+                .HasDatabaseName("IX_ServerCredentials_Unique");
+
+            modelBuilder.Entity<ServerCredential>()
+                .HasIndex(s => s.CredentialType)
+                .HasDatabaseName("IX_ServerCredentials_CredentialType");
+
+            modelBuilder.Entity<ServerCredential>()
+                .HasIndex(s => s.RiskLevel)
+                .HasDatabaseName("IX_ServerCredentials_RiskLevel");
+
+            modelBuilder.Entity<ServerCredential>()
+                .HasIndex(s => s.AuthenticationStatus)
+                .HasDatabaseName("IX_ServerCredentials_AuthenticationStatus");
+
+            modelBuilder.Entity<ServerCredential>()
+                .HasIndex(s => s.IsHoneypot)
+                .HasDatabaseName("IX_ServerCredentials_IsHoneypot");
         }
     }
 }

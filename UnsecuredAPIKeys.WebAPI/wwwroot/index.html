@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APIHunter | Control Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <!-- Abstract Background Decor -->
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+
+    <!-- MAIN APP CONTAINER -->
+    <div class="app-container">
+        
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-icon">⚡</span>
+                <span class="brand-name">API<span>HUNTER</span></span>
+            </div>
+            
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="dashboard-tab">
+                    <svg viewBox="0 0 24 24" class="nav-icon"><path d="M3 13h1v7c0 1.103.897 2 2 2h12c1.103 0 2-.897 2-2v-7h1a1 1 0 0 0 .707-1.707l-9-9a.999.999 0 0 0-1.414 0l-9 9A1 1 0 0 0 3 13zm7 7v-5h4v5h-4zm2-15.586 6 6V20h-2v-5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v5H6v-9.586l6-6z"/></svg>
+                    Dashboard
+                </button>
+                <button class="nav-item" data-tab="keys-tab">
+                    <svg viewBox="0 0 24 24" class="nav-icon"><path d="M7 14c-1.103 0-2-.897-2-2s.897-2 2-2 2 .897 2 2-.897 2-2 2zm15-2c0-4.411-3.589-8-8-8H6c-3.309 0-6 2.691-6 6v4c0 3.309 2.691 6 6 6h8c4.411 0 8-3.589 8-8zm-8 6H6c-2.206 0-4-1.794-4-4v-4c0-2.206 1.794-4 4-4h8c3.309 0 6 2.691 6 6s-2.691 6-6 6zm-1-8h2v2h-2zm-3 0h2v2h-2zm6 4h2v2h-2zm-3 0h2v2h-2z"/></svg>
+                    Keys Explorer
+                </button>
+                <button class="nav-item" data-tab="workers-tab">
+                    <svg viewBox="0 0 24 24" class="nav-icon"><path d="M19 14c1.103 0 2-.897 2-2V4c0-1.103-.897-2-2-2H5c-1.103 0-2 .897-2 2v8c0 1.103.897 2 2 2h4l-1.6 2.4A.993.993 0 0 0 7 17v1c0 1.103.897 2 2 2h6c1.103 0 2-.897 2-2v-1a.993.993 0 0 0-.4-1.6L15 14h4zM5 4h14v8H5V4zm10 14H9v-1l1.333-2h3.333L15 17v1z"/></svg>
+                    Workers Network
+                </button>
+                <button class="nav-item admin-only" data-tab="config-tab">
+                    <svg viewBox="0 0 24 24" class="nav-icon"><path d="m2.344 15.271 2 3.46a1 1 0 0 0 1.366.365l1.396-.806c.58.457 1.221.832 1.895 1.112V21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1.598c.674-.28 1.315-.655 1.895-1.112l1.396.806A1.002 1.002 0 0 0 21.656 18.729l2-3.46a1 1 0 0 0-.365-1.366l-1.396-.806c.026-.356.05-.713.05-1.077 0-.363-.024-.721-.05-1.077l1.396-.806a1 1 0 0 0 .365-1.366l-2-3.46a1 1 0 0 0-1.366-.365l-1.396.806A8.932 8.932 0 0 0 16.398 5.6V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v1.6c-.674.28-1.315.655-1.895 1.112l-1.396-.806A1 1 0 0 0 4.344 5.271l-2 3.46a1 1 0 0 0 .365 1.366l1.396.806C4.079 11.259 4.055 11.617 4.055 12c0 .363.024.721.05 1.077l-1.396.806a1 1 0 0 0-.365 1.388zm9.656-6.271c1.654 0 3 1.346 3 3s-1.346 3-3 3-3-1.346-3-3 1.346-3 3-3z"/></svg>
+                    Settings & Config
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="connection-status">
+                    <span class="pulse-dot green"></span>
+                    <span class="status-text">Connected</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="main-content">
+            
+            <!-- TOP BAR -->
+            <header class="top-bar">
+                <div class="search-box">
+                    <h1 class="page-title" id="page-title-text">Dashboard Overview</h1>
+                </div>
+                
+                <div class="user-controls">
+                    <!-- NODE TOKEN INPUT -->
+                    <div class="token-container">
+                        <label for="node-token-input" class="token-label">Auth Token:</label>
+                        <input type="password" id="node-token-input" class="token-input" placeholder="Enter X-Node-Token..." value="default_admin_token_2026">
+                        <button id="save-token-btn" class="btn btn-primary btn-sm">Save</button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- TAB: DASHBOARD -->
+            <section id="dashboard-tab" class="tab-content active">
+                
+                <!-- SUMMARY CARDS GRID -->
+                <div class="stats-grid">
+                    <div class="stat-card glass animate-fade-in">
+                        <div class="card-icon blue">📡</div>
+                        <div class="card-data">
+                            <span class="card-title">Active Workers</span>
+                            <span class="card-val" id="stat-active-workers">0</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card glass animate-fade-in">
+                        <div class="card-icon emerald">🔑</div>
+                        <div class="card-data">
+                            <span class="card-title">Total Keys</span>
+                            <span class="card-val" id="stat-total-keys">0</span>
+                        </div>
+                    </div>
+
+                    <div class="stat-card glass animate-fade-in">
+                        <div class="card-icon amber">🔍</div>
+                        <div class="card-data">
+                            <span class="card-title">Active Queries</span>
+                            <span class="card-val" id="stat-active-queries">0</span>
+                        </div>
+                    </div>
+
+                    <div class="stat-card glass animate-fade-in">
+                        <div class="card-icon pink">⚡</div>
+                        <div class="card-data">
+                            <span class="card-title">GitHub Tokens</span>
+                            <span class="card-val" id="stat-github-tokens">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DETAILED STATS (CHARTS & GRAPHS) -->
+                <div class="dashboard-charts-row">
+                    <!-- KEY STATUS DISTRIBUTION -->
+                    <div class="chart-card glass animate-slide-up">
+                        <h3 class="chart-title">Key Verification Distribution</h3>
+                        <div class="bar-chart-container">
+                            <div class="chart-bar-row">
+                                <span class="bar-label">Valid (Credits)</span>
+                                <div class="bar-outer">
+                                    <div class="bar-inner bg-emerald" id="bar-valid-credits" style="width: 0%;"></div>
+                                </div>
+                                <span class="bar-count" id="count-valid-credits">0</span>
+                            </div>
+                            
+                            <div class="chart-bar-row">
+                                <span class="bar-label">Quota Exhausted</span>
+                                <div class="bar-outer">
+                                    <div class="bar-inner bg-amber" id="bar-valid-nocredits" style="width: 0%;"></div>
+                                </div>
+                                <span class="bar-count" id="count-valid-nocredits">0</span>
+                            </div>
+
+                            <div class="chart-bar-row">
+                                <span class="bar-label">Unverified</span>
+                                <div class="bar-outer">
+                                    <div class="bar-inner bg-blue" id="bar-unverified" style="width: 0%;"></div>
+                                </div>
+                                <span class="bar-count" id="count-unverified">0</span>
+                            </div>
+
+                            <div class="chart-bar-row">
+                                <span class="bar-label">Invalid</span>
+                                <div class="bar-outer">
+                                    <div class="bar-inner bg-red" id="bar-invalid" style="width: 0%;"></div>
+                                </div>
+                                <span class="bar-count" id="count-invalid">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- JOB RUNNER PANEL -->
+                    <div class="chart-card glass animate-slide-up">
+                        <h3 class="chart-title">Job Control Center</h3>
+                        <div class="job-runner-tabs">
+                            <div class="job-runner-controls">
+                                <h4 class="control-section-header">Start Scraper Job</h4>
+                                <p class="control-description">Scrapes GitHub/sources for new keys based on configured queries.</p>
+                                <button id="start-scraper-btn" class="btn btn-primary btn-block">
+                                    <span class="btn-spinner hidden"></span> Start Scraper
+                                </button>
+                            </div>
+                            <hr class="separator">
+                            <div class="job-runner-controls">
+                                <h4 class="control-section-header">Start Verifier Job</h4>
+                                <p class="control-description">Validates unverified keys. Select options below.</p>
+                                
+                                <div class="form-row">
+                                    <div class="form-group col-6">
+                                        <label for="verifier-types-select" class="form-label-small">API Types (CSV, optional)</label>
+                                        <input type="text" id="verifier-types-select" class="form-input-sm" placeholder="e.g. OpenAI,Anthropic">
+                                    </div>
+                                    <div class="form-group col-6 flex-align-center">
+                                        <input type="checkbox" id="verifier-reverify-check" class="form-checkbox">
+                                        <label for="verifier-reverify-check" class="form-label-small checkbox-label">Re-verify Valid Keys Only</label>
+                                    </div>
+                                </div>
+
+                                <button id="start-verifier-btn" class="btn btn-success btn-block">
+                                    <span class="btn-spinner hidden"></span> Start Verifier
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RUNNING BACKGROUND JOBS -->
+                <div class="section-card glass animate-slide-up">
+                    <h3 class="section-title">Running Jobs</h3>
+                    <div class="table-container">
+                        <table class="data-table" id="jobs-table">
+                            <thead>
+                                <tr>
+                                    <th>Job ID</th>
+                                    <th>Job Type</th>
+                                    <th>Status</th>
+                                    <th>Started At</th>
+                                    <th>Duration</th>
+                                    <th>Owner</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="jobs-tbody">
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted">No active background jobs running.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- LAST SIGNAL & QUICK LOG -->
+                <div class="status-summary-card glass animate-fade-in">
+                    <span>🛰️ Last Database Signal Detected: <strong id="stat-last-signal" class="accent-glow">Waiting...</strong></span>
+                </div>
+
+            </section>
+
+            <!-- TAB: KEYS EXPLORER -->
+            <section id="keys-tab" class="tab-content">
+                <div class="filter-bar-card glass">
+                    <div class="filter-inputs">
+                        <div class="filter-group">
+                            <label for="key-search" class="filter-label">Search</label>
+                            <input type="text" id="key-search" class="filter-input" placeholder="Search keys...">
+                        </div>
+                        <div class="filter-group">
+                            <label for="filter-status" class="filter-label">Status</label>
+                            <select id="filter-status" class="filter-input">
+                                <option value="All">All Statuses</option>
+                                <option value="Valid">Valid (With Credits)</option>
+                                <option value="ValidNoCredits">Quota Exhausted</option>
+                                <option value="Unverified">Unverified</option>
+                                <option value="Invalid">Invalid</option>
+                                <option value="Error">Error</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="filter-type" class="filter-label">API Type</label>
+                            <select id="filter-type" class="filter-input">
+                                <option value="All">All API Types</option>
+                            </select>
+                        </div>
+                        <div class="filter-group flex-end">
+                            <button id="reset-filters-btn" class="btn btn-secondary">Clear</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-card glass">
+                    <div class="table-header-row">
+                        <h3 class="section-title">Discovered API Keys</h3>
+                        <div class="table-actions">
+                            <span class="results-count" id="keys-total-count">Showing 0 keys</span>
+                        </div>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table class="data-table" id="keys-table">
+                            <thead>
+                                <tr>
+                                    <th>API Type</th>
+                                    <th>Status</th>
+                                    <th>API Key Snippet</th>
+                                    <th>Balance</th>
+                                    <th>Tier</th>
+                                    <th>Discovered</th>
+                                    <th>Last Checked</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="keys-tbody">
+                                <tr>
+                                    <td colspan="8" class="text-center text-muted">Enter auth token to fetch keys.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="pagination">
+                        <button id="prev-page-btn" class="btn btn-secondary btn-sm" disabled>Previous</button>
+                        <span class="page-number" id="page-num-display">Page 1</span>
+                        <button id="next-page-btn" class="btn btn-secondary btn-sm" disabled>Next</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB: WORKERS NETWORK -->
+            <section id="workers-tab" class="tab-content">
+                <div class="section-card glass animate-slide-up">
+                    <h3 class="section-title">Registered Hunter Nodes</h3>
+                    <p class="section-desc">Active instances scraping or reporting credentials to this Master. Heartbeats are updated every 10 seconds.</p>
+                    <div class="table-container">
+                        <table class="data-table" id="workers-table">
+                            <thead>
+                                <tr>
+                                    <th>Telegram ID</th>
+                                    <th>Username</th>
+                                    <th>Node URL</th>
+                                    <th>Last Heartbeat</th>
+                                    <th>Network Role</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="workers-tbody">
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted">Admin node token required to view worker statistics.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB: CONFIGURATION -->
+            <section id="config-tab" class="tab-content">
+                <div class="config-grid">
+                    
+                    <!-- SEARCH QUERIES -->
+                    <div class="section-card glass">
+                        <h3 class="section-title">Search Spectrum Queries</h3>
+                        <p class="section-desc">Add/remove target search queries distributed across workers.</p>
+                        
+                        <div class="config-add-form">
+                            <input type="text" id="new-query-input" class="form-input" placeholder="e.g. sk-ant-api OR claude_api_key">
+                            <button id="add-query-btn" class="btn btn-primary">Add Target</button>
+                        </div>
+                        
+                        <div class="queries-list-container" id="queries-list">
+                            <div class="text-muted">Loading queries...</div>
+                        </div>
+                    </div>
+
+                    <!-- GITHUB TOKENS -->
+                    <div class="section-card glass">
+                        <h3 class="section-title">GitHub Scraping Tokens</h3>
+                        <p class="section-desc">Manage API keys used to query GitHub Search endpoints.</p>
+
+                        <div class="config-add-form">
+                            <input type="password" id="new-token-input" class="form-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxx">
+                            <button id="add-token-btn" class="btn btn-success">Add Token</button>
+                        </div>
+
+                        <div class="tokens-list-container" id="tokens-list">
+                            <div class="text-muted">Loading tokens...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- EXPORT & UTILITIES -->
+                <div class="config-grid grid-2-col">
+                    <div class="section-card glass">
+                        <h3 class="section-title">Export Valid Credentials</h3>
+                        <p class="section-desc">Download verified active credentials in standard formats for integration.</p>
+                        <div class="export-actions">
+                            <button id="export-json-btn" class="btn btn-primary">
+                                📥 Export JSON Data
+                            </button>
+                            <button id="export-csv-btn" class="btn btn-success">
+                                📊 Export CSV Spreadsheet
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- DATABASE RESET (DANGER ZONE) -->
+                    <div class="section-card glass border-danger">
+                        <h3 class="section-title text-danger">System Reset (Danger Zone)</h3>
+                        <p class="section-desc">Completely clear database credentials, worker records, configurations, and logs.</p>
+                        
+                        <div class="danger-confirm-row">
+                            <input type="text" id="reset-confirm-input" class="form-input input-danger" placeholder="Type CONFIRM_RESET">
+                            <button id="reset-db-btn" class="btn btn-danger" disabled>Reset Database</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- MODAL: KEY DETAILS INSPECTOR -->
+    <div class="modal-backdrop hidden" id="key-modal">
+        <div class="modal glass animate-slide-up">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modal-key-title">API Key Details</h3>
+                <button class="modal-close" id="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-row">
+                    <span class="info-label">Full Key:</span>
+                    <div class="code-block-container">
+                        <code id="modal-full-key">loading...</code>
+                        <button id="modal-copy-btn" class="btn btn-sm btn-secondary">Copy</button>
+                    </div>
+                </div>
+                <div class="modal-info-grid">
+                    <div>
+                        <span class="info-label">Type:</span>
+                        <strong id="modal-key-type">loading...</strong>
+                    </div>
+                    <div>
+                        <span class="info-label">Status:</span>
+                        <strong id="modal-key-status">loading...</strong>
+                    </div>
+                    <div>
+                        <span class="info-label">Balance / Quota:</span>
+                        <span id="modal-key-balance">loading...</span>
+                    </div>
+                    <div>
+                        <span class="info-label">Account Tier:</span>
+                        <span id="modal-key-tier">loading...</span>
+                    </div>
+                </div>
+                
+                <div class="modal-info-row">
+                    <span class="info-label">Validation HTTP Response Body:</span>
+                    <pre class="json-viewer"><code id="modal-key-response">loading...</code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/js/dashboard.js"></script>
+</body>
+</html>

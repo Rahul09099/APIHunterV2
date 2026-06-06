@@ -893,6 +893,31 @@ class StabilityAIProvider(BaseProvider):
         except Exception as e:
             return ValidationResult(ValidationStatus.ERROR, str(e))
 
+class AI21LabsProvider(BaseProvider):
+    provider_name = "AI21 Labs"
+    regex_patterns = [r"sk-[A-Za-z0-9]{20,}"]
+
+    def validate(self, api_key):
+        api_key = self.clean_key(api_key)
+        headers = {"Authorization": f"Bearer {api_key}"}
+        payload = {
+            "model": "jamba-1.5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1
+        }
+        try:
+            resp = requests.post("https://api.ai21.com/studio/v1/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+            if resp.status_code in [401, 403]:
+                return ValidationResult(ValidationStatus.UNAUTHORIZED, "Invalid Key", http_status=resp.status_code)
+            if self._is_success(resp.status_code):
+                return ValidationResult(ValidationStatus.VALID, "Valid key - Jamba/Jurassic models", balance="N/A", http_status=resp.status_code, raw_response=resp.text)
+            if resp.status_code == 429:
+                return ValidationResult(ValidationStatus.VALID, "Rate limited (key is valid)", balance="N/A", http_status=resp.status_code, raw_response=resp.text)
+            return ValidationResult(ValidationStatus.ERROR, f"Status {resp.status_code}", http_status=resp.status_code, raw_response=resp.text)
+        except Exception as e:
+            return ValidationResult(ValidationStatus.ERROR, str(e))
+
+
 class PolloAIProvider(BaseProvider):
     provider_name = "PolloAI"
     regex_patterns = [r"pollo_[a-zA-Z0-9]{24,}"]
@@ -991,7 +1016,7 @@ class VerifierEngine:
             PerplexityProvider(), RunwayProvider(), OpenRouterProvider(),
             TogetherAIProvider(), CohereProvider(), VoyageAIProvider(), XAIProvider(),
             HuggingFaceProvider(), ReplicateProvider(), StabilityAIProvider(), PolloAIProvider(),
-            SendGridProvider(), SlackProvider(), CerebrasProvider()
+            SendGridProvider(), SlackProvider(), CerebrasProvider(), AI21LabsProvider()
         ]
 
     def identify_provider(self, key_text):
@@ -1021,7 +1046,8 @@ class VerifierEngine:
             "togetherai": "together ai",
             "runway": "runwayml",
             "xai": "x.ai",
-            "a2e": "a2e ai"
+            "a2e": "a2e ai",
+            "ai21labs": "ai21 labs"
         }
         search_type = aliases.get(assigned_type, assigned_type)
 
