@@ -41,6 +41,9 @@ public class VerifierController : ControllerBase
 
         if (node == null) return Unauthorized(new { message = "Invalid node token" });
 
+        var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => j.JobType == "Verifier" && j.Status == "Running");
+        if (isAlreadyRunning) return Conflict(new { message = "A verifier job is already running." });
+
         HashSet<ApiTypeEnum>? selectedTypes = null;
         
         if (!string.IsNullOrEmpty(apiTypes))

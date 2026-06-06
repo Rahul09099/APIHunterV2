@@ -35,6 +35,9 @@ public class ScraperController : ControllerBase
 
         if (node == null) return Unauthorized(new { message = "Invalid node token" });
 
+        var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => (j.JobType == "Scraper" || j.JobType == "AutoScraper-All" || j.JobType.StartsWith("Scraper-")) && j.Status == "Running");
+        if (isAlreadyRunning) return Conflict(new { message = "A scraper job is already running." });
+
         var jobId = _jobManager.StartJob("Scraper", async (cancellationToken) =>
         {
             var scraper = new ScraperService(_dbContext, _httpClientFactory);

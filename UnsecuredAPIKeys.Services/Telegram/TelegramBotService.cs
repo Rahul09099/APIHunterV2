@@ -395,7 +395,15 @@ public class TelegramBotService : BackgroundService
                     var mode = parts[2];
                     var isDeep = mode == "deep";
  
-                    var jobId = _jobManager.StartJob($"Scraper-{groupName}", async (ct) =>
+                    var jobName = $"Scraper-{groupName}";
+                    var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => j.JobType == jobName && j.Status == "Running");
+                    if (isAlreadyRunning)
+                    {
+                        await _botClient.AnswerCallbackQuery(queryId, $"⚠️ Scraper for {groupName} is already running!", cancellationToken: cancellationToken);
+                        return;
+                    }
+ 
+                    var jobId = _jobManager.StartJob(jobName, async (ct) =>
                     {
                         using var scope = _serviceProvider.CreateScope();
                         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
@@ -569,6 +577,13 @@ public class TelegramBotService : BackgroundService
             }
             else if (callbackData == "scrape_all")
             {
+                var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => j.JobType == "AutoScraper-All" && j.Status == "Running");
+                if (isAlreadyRunning)
+                {
+                    await _botClient.AnswerCallbackQuery(queryId, "⚠️ Comprehensive scan is already running!", cancellationToken: cancellationToken);
+                    return;
+                }
+ 
                 var jobId = _jobManager.StartJob("AutoScraper-All", async (ct) =>
                 {
                     using var scope = _serviceProvider.CreateScope();
@@ -992,6 +1007,13 @@ public class TelegramBotService : BackgroundService
                 }
                 if (selectedTypes.Count == 0) selectedTypes = null;
             }
+        }
+
+        var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => j.JobType == "Verifier" && j.Status == "Running");
+        if (isAlreadyRunning)
+        {
+            await _botClient.SendMessage(chatId, "⚠️ <b>Verifier is already running!</b>\nPlease wait for the current run to complete.", parseMode: ParseMode.Html, cancellationToken: ct);
+            return;
         }
 
         var jobId = _jobManager.StartJob("Verifier", async (cancellationToken) =>

@@ -122,6 +122,7 @@ public class StatusController : ControllerBase
             .Select(k => new
             {
                 k.Id,
+                k.ApiKey,
                 k.ApiType,
                 k.Status,
                 k.FirstFoundUTC,
@@ -129,7 +130,7 @@ public class StatusController : ControllerBase
                 k.Balance,
                 k.AccountTier,
                 k.ValidationResponse,
-                keyPreview = k.ApiKey.Length > 20 ? k.ApiKey.Substring(0, 20) + "..." : k.ApiKey
+                keyPreview = k.ApiKey
             })
             .ToListAsync();
 

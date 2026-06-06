@@ -205,16 +205,15 @@
                                 <option value="All">All API Types</option>
                             </select>
                         </div>
-                        <!-- REVEAL SWITCHES -->
-                        <div class="filter-group flex-row-align">
-                            <div class="switch-row">
-                                <label class="switch">
-                                    <input type="checkbox" id="reveal-naked-keys-check">
-                                    <span class="slider"></span>
-                                </label>
-                                <label for="reveal-naked-keys-check" class="filter-label clickable">👁️ Reveal Naked Keys</label>
-                            </div>
+                        <div class="filter-group">
+                            <label for="filter-sort" class="filter-label">Sort By</label>
+                            <select id="filter-sort" class="filter-input">
+                                <option value="recent">Recent Discovered</option>
+                                <option value="api-type">API Type (A-Z)</option>
+                                <option value="balance-high">Highest Balance / Quota</option>
+                            </select>
                         </div>
+
                         <div class="filter-group flex-end">
                             <button id="toggle-raw-console-btn" class="btn btn-secondary mr-2">📋 Show Raw Text</button>
                             <button id="reset-filters-btn" class="btn btn-secondary">Clear</button>
@@ -332,20 +331,8 @@
                     </div>
                 </div>
 
-                <!-- EXPORT & UTILITIES -->
-                <div class="config-grid grid-2-col">
-                    <div class="section-card glass">
-                        <h3 class="section-title">Direct File Exports</h3>
-                        <p class="section-desc">Download complete database exports. All credentials will be fully unmasked.</p>
-                        <div class="export-actions">
-                            <button id="export-json-btn" class="btn btn-primary">
-                                📥 Export JSON
-                            </button>
-                            <button id="export-csv-btn" class="btn btn-success">
-                                📊 Export CSV
-                            </button>
-                        </div>
-                    </div>
+                <!-- UTILITIES -->
+                <div class="config-grid">
 
                     <!-- DATABASE RESET (DANGER ZONE) -->
                     <div class="section-card glass border-danger">

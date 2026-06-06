@@ -180,9 +180,11 @@ public class ConfigController : ControllerBase
     [HttpGet("export-keys")]
     public async Task<IActionResult> ExportKeys(
         [FromQuery] string format = "json",
-        [FromHeader(Name = "X-Node-Token")] string? nodeToken = null)
+        [FromHeader(Name = "X-Node-Token")] string? nodeTokenHeader = null,
+        [FromQuery] string? nodeToken = null)
     {
-        var user = await GetAuthenticatedUser(nodeToken ?? "");
+        var token = nodeTokenHeader ?? nodeToken ?? "";
+        var user = await GetAuthenticatedUser(token);
         if (user == null) return Unauthorized("Node Token required for export");
 
         var query = _dbContext.APIKeys

@@ -45,7 +45,7 @@ const UI = {
     keySearchInput: document.getElementById('key-search'),
     filterStatusSelect: document.getElementById('filter-status'),
     filterTypeSelect: document.getElementById('filter-type'),
-    revealNakedKeysCheck: document.getElementById('reveal-naked-keys-check'),
+    filterSortSelect: document.getElementById('filter-sort'),
     toggleRawConsoleBtn: document.getElementById('toggle-raw-console-btn'),
     resetFiltersBtn: document.getElementById('reset-filters-btn'),
     keysTbody: document.getElementById('keys-tbody'),
@@ -70,9 +70,6 @@ const UI = {
     newTokenInput: document.getElementById('new-token-input'),
     addTokenBtn: document.getElementById('add-token-btn'),
     tokensList: document.getElementById('tokens-list'),
-    
-    exportJsonBtn: document.getElementById('export-json-btn'),
-    exportCsvBtn: document.getElementById('export-csv-btn'),
     
     resetConfirmInput: document.getElementById('reset-confirm-input'),
     resetDbBtn: document.getElementById('reset-db-btn'),
@@ -176,15 +173,9 @@ function setupEventListeners() {
     UI.keySearchInput.addEventListener('input', applyKeysFilters);
     UI.filterStatusSelect.addEventListener('change', applyKeysFilters);
     UI.filterTypeSelect.addEventListener('change', applyKeysFilters);
+    UI.filterSortSelect.addEventListener('change', applyKeysFilters);
     
-    // Reveal Naked Keys Toggle
-    UI.revealNakedKeysCheck.addEventListener('change', async () => {
-        if (UI.revealNakedKeysCheck.checked && !STATE.keysAreUnmasked) {
-            showNotification('Fetching unmasked key details...', 'info');
-            await loadUnmaskedKeysCache();
-        }
-        applyKeysFilters();
-    });
+
 
     // Raw Console Toggle
     UI.toggleRawConsoleBtn.addEventListener('click', () => {
@@ -210,7 +201,7 @@ function setupEventListeners() {
         UI.keySearchInput.value = '';
         UI.filterStatusSelect.value = 'All';
         UI.filterTypeSelect.value = 'All';
-        UI.revealNakedKeysCheck.checked = false;
+        UI.filterSortSelect.value = 'recent';
         applyKeysFilters();
     });
 
@@ -245,13 +236,7 @@ function setupEventListeners() {
         if (e.key === 'Enter') addGitHubToken();
     });
 
-    // Export keys file download redirections
-    UI.exportJsonBtn.addEventListener('click', () => {
-        window.open(`/api/Config/export-keys?format=json&nodeToken=${encodeURIComponent(STATE.token)}`, '_blank');
-    });
-    UI.exportCsvBtn.addEventListener('click', () => {
-        window.open(`/api/Config/export-keys?format=csv&nodeToken=${encodeURIComponent(STATE.token)}`, '_blank');
-    });
+
 
     // Database Reset controls
     UI.resetConfirmInput.addEventListener('input', () => {
@@ -744,6 +729,27 @@ function applyKeysFilters() {
         return true;
     });
     
+    // Apply Sorting
+    const sortVal = UI.filterSortSelect ? UI.filterSortSelect.value : 'recent';
+    if (sortVal === 'api-type') {
+        STATE.filteredKeys.sort((a, b) => (a.apiType || '').localeCompare(b.apiType || ''));
+    } else if (sortVal === 'balance-high') {
+        STATE.filteredKeys.sort((a, b) => {
+            const getNumeric = (val) => {
+                if (!val) return -1;
+                const match = val.toString().replace(/,/g, '').match(/[-+]?[0-9]*\.?[0-9]+/);
+                return match ? parseFloat(match[0]) : 0;
+            };
+            return getNumeric(b.balance) - getNumeric(a.balance);
+        });
+    } else {
+        STATE.filteredKeys.sort((a, b) => {
+            const dateA = a.firstFoundUTC ? new Date(a.firstFoundUTC) : new Date(0);
+            const dateB = b.firstFoundUTC ? new Date(b.firstFoundUTC) : new Date(0);
+            return dateB - dateA;
+        });
+    }
+    
     STATE.currentPage = 1;
     renderKeysTable();
     updateRawConsole();
@@ -800,8 +806,8 @@ function renderKeysTable() {
         const foundDate = new Date(key.firstFoundUTC).toLocaleDateString();
         const lastCheck = key.lastCheckedUTC ? new Date(key.lastCheckedUTC).toLocaleDateString() : 'Never';
         
-        // Show unmasked key if reveal checked and unmasked key string is loaded, else show preview
-        const displayKeyString = (reveal && key.apiKey) ? key.apiKey : (key.keyPreview || '***');
+        // Show unmasked key directly in the table
+        const displayKeyString = key.apiKey || key.keyPreview || '***';
         
         tr.innerHTML = `
             <td><span class="badge ${typeBadgeClass}">${key.apiType}</span></td>
@@ -871,7 +877,7 @@ function updateRawConsole() {
     let rawText = '';
     
     STATE.filteredKeys.forEach(k => {
-        const keyString = (reveal && k.apiKey) ? k.apiKey : (k.keyPreview || '***');
+        const keyString = k.apiKey || k.keyPreview || '***';
         const balanceStr = k.balance ? ` [Balance: ${k.balance}]` : '';
         const tierStr = k.accountTier ? ` [Tier: ${k.accountTier}]` : '';
         
