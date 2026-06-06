@@ -470,7 +470,6 @@ async function loadUnmaskedKeysCache() {
         STATE.keysAreUnmasked = true;
     } catch (err) {
         showNotification('Failed to fetch full unmasked keys. Admin role required.', 'danger');
-        UI.revealNakedKeysCheck.checked = false;
     }
 }
 
@@ -486,22 +485,69 @@ function calculateCategoriesSummary() {
         const status = key.status;
         if (status !== 'Valid' && status !== 'ValidNoCredits') return;
         
-        const type = (key.apiType || '').toLowerCase();
+        const type = (key.apiTypeName || '').toLowerCase();
         
         // AI Categories
-        if (['openai', 'anthropic', 'google', 'deepseek', 'cohere', 'elevenlabs', 'stabilityai', 'togetherai', 'xai', 'mistral', 'groq', 'perplexity'].includes(type)) {
+        if (
+            type.includes('openai') ||
+            type.includes('anthropic') ||
+            type.includes('google') ||
+            type.includes('deepseek') ||
+            type.includes('cohere') ||
+            type.includes('eleven') ||
+            type.includes('stability') ||
+            type.includes('together') ||
+            type.includes('xai') ||
+            type.includes('mistral') ||
+            type.includes('groq') ||
+            type.includes('perplexity') ||
+            type.includes('huggingface') ||
+            type.includes('replicate') ||
+            type.includes('fireworks') ||
+            type.includes('kling') ||
+            type.includes('pollo') ||
+            type.includes('runway') ||
+            type.includes('a2e') ||
+            type.includes('piapi') ||
+            type.includes('openrouter') ||
+            type.includes('cerebras') ||
+            type.includes('voyage') ||
+            type.includes('ai21') ||
+            type.includes('assembly') ||
+            type.includes('deepgram') ||
+            type.includes('jina') ||
+            type.includes('upstage') ||
+            type.includes('leonardo') ||
+            type.includes('fal') ||
+            type.includes('runpod')
+        ) {
             aiCount++;
         }
         // Database Categories
-        else if (['redis', 'mysql', 'postgresql', 'mongodb', 'couchdb', 'dynamodb'].includes(type)) {
+        else if (
+            type.includes('redis') ||
+            type.includes('mysql') ||
+            type.includes('postgres') ||
+            type.includes('mongodb') ||
+            type.includes('couchdb') ||
+            type.includes('dynamodb')
+        ) {
             dbCount++;
         }
         // Server login formats
-        else if (['ssh', 'ftp', 'sftp'].includes(type)) {
+        else if (
+            type.includes('ssh') ||
+            type.includes('ftp') ||
+            type.includes('servercredential')
+        ) {
             serverCount++;
         }
         // Cloud providers
-        else if (['aws', 'azure', 'gcp', 'aws bedrock', 'aws iam', 'azure openai'].includes(type)) {
+        else if (
+            type.includes('aws') ||
+            type.includes('azure') ||
+            type.includes('gcp')
+        ) {
             cloudCount++;
         }
         else {
@@ -712,14 +758,14 @@ function applyKeysFilters() {
         }
         
         // Type matching
-        if (typeVal !== 'All' && key.apiType !== typeVal) return false;
+        if (typeVal !== 'All' && key.apiTypeName !== typeVal) return false;
         
         // Keyword text matching
         if (searchVal) {
             const rawKey = key.apiKey || '';
             const keyText = STATE.revealKeys ? rawKey : (key.keyPreview || '');
             const inPreview = keyText.toLowerCase().includes(searchVal);
-            const inType = key.apiType && key.apiType.toLowerCase().includes(searchVal);
+            const inType = key.apiTypeName && key.apiTypeName.toLowerCase().includes(searchVal);
             const inStatus = key.status && key.status.toLowerCase().includes(searchVal);
             const inTier = key.accountTier && key.accountTier.toLowerCase().includes(searchVal);
             
@@ -732,7 +778,7 @@ function applyKeysFilters() {
     // Apply Sorting
     const sortVal = UI.filterSortSelect ? UI.filterSortSelect.value : 'recent';
     if (sortVal === 'api-type') {
-        STATE.filteredKeys.sort((a, b) => (a.apiType || '').localeCompare(b.apiType || ''));
+        STATE.filteredKeys.sort((a, b) => (a.apiTypeName || '').localeCompare(b.apiTypeName || ''));
     } else if (sortVal === 'balance-high') {
         STATE.filteredKeys.sort((a, b) => {
             const getNumeric = (val) => {
@@ -785,8 +831,6 @@ function renderKeysTable() {
     UI.nextPageBtn.disabled = (STATE.currentPage === maxPage);
     UI.pageNumDisplay.innerText = `Page ${STATE.currentPage} of ${maxPage}`;
     
-    const reveal = UI.revealNakedKeysCheck.checked;
-    
     pageKeys.forEach(key => {
         const tr = document.createElement('tr');
         
@@ -810,7 +854,7 @@ function renderKeysTable() {
         const displayKeyString = key.apiKey || key.keyPreview || '***';
         
         tr.innerHTML = `
-            <td><span class="badge ${typeBadgeClass}">${key.apiType}</span></td>
+            <td><span class="badge ${typeBadgeClass}">${key.apiTypeName}</span></td>
             <td><span class="badge ${statusBadgeClass}">${key.status}</span></td>
             <td>
                 <div class="key-preview-container">
@@ -852,7 +896,7 @@ async function inspectKeyDetails(keyId) {
     const displayKey = key.apiKey || key.keyPreview;
     
     UI.modalFullKey.innerText = displayKey;
-    UI.modalKeyType.innerText = key.apiType;
+    UI.modalKeyType.innerText = key.apiTypeName;
     UI.modalKeyStatus.innerText = key.status;
     UI.modalKeyBalance.innerText = key.balance || 'No balance data';
     UI.modalKeyTier.innerText = key.accountTier || 'Unknown Tier';
@@ -873,7 +917,6 @@ window.inspectKeyDetails = inspectKeyDetails;
 function updateRawConsole() {
     if (!STATE.isRawConsoleVisible) return;
     
-    const reveal = UI.revealNakedKeysCheck.checked;
     let rawText = '';
     
     STATE.filteredKeys.forEach(k => {
@@ -881,7 +924,7 @@ function updateRawConsole() {
         const balanceStr = k.balance ? ` [Balance: ${k.balance}]` : '';
         const tierStr = k.accountTier ? ` [Tier: ${k.accountTier}]` : '';
         
-        rawText += `${k.apiType} | ${keyString} | Status: ${k.status}${balanceStr}${tierStr}\n`;
+        rawText += `${k.apiTypeName} | ${keyString} | Status: ${k.status}${balanceStr}${tierStr}\n`;
     });
     
     UI.rawExportTextarea.value = rawText || 'No credentials matching current filters.';
