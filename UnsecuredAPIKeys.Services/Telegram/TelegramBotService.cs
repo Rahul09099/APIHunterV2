@@ -219,11 +219,11 @@ public class TelegramBotService : BackgroundService
                 case "/status":
                     await HandleStatusCommand(chatId, isAdmin, cancellationToken);
                     break;
-                case "/stats":
-                    await HandleStatsCommand(chatId, isAdmin, cancellationToken);
-                    break;
                 case "/start_scraper":
                     await HandleStartScraperCommand(chatId, cancellationToken);
+                    break;
+                case "/stats":
+                    await HandleStatsCommand(chatId, isAdmin, cancellationToken);
                     break;
                 case "/stop_scraper":
                     await HandleStopJobCommand(chatId, args, "Scraper", isAdmin, cancellationToken);
@@ -706,7 +706,11 @@ public class TelegramBotService : BackgroundService
 
     private async Task HandleDashboardCommand(long chatId, CancellationToken ct)
     {
-        var dashboardUrl = "https://unsecuredapikeys-api-aezg.onrender.com/dashboard";
+        var masterUrl = Environment.GetEnvironmentVariable("RENDER_EXTERNAL_URL") 
+                      ?? Environment.GetEnvironmentVariable("MASTER_API_URL")
+                      ?? "https://unsecuredapikeys-api-aezg.onrender.com";
+        masterUrl = masterUrl.TrimEnd('/');
+        var dashboardUrl = $"{masterUrl}/dashboard";
         
         var inlineKeyboard = new InlineKeyboardMarkup(new[]
         {
