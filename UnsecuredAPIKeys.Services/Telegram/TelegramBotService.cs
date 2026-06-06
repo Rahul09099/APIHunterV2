@@ -75,8 +75,8 @@ public class TelegramBotService : BackgroundService
         // Set bot commands menu
         await _botClient.SetMyCommands(new[]
         {
-            new BotCommand { Command = "dashboard", Description = "Open Visual Dashboard" },
             new BotCommand { Command = "status", Description = "Mission Control" },
+            new BotCommand { Command = "dashboard", Description = "Open Visual Dashboard" },
             new BotCommand { Command = "stats", Description = "Statistics" },
             new BotCommand { Command = "start_scraper", Description = "Start Scraper" },
             new BotCommand { Command = "start_verifier", Description = "Start Verifier" },
@@ -618,8 +618,8 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         help.AppendLine("📊 <b>General</b>");
         help.AppendLine("├ /status - Overall status &amp; active jobs");
-        help.AppendLine("├ /stats - Detailed statistics");
         help.AppendLine("├ /dashboard - Launch visual control center");
+        help.AppendLine("├ /stats - Detailed statistics");
         help.AppendLine("└ /help - Show this message");
         help.AppendLine();
         help.AppendLine("🔍 <b>Scraper</b>");

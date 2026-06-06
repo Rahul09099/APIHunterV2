@@ -245,9 +245,9 @@ public class DatabaseService(DBContext dbContext)
                     ""Domain"" TEXT,
                     ""NetworkStatus"" TEXT NOT NULL DEFAULT 'Unknown',
                     ""AuthenticationStatus"" TEXT NOT NULL DEFAULT 'Untested',
-                    ""ServerMetadata"" TEXT NOT NULL DEFAULT '{}',
-                    ""GeolocationData"" TEXT NOT NULL DEFAULT '{}',
-                    ""OSINTData"" TEXT NOT NULL DEFAULT '{}',
+                    ""ServerMetadata"" TEXT NOT NULL DEFAULT '{{}}',
+                    ""GeolocationData"" TEXT NOT NULL DEFAULT '{{}}',
+                    ""OSINTData"" TEXT NOT NULL DEFAULT '{{}}',
                     ""RiskLevel"" TEXT NOT NULL DEFAULT 'Low',
                     ""IsHoneypot"" BOOLEAN NOT NULL DEFAULT 0,
                     ""SourceRepository"" TEXT,
@@ -394,9 +394,9 @@ public class DatabaseService(DBContext dbContext)
                     ""Domain"" VARCHAR(255),
                     ""NetworkStatus"" VARCHAR(50)  NOT NULL DEFAULT 'Unknown',
                     ""AuthenticationStatus"" VARCHAR(50)  NOT NULL DEFAULT 'Untested',
-                    ""ServerMetadata"" JSONB        NOT NULL DEFAULT '{}',
-                    ""GeolocationData"" JSONB        NOT NULL DEFAULT '{}',
-                    ""OSINTData"" JSONB        NOT NULL DEFAULT '{}',
+                    ""ServerMetadata"" JSONB        NOT NULL DEFAULT '{{}}',
+                    ""GeolocationData"" JSONB        NOT NULL DEFAULT '{{}}',
+                    ""OSINTData"" JSONB        NOT NULL DEFAULT '{{}}',
                     ""RiskLevel"" VARCHAR(20)  NOT NULL DEFAULT 'Low',
                     ""IsHoneypot"" BOOLEAN      NOT NULL DEFAULT FALSE,
                     ""SourceRepository"" VARCHAR(500),
@@ -415,9 +415,9 @@ public class DatabaseService(DBContext dbContext)
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""Domain"" VARCHAR(255);
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""NetworkStatus"" VARCHAR(50) NOT NULL DEFAULT 'Unknown';
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""AuthenticationStatus"" VARCHAR(50) NOT NULL DEFAULT 'Untested';
-                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""ServerMetadata"" JSONB NOT NULL DEFAULT '{}';
-                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""GeolocationData"" JSONB NOT NULL DEFAULT '{}';
-                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""OSINTData"" JSONB NOT NULL DEFAULT '{}';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""ServerMetadata"" JSONB NOT NULL DEFAULT '{{}}';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""GeolocationData"" JSONB NOT NULL DEFAULT '{{}}';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""OSINTData"" JSONB NOT NULL DEFAULT '{{}}';
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""RiskLevel"" VARCHAR(20) NOT NULL DEFAULT 'Low';
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""IsHoneypot"" BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""SourceRepository"" VARCHAR(500);
