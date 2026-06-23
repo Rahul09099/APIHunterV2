@@ -112,11 +112,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // GraphQL query — api_key as query param (confirmed from official docs)
-                const string query = """{"query": "{ myself { id email currentSpendPerHr spendLimit } }"}""";
+                // GraphQL query to fetch RunPod balance, spend rate, and limits
+                const string query = """{"query": "query { myself { id email clientBalance currentSpendPerHr underBalance minBalance creditAlertThreshold } }"}""";
 
-                using var request = new HttpRequestMessage(HttpMethod.Post,
-                    $"https://api.runpod.io/graphql?api_key={Uri.EscapeDataString(apiKey)}");
+                using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.runpod.io/graphql");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
                 request.Content = new StringContent(query,
                     System.Text.Encoding.UTF8, "application/json");
 
@@ -150,6 +150,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 }
 
                 var result = ValidationResult.Success(response.StatusCode, "Valid RunPod key");
+                result.RawResponse = responseBody;
 
                 try
                 {
@@ -158,19 +159,51 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         data.TryGetProperty("myself", out var myself))
                     {
                         // Email as account identifier
-                        if (myself.TryGetProperty("email", out var email))
+                        if (myself.TryGetProperty("email", out var email) && email.ValueKind != System.Text.Json.JsonValueKind.Null)
                             result.AccountTier = email.GetString();
 
-                        // currentSpendPerHr = active spend rate
-                        if (myself.TryGetProperty("currentSpendPerHr", out var spend))
-                            result.Balance = $"${spend.GetDouble():N4}/hr";
+                        double clientBalance = 0;
+                        if (myself.TryGetProperty("clientBalance", out var clientBalProp) && clientBalProp.ValueKind != System.Text.Json.JsonValueKind.Null)
+                        {
+                            clientBalance = clientBalProp.GetDouble();
+                            result.Balance = $"${clientBalance:N4}";
+                        }
 
-                        // spendLimit = account spend cap (null = unlimited)
-                        if (myself.TryGetProperty("spendLimit", out var limit) &&
-                            limit.ValueKind != System.Text.Json.JsonValueKind.Null)
-                            result.Detail = $"Valid RunPod key — spend limit: ${limit.GetDouble():N2}";
-                        else
-                            result.Detail = "Valid RunPod key — no spend limit";
+                        double spendPerHr = 0;
+                        if (myself.TryGetProperty("currentSpendPerHr", out var spendProp) && spendProp.ValueKind != System.Text.Json.JsonValueKind.Null)
+                        {
+                            spendPerHr = spendProp.GetDouble();
+                        }
+
+                        double minBalance = 0;
+                        if (myself.TryGetProperty("minBalance", out var minBalProp) && minBalProp.ValueKind != System.Text.Json.JsonValueKind.Null)
+                        {
+                            minBalance = minBalProp.GetDouble();
+                        }
+
+                        bool underBalance = false;
+                        if (myself.TryGetProperty("underBalance", out var underBalProp) && underBalProp.ValueKind != System.Text.Json.JsonValueKind.Null)
+                        {
+                            underBalance = underBalProp.GetBoolean();
+                            result.IsQuotaExceeded = underBalance;
+                        }
+
+                        double creditAlertThreshold = 0;
+                        if (myself.TryGetProperty("creditAlertThreshold", out var alertProp) && alertProp.ValueKind != System.Text.Json.JsonValueKind.Null)
+                        {
+                            creditAlertThreshold = alertProp.GetDouble();
+                        }
+
+                        result.Detail = $"Valid RunPod key — Balance: ${clientBalance:N4}, Spend/hr: ${spendPerHr:N4}, Min Balance: ${minBalance:N4}, Under Balance: {underBalance}";
+
+                        result.Metadata = new Dictionary<string, object>
+                        {
+                            { "clientBalance", clientBalance },
+                            { "currentSpendPerHr", spendPerHr },
+                            { "minBalance", minBalance },
+                            { "underBalance", underBalance },
+                            { "creditAlertThreshold", creditAlertThreshold }
+                        };
                     }
                 }
                 catch { /* Best effort */ }

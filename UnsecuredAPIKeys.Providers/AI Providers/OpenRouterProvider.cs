@@ -113,28 +113,39 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         result.Balance = $"No key limit (Used: ${usage:F4})";
                     }
 
-                    // Additional check: If key is valid and paid tier, verify if the account actually has credits
-                    if (!isFreeTier && !result.IsQuotaExceeded)
+                    // Send a simple chat completions "hi" request using the API key to verify it actually works and is valid
+                    try
                     {
-                        try
+                        using var checkRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
+                        checkRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                        
+                        var jsonPayload = "{\"model\":\"google/gemini-2.5-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}";
+                        checkRequest.Content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
+                        
+                        using var checkResponse = await httpClient.SendAsync(checkRequest);
+                        var checkBody = await checkResponse.Content.ReadAsStringAsync();
+                        
+                        _logger?.LogDebug("OpenRouter chat/completions check response: Status={Status}, Body={Body}",
+                            checkResponse.StatusCode, TruncateResponse(checkBody));
+
+                        if (checkResponse.StatusCode == HttpStatusCode.Unauthorized || checkResponse.StatusCode == HttpStatusCode.Forbidden)
                         {
-                            using var checkRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
-                            checkRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                            
-                            var jsonPayload = "{\"model\":\"google/gemini-2.5-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}";
-                            checkRequest.Content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
-                            
-                            using var checkResponse = await httpClient.SendAsync(checkRequest);
-                            var checkBody = await checkResponse.Content.ReadAsStringAsync();
-                            
-                            if ((int)checkResponse.StatusCode == 402 || checkBody.Contains("Insufficient credits", StringComparison.OrdinalIgnoreCase))
-                            {
-                                result.IsQuotaExceeded = true;
-                                result.Detail = "Valid key but insufficient account credits.";
-                                result.Balance = $"Insufficient account credits (Used: ${usage:F4})";
-                            }
+                            return ValidationResult.IsUnauthorized(checkResponse.StatusCode, "Invalid OpenRouter API key — chat completions rejected");
                         }
-                        catch { /* Best effort account credit check */ }
+                        else if ((int)checkResponse.StatusCode == 402 || checkBody.Contains("Insufficient credits", StringComparison.OrdinalIgnoreCase))
+                        {
+                            result.IsQuotaExceeded = true;
+                            result.Detail = "Valid key but insufficient account credits.";
+                            result.Balance = $"Insufficient account credits (Used: ${usage:F4})";
+                        }
+                        else if (checkResponse.IsSuccessStatusCode)
+                        {
+                            result.Detail = "Valid OpenRouter key — Chat completions verified.";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning("OpenRouter chat/completions check failed with exception: {Message}", ex.Message);
                     }
 
                     // Account Tier

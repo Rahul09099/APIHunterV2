@@ -61,8 +61,8 @@ public class DatabaseService(DBContext dbContext)
     {
         try
         {
-            var hasDefaultAdmin = await context.TelegramSubscribers.AnyAsync(s => s.TelegramId == 12345678 || s.NodeToken == "default_admin_token_2026");
-            if (!hasDefaultAdmin)
+            var adminUser = await context.TelegramSubscribers.FirstOrDefaultAsync(s => s.TelegramId == 12345678);
+            if (adminUser == null)
             {
                 var defaultAdmin = new TelegramSubscriber
                 {
@@ -76,6 +76,13 @@ public class DatabaseService(DBContext dbContext)
                 context.TelegramSubscribers.Add(defaultAdmin);
                 await context.SaveChangesAsync();
                 Console.WriteLine("[DB] Seeded default admin subscriber with node token: default_admin_token_2026");
+            }
+            else if (adminUser.NodeToken != "default_admin_token_2026")
+            {
+                adminUser.NodeToken = "default_admin_token_2026";
+                adminUser.IsAdmin = true;
+                await context.SaveChangesAsync();
+                Console.WriteLine("[DB] Updated existing admin subscriber 12345678 with node token: default_admin_token_2026");
             }
         }
         catch (Exception ex)

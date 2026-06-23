@@ -203,6 +203,7 @@ public class ConfigController : ControllerBase
                 k.ApiKey,
                 ApiType = (int)k.ApiType,
                 ApiTypeName = k.ApiType.ToString(),
+                Status = k.Status.ToString(),
                 k.Balance,
                 k.AccountTier,
                 k.ValidationResponse,

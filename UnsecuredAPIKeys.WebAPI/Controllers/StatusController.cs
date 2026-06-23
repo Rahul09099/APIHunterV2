@@ -123,8 +123,9 @@ public class StatusController : ControllerBase
             {
                 k.Id,
                 k.ApiKey,
-                k.ApiType,
-                k.Status,
+                ApiType = (int)k.ApiType,
+                ApiTypeName = k.ApiType.ToString(),
+                Status = k.Status.ToString(),
                 k.FirstFoundUTC,
                 k.LastCheckedUTC,
                 k.Balance,
