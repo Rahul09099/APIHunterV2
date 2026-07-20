@@ -61,11 +61,12 @@
                 </div>
                 
                 <div class="user-controls">
-                    <!-- NODE TOKEN INPUT -->
+                    <!-- ENVIRONMENT ACCESS CODE LOGIN -->
                     <div class="token-container">
-                        <label for="node-token-input" class="token-label">Auth Token:</label>
-                        <input type="password" id="node-token-input" class="token-input" placeholder="Enter X-Node-Token..." value="default_admin_token_2026">
-                        <button id="save-token-btn" class="btn btn-primary btn-sm">Save</button>
+                        <label for="access-code-input" class="token-label">Access Code:</label>
+                        <input type="password" id="access-code-input" class="token-input" placeholder="Enter access code" autocomplete="current-password">
+                        <button id="sign-in-btn" class="btn btn-primary btn-sm">Sign in</button>
+                        <button id="logout-btn" class="btn btn-secondary btn-sm hidden">Sign out</button>
                     </div>
                 </div>
             </header>
@@ -122,7 +123,7 @@
                 </div>
 
                 <!-- CONTROLLERS AND JOBS SUMMARY split -->
-                <div class="dashboard-split-row">
+                <div class="dashboard-split-row admin-only">
                     <!-- RUNNING BACKGROUND JOBS (60% width) -->
                     <div class="section-card glass main-jobs-card animate-slide-up">
                         <h3 class="section-title">Active Job Logs</h3>
@@ -387,6 +388,10 @@
                 <div class="modal-info-row">
                     <span class="info-label">Validation HTTP Response Body:</span>
                     <pre class="json-viewer"><code id="modal-key-response">loading...</code></pre>
+                </div>
+                <div class="modal-info-row">
+                    <span class="info-label">Complete Key Details:</span>
+                    <pre class="json-viewer"><code id="modal-key-details">loading...</code></pre>
                 </div>
             </div>
         </div>

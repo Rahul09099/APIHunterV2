@@ -657,17 +657,18 @@ async Task ExportKeysAsync(DBContext db, DatabaseService dbService)
             {
                 "1. API Keys (JSON)",
                 "2. API Keys (CSV)",
-                "3. Server Credentials (CSV)",
-                "4. Server Credentials (JSON)",
-                "5. Back to Main Menu"
+                "3. API Keys (Excel-compatible CSV)",
+                "4. Server Credentials (CSV)",
+                "5. Server Credentials (JSON)",
+                "6. Back to Main Menu"
             }));
 
-    if (exportChoice.StartsWith("5")) return;
+    if (exportChoice.StartsWith("6")) return;
 
-    if (exportChoice.StartsWith("3") || exportChoice.StartsWith("4"))
+    if (exportChoice.StartsWith("4") || exportChoice.StartsWith("5"))
     {
-        var format = exportChoice.StartsWith("3") ? "csv" : "json";
-        var defaultFileName = exportChoice.StartsWith("3") ? "credentials.csv" : "credentials.json";
+        var format = exportChoice.StartsWith("4") ? "csv" : "json";
+        var defaultFileName = exportChoice.StartsWith("4") ? "credentials.csv" : "credentials.json";
 
         var filterType = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
@@ -721,7 +722,9 @@ async Task ExportKeysAsync(DBContext db, DatabaseService dbService)
     }
 
     var formatKeys = exportChoice.StartsWith("1") ? "json" : "csv";
-    var defaultFileNameKeys = exportChoice.StartsWith("1") ? "keys.json" : "keys.csv";
+    var defaultFileNameKeys = exportChoice.StartsWith("1")
+        ? "keys.json"
+        : exportChoice.StartsWith("3") ? "keys_excel.csv" : "keys.csv";
     var fileNameKeys = AnsiConsole.Prompt(
         new TextPrompt<string>("[green]Output file name:[/]")
             .DefaultValue(defaultFileNameKeys));

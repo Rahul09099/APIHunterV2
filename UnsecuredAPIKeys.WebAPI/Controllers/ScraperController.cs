@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.Services.Telegram;
+using UnsecuredAPIKeys.WebAPI.Services;
 
 namespace UnsecuredAPIKeys.WebAPI.Controllers;
 
@@ -13,27 +14,41 @@ public class ScraperController : ControllerBase
     private readonly DBContext _dbContext;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly BackgroundJobManager _jobManager;
+    private readonly DashboardAccessService _accessService;
 
     public ScraperController(
         DBContext dbContext,
         IHttpClientFactory httpClientFactory,
-        BackgroundJobManager jobManager)
+        BackgroundJobManager jobManager,
+        DashboardAccessService accessService)
     {
         _dbContext = dbContext;
         _httpClientFactory = httpClientFactory;
         _jobManager = jobManager;
+        _accessService = accessService;
+    }
+
+    private async Task<bool> IsAdministratorAsync(string? nodeToken, string? accessToken)
+    {
+        if (_accessService.TryGetSession(accessToken, out var session) && session is not null)
+        {
+            return session.Role == DashboardAccessRole.Admin;
+        }
+
+        return !string.IsNullOrEmpty(nodeToken) &&
+               await _dbContext.TelegramSubscribers.AnyAsync(s => s.NodeToken == nodeToken && s.IsAdmin);
     }
 
     /// <summary>
     /// Start the scraper service in the background
     /// </summary>
     [HttpPost("start")]
-    public async Task<IActionResult> StartScraper([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> StartScraper(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var node = await _dbContext.TelegramSubscribers
-            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
-
-        if (node == null) return Unauthorized(new { message = "Invalid node token" });
+        if (!await IsAdministratorAsync(nodeToken, accessToken))
+            return Unauthorized(new { message = "Admin access required" });
 
         var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => (j.JobType == "Scraper" || j.JobType == "AutoScraper-All" || j.JobType.StartsWith("Scraper-")) && j.Status == "Running");
         if (isAlreadyRunning) return Conflict(new { message = "A scraper job is already running." });
@@ -42,7 +57,7 @@ public class ScraperController : ControllerBase
         {
             var scraper = new ScraperService(_dbContext, _httpClientFactory);
             await scraper.RunScrapeAllGroupsAsync(null, cancellationToken);
-        }, node.TelegramId);
+        });
 
         return Ok(new { 
             message = "Scraper started successfully",
@@ -55,8 +70,14 @@ public class ScraperController : ControllerBase
     /// Stop a running scraper job
     /// </summary>
     [HttpPost("stop/{jobId}")]
-    public IActionResult StopScraper(string jobId)
+    public async Task<IActionResult> StopScraper(
+        string jobId,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
+        if (!await IsAdministratorAsync(nodeToken, accessToken))
+            return Unauthorized(new { message = "Admin access required" });
+
         var success = _jobManager.StopJob(jobId);
         
         if (success)
@@ -71,8 +92,14 @@ public class ScraperController : ControllerBase
     /// Get status of a scraper job
     /// </summary>
     [HttpGet("status/{jobId}")]
-    public IActionResult GetJobStatus(string jobId)
+    public async Task<IActionResult> GetJobStatus(
+        string jobId,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
+        if (!await IsAdministratorAsync(nodeToken, accessToken))
+            return Unauthorized(new { message = "Admin access required" });
+
         var jobInfo = _jobManager.GetJobInfo(jobId);
         
         if (jobInfo == null)
@@ -87,20 +114,15 @@ public class ScraperController : ControllerBase
     /// Get all scraper jobs
     /// </summary>
     [HttpGet("jobs")]
-    public async Task<IActionResult> GetAllJobs([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> GetAllJobs(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var node = await _dbContext.TelegramSubscribers
-            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
-
-        if (node == null) return Unauthorized(new { message = "Invalid node token" });
+        if (!await IsAdministratorAsync(nodeToken, accessToken))
+            return Unauthorized(new { message = "Admin access required" });
 
         var jobs = _jobManager.GetAllJobs()
             .Where(j => j.JobType == "Scraper");
-        
-        if (!node.IsAdmin)
-        {
-            jobs = jobs.Where(j => j.OwnerTelegramId == node.TelegramId);
-        }
         
         return Ok(jobs);
     }

@@ -3,7 +3,7 @@
  */
 
 const STATE = {
-    token: localStorage.getItem('X-Node-Token') || 'default_admin_token_2026',
+    accessToken: localStorage.getItem('APIHunter-Access-Token') || '',
     isAdmin: false,
     activeTab: 'dashboard-tab',
     keys: [], // In-memory database cache
@@ -21,8 +21,9 @@ const STATE = {
 
 // UI Element Cache
 const UI = {
-    tokenInput: document.getElementById('node-token-input'),
-    saveTokenBtn: document.getElementById('save-token-btn'),
+    accessCodeInput: document.getElementById('access-code-input'),
+    signInBtn: document.getElementById('sign-in-btn'),
+    logoutBtn: document.getElementById('logout-btn'),
     navItems: document.querySelectorAll('.nav-item'),
     tabContents: document.querySelectorAll('.tab-content'),
     pageTitleText: document.getElementById('page-title-text'),
@@ -83,49 +84,12 @@ const UI = {
     modalKeyStatus: document.getElementById('modal-key-status'),
     modalKeyBalance: document.getElementById('modal-key-balance'),
     modalKeyTier: document.getElementById('modal-key-tier'),
-    modalKeyResponse: document.getElementById('modal-key-response')
+    modalKeyResponse: document.getElementById('modal-key-response'),
+    modalKeyDetails: document.getElementById('modal-key-details')
 };
-
-// Auto-detect Telegram WebApp User & Token
-async function autoDetectTelegramUser() {
-    if (window.Telegram && window.Telegram.WebApp) {
-        const webApp = window.Telegram.WebApp;
-        webApp.ready();
-        
-        // Retrieve telegram user object from initData
-        const user = webApp.initDataUnsafe?.user;
-        if (user && user.id) {
-            const telegramId = user.id;
-            console.log(`Telegram WebApp detected. User ID: ${telegramId}`);
-            try {
-                const response = await fetch(`/api/Status/token-by-telegram/${telegramId}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data && data.token) {
-                        STATE.token = data.token;
-                        localStorage.setItem('X-Node-Token', data.token);
-                        showNotification(`Auto-detected Telegram session (ID: ${telegramId})`, 'success');
-                    }
-                } else {
-                    console.warn(`Could not resolve token for Telegram ID ${telegramId}`);
-                }
-            } catch (err) {
-                console.error('Error auto-logging via Telegram:', err);
-            }
-        }
-    }
-}
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', async () => {
-    // Attempt auto login via Telegram WebApp context first
-    await autoDetectTelegramUser();
-
-    // Populate saved token
-    if (STATE.token) {
-        UI.tokenInput.value = STATE.token;
-    }
-    
     setupEventListeners();
     await validateSession();
     fetchApiTypes();
@@ -136,16 +100,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // Event Listeners Routing
 function setupEventListeners() {
-    // Token Save Action
-    UI.saveTokenBtn.addEventListener('click', () => {
-        const val = UI.tokenInput.value.trim();
-        if (val) {
-            STATE.token = val;
-            localStorage.setItem('X-Node-Token', val);
-            showNotification('Token saved. Verifying authorization...', 'info');
-            validateSession();
-        }
+    UI.signInBtn.addEventListener('click', signIn);
+    UI.accessCodeInput.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') signIn();
     });
+    UI.logoutBtn.addEventListener('click', signOut);
 
     // Tab Switch Coordinator
     UI.navItems.forEach(item => {
@@ -276,12 +235,12 @@ function switchTab(tabId) {
 
 // Load data specifically needed for selected tab
 function runTabLoadingLogic(tabId) {
-    if (!STATE.token) return;
+    if (!STATE.accessToken) return;
     
     switch (tabId) {
         case 'dashboard-tab':
             fetchDashboardStats();
-            fetchBackgroundJobs();
+            if (STATE.isAdmin) fetchBackgroundJobs();
             break;
         case 'keys-tab':
             fetchRecentKeys();
@@ -299,8 +258,8 @@ function runTabLoadingLogic(tabId) {
 // Core loop refreshing active views
 function runPollingCycle() {
     // Poll running jobs & heartbeats every 10 seconds
-    if (STATE.token) {
-        if (STATE.activeTab === 'dashboard-tab') {
+    if (STATE.accessToken) {
+        if (STATE.activeTab === 'dashboard-tab' && STATE.isAdmin) {
             fetchBackgroundJobs();
         } else if (STATE.activeTab === 'workers-tab') {
             fetchWorkerNodes();
@@ -314,8 +273,8 @@ async function apiCall(endpoint, method = 'GET', body = null) {
         'Accept': 'application/json'
     };
     
-    if (STATE.token) {
-        headers['X-Node-Token'] = STATE.token;
+    if (STATE.accessToken) {
+        headers['X-Access-Token'] = STATE.accessToken;
     }
     
     const config = {
@@ -351,30 +310,22 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     return await response.text();
 }
 
-// Validate Token & Check Admin Role
+// Validate the short-lived session issued after access-code login.
 async function validateSession() {
-    if (!STATE.token) {
+    if (!STATE.accessToken) {
         setAuthorizedUI(false);
-        showNotification('Please enter a Node Token in the top right to get started.', 'warning');
         return;
     }
     
     try {
-        // Try getting github tokens as user authentication check
-        const response = await apiCall('/api/Status/github-tokens');
+        const response = await apiCall('/api/access/me');
         setAuthorizedUI(true);
-        
-        // Check if user is Admin by querying admin configuration endpoint (will fail if not admin)
-        try {
-            await apiCall('/api/Status/search-queries');
-            STATE.isAdmin = true;
-            document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
-        } catch(err) {
-            STATE.isAdmin = false;
-            document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
-            if (STATE.activeTab === 'config-tab') {
-                switchTab('dashboard-tab');
-            }
+        STATE.isAdmin = response.role === 'Admin';
+        document.querySelectorAll('.admin-only').forEach(el => {
+            el.classList.toggle('hidden', !STATE.isAdmin);
+        });
+        if (!STATE.isAdmin && (STATE.activeTab === 'config-tab' || STATE.activeTab === 'workers-tab')) {
+            switchTab('dashboard-tab');
         }
         
         // Prefetch keys once into memory to initialize counts and avoid redundant DB hits
@@ -387,7 +338,9 @@ async function validateSession() {
         console.error('Session validation error:', err);
         setAuthorizedUI(false);
         if (err.message === 'UNAUTHORIZED') {
-            showNotification('Invalid Node Token. Access Denied.', 'danger');
+            localStorage.removeItem('APIHunter-Access-Token');
+            STATE.accessToken = '';
+            showNotification('Your session has expired. Please sign in again.', 'warning');
         } else {
             showNotification('Unable to connect to Master API server.', 'danger');
         }
@@ -397,15 +350,18 @@ async function validateSession() {
 // Update UI lock state based on authorization
 function setAuthorizedUI(isAuth) {
     if (isAuth) {
-        UI.tokenInput.classList.remove('input-danger');
-        UI.tokenInput.style.borderColor = 'var(--accent-emerald)';
+        UI.accessCodeInput.value = '';
+        UI.accessCodeInput.classList.remove('input-danger');
+        UI.accessCodeInput.style.borderColor = 'var(--accent-emerald)';
+        UI.logoutBtn.classList.remove('hidden');
         document.querySelector('.connection-status').innerHTML = `
             <span class="pulse-dot green"></span>
             <span class="status-text">Authenticated</span>
         `;
     } else {
-        UI.tokenInput.classList.add('input-danger');
-        UI.tokenInput.style.borderColor = 'var(--accent-red)';
+        UI.accessCodeInput.classList.add('input-danger');
+        UI.accessCodeInput.style.borderColor = 'var(--accent-red)';
+        UI.logoutBtn.classList.add('hidden');
         document.querySelector('.connection-status').innerHTML = `
             <span class="pulse-dot red"></span>
             <span class="status-text">Unauthorized</span>
@@ -413,6 +369,49 @@ function setAuthorizedUI(isAuth) {
         // Hide Admin tabs
         document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
     }
+}
+
+async function signIn() {
+    const accessCode = UI.accessCodeInput.value;
+    if (!accessCode) {
+        showNotification('Enter an access code to continue.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/access/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ accessCode })
+        });
+
+        if (!response.ok) throw new Error('INVALID_ACCESS_CODE');
+        const session = await response.json();
+        STATE.accessToken = session.accessToken;
+        localStorage.setItem('APIHunter-Access-Token', session.accessToken);
+        await validateSession();
+        showNotification(`Signed in as ${session.role}.`, 'success');
+    } catch (err) {
+        showNotification('Invalid access code.', 'danger');
+    }
+}
+
+async function signOut() {
+    try {
+        await apiCall('/api/access/logout', 'POST');
+    } catch (err) {
+        // Clear the local session even when the server is unreachable.
+    }
+
+    STATE.accessToken = '';
+    STATE.isAdmin = false;
+    STATE.keys = [];
+    STATE.filteredKeys = [];
+    localStorage.removeItem('APIHunter-Access-Token');
+    document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
+    setAuthorizedUI(false);
+    UI.keysTbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Sign in to view API-key results.</td></tr>';
+    showNotification('Signed out.', 'info');
 }
 
 // Fetch Master API Types List
@@ -436,17 +435,9 @@ async function fetchApiTypes() {
 
 // Optimized Cache Loaders to prevent database load
 async function initKeysCache() {
-    try {
-        // Try calling export endpoint first (gets us raw unmasked keys and all valid keys)
-        const unmaskedData = await apiCall('/api/Config/export-keys?format=json');
-        STATE.keys = unmaskedData;
-        STATE.keysAreUnmasked = true;
-    } catch (err) {
-        // Fallback for non-admins to load preview summaries
-        const previewData = await apiCall('/api/Status/recent-keys?limit=300');
-        STATE.keys = previewData;
-        STATE.keysAreUnmasked = false;
-    }
+    const keyData = await apiCall('/api/Status/recent-keys?limit=300');
+    STATE.keys = keyData;
+    STATE.keysAreUnmasked = STATE.isAdmin;
     
     // Calculate and render categories card values immediately from the in-memory cache
     calculateCategoriesSummary();
@@ -454,19 +445,13 @@ async function initKeysCache() {
 
 // Load full unmasked keys if requested
 async function loadUnmaskedKeysCache() {
+    if (!STATE.isAdmin) {
+        showNotification('Only administrators can view unmasked API keys.', 'warning');
+        return;
+    }
+
     try {
-        const unmaskedData = await apiCall('/api/Config/export-keys?format=json');
-        
-        // Merge unmasked keys with existing preview list to retain unverified key records
-        unmaskedData.forEach(unmasked => {
-            const index = STATE.keys.findIndex(k => k.id === unmasked.id);
-            if (index !== -1) {
-                STATE.keys[index] = { ...STATE.keys[index], ...unmasked };
-            } else {
-                STATE.keys.push(unmasked);
-            }
-        });
-        
+        STATE.keys = await apiCall('/api/Status/recent-keys?limit=300');
         STATE.keysAreUnmasked = true;
     } catch (err) {
         showNotification('Failed to fetch full unmasked keys. Admin role required.', 'danger');
@@ -716,19 +701,11 @@ async function fetchRecentKeys() {
     `;
     
     try {
-        // Pull latest list from DB once, update memory cache
+        // Replace the cache so a previous administrator session cannot leave raw
+        // values available after a normal-user sign-in.
         const data = await apiCall('/api/Status/recent-keys?limit=300');
-        
-        // Merge with existing cache to keep unmasked values if we have them
-        data.forEach(freshKey => {
-            const cachedIdx = STATE.keys.findIndex(k => k.id === freshKey.id);
-            if (cachedIdx !== -1) {
-                // Keep the raw unmasked key if we already fetched it previously
-                STATE.keys[cachedIdx] = { ...freshKey, ...STATE.keys[cachedIdx] };
-            } else {
-                STATE.keys.push(freshKey);
-            }
-        });
+        STATE.keys = data;
+        STATE.keysAreUnmasked = STATE.isAdmin;
         
         applyKeysFilters();
     } catch(err) {
@@ -908,6 +885,34 @@ async function inspectKeyDetails(keyId) {
     } catch(e) {
         UI.modalKeyResponse.innerText = rawResponse;
     }
+
+    // Show every stored API-key field except repository/source references.
+    // Sources are intentionally excluded from the webpage view.
+    const details = {
+        id: key.id,
+        apiKey: displayKey,
+        apiType: key.apiTypeName || key.apiType,
+        status: key.status,
+        searchProvider: key.searchProvider,
+        balance: key.balance,
+        accountTier: key.accountTier,
+        validationResponse: key.validationResponse,
+        metadata: key.metadata,
+        firstFoundUTC: key.firstFoundUTC,
+        lastFoundUTC: key.lastFoundUTC,
+        lastCheckedUTC: key.lastCheckedUTC,
+        timesDisplayed: key.timesDisplayed,
+        errorCount: key.errorCount,
+        discoveredByTelegramId: key.discoveredByTelegramId,
+        awsAccountId: key.awsAccountId,
+        awsUserArn: key.awsUserArn,
+        awsUserId: key.awsUserId,
+        awsCredentialType: key.awsCredentialType,
+        awsAttachedPolicies: key.awsAttachedPolicies,
+        awsRiskLevel: key.awsRiskLevel,
+        awsIsRootAccount: key.awsIsRootAccount
+    };
+    UI.modalKeyDetails.innerText = JSON.stringify(details, null, 4);
     
     UI.keyModal.classList.remove('hidden');
 }

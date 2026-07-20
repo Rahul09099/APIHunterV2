@@ -4,6 +4,7 @@ using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.DTOs;
 using UnsecuredAPIKeys.Data.Models;
 using UnsecuredAPIKeys.Data.Common;
+using UnsecuredAPIKeys.WebAPI.Services;
 
 namespace UnsecuredAPIKeys.WebAPI.Controllers;
 
@@ -13,11 +14,13 @@ public class NodesController : ControllerBase
 {
     private readonly DBContext _dbContext;
     private readonly ILogger<NodesController> _logger;
+    private readonly DashboardAccessService _accessService;
 
-    public NodesController(DBContext dbContext, ILogger<NodesController> logger)
+    public NodesController(DBContext dbContext, ILogger<NodesController> logger, DashboardAccessService accessService)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _accessService = accessService;
     }
 
     /// <summary>
@@ -234,14 +237,15 @@ public class NodesController : ControllerBase
     /// Get all registered worker nodes (Admins only)
     /// </summary>
     [HttpGet]
-    public async Task<IActionResult> GetNodes([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> GetNodes(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        if (string.IsNullOrEmpty(nodeToken)) return Unauthorized("Missing Node Token");
-
-        var adminNode = await _dbContext.TelegramSubscribers
-            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
-
-        if (adminNode == null || !adminNode.IsAdmin) return Unauthorized("Admin access required");
+        var isDashboardAdmin = _accessService.TryGetSession(accessToken, out var session) &&
+                               session?.Role == DashboardAccessRole.Admin;
+        var isNodeAdmin = !string.IsNullOrEmpty(nodeToken) &&
+                          await _dbContext.TelegramSubscribers.AnyAsync(s => s.NodeToken == nodeToken && s.IsAdmin);
+        if (!isDashboardAdmin && !isNodeAdmin) return Unauthorized("Admin access required");
 
         var tenMinutesAgo = DateTime.UtcNow.AddMinutes(-10);
         var nodes = await _dbContext.TelegramSubscribers

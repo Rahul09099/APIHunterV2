@@ -4,6 +4,7 @@ using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.Services.Telegram;
+using UnsecuredAPIKeys.WebAPI.Services;
 
 namespace UnsecuredAPIKeys.WebAPI.Controllers;
 
@@ -15,17 +16,31 @@ public class VerifierController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly BackgroundJobManager _jobManager;
     private readonly DatabaseService _dbService;
+    private readonly DashboardAccessService _accessService;
 
     public VerifierController(
         DBContext dbContext,
         IHttpClientFactory httpClientFactory,
         BackgroundJobManager jobManager,
-        DatabaseService dbService)
+        DatabaseService dbService,
+        DashboardAccessService accessService)
     {
         _dbContext = dbContext;
         _httpClientFactory = httpClientFactory;
         _jobManager = jobManager;
         _dbService = dbService;
+        _accessService = accessService;
+    }
+
+    private async Task<bool> IsAdministratorAsync(string? nodeToken, string? accessToken)
+    {
+        if (_accessService.TryGetSession(accessToken, out var session) && session is not null)
+        {
+            return session.Role == DashboardAccessRole.Admin;
+        }
+
+        return !string.IsNullOrEmpty(nodeToken) &&
+               await _dbContext.TelegramSubscribers.AnyAsync(s => s.NodeToken == nodeToken && s.IsAdmin);
     }
 
     /// <summary>
@@ -34,12 +49,14 @@ public class VerifierController : ControllerBase
     /// <param name="apiTypes">Optional comma-separated list of API types (e.g., "OpenAI,Anthropic")</param>
     /// <param name="reverify">Set to true to only re-verify existing valid keys</param>
     [HttpPost("start")]
-    public async Task<IActionResult> StartVerifier([FromHeader(Name = "X-Node-Token")] string nodeToken, [FromQuery] string? apiTypes = null, [FromQuery] bool reverify = false)
+    public async Task<IActionResult> StartVerifier(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken,
+        [FromQuery] string? apiTypes = null,
+        [FromQuery] bool reverify = false)
     {
-        var node = await _dbContext.TelegramSubscribers
-            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
-
-        if (node == null) return Unauthorized(new { message = "Invalid node token" });
+        if (!await IsAdministratorAsync(nodeToken, accessToken))
+            return Unauthorized(new { message = "Admin access required" });
 
         var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => j.JobType == "Verifier" && j.Status == "Running");
         if (isAlreadyRunning) return Conflict(new { message = "A verifier job is already running." });
@@ -64,7 +81,7 @@ public class VerifierController : ControllerBase
         {
             var verifier = new VerifierService(_dbContext, _httpClientFactory, selectedTypes, reverify);
             await verifier.RunAsync(cancellationToken);
-        }, node.TelegramId);
+        });
 
         var typesList = selectedTypes != null 
             ? string.Join(", ", selectedTypes) 
@@ -82,8 +99,14 @@ public class VerifierController : ControllerBase
     /// Stop a running verifier job
     /// </summary>
     [HttpPost("stop/{jobId}")]
-    public IActionResult StopVerifier(string jobId)
+    public async Task<IActionResult> StopVerifier(
+        string jobId,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
+        if (!await IsAdministratorAsync(nodeToken, accessToken))
+            return Unauthorized(new { message = "Admin access required" });
+
         var success = _jobManager.StopJob(jobId);
         
         if (success)
@@ -98,8 +121,14 @@ public class VerifierController : ControllerBase
     /// Get status of a verifier job
     /// </summary>
     [HttpGet("status/{jobId}")]
-    public IActionResult GetJobStatus(string jobId)
+    public async Task<IActionResult> GetJobStatus(
+        string jobId,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
+        if (!await IsAdministratorAsync(nodeToken, accessToken))
+            return Unauthorized(new { message = "Admin access required" });
+
         var jobInfo = _jobManager.GetJobInfo(jobId);
         
         if (jobInfo == null)
@@ -114,20 +143,15 @@ public class VerifierController : ControllerBase
     /// Get all verifier jobs
     /// </summary>
     [HttpGet("jobs")]
-    public async Task<IActionResult> GetAllJobs([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> GetAllJobs(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var node = await _dbContext.TelegramSubscribers
-            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
-
-        if (node == null) return Unauthorized(new { message = "Invalid node token" });
+        if (!await IsAdministratorAsync(nodeToken, accessToken))
+            return Unauthorized(new { message = "Admin access required" });
 
         var jobs = _jobManager.GetAllJobs()
             .Where(j => j.JobType == "Verifier");
-        
-        if (!node.IsAdmin)
-        {
-            jobs = jobs.Where(j => j.OwnerTelegramId == node.TelegramId);
-        }
         
         return Ok(jobs);
     }

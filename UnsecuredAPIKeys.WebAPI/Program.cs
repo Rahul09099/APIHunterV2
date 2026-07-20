@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.Services.Telegram;
+using UnsecuredAPIKeys.WebAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -48,6 +49,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<DatabaseService>();
 builder.Services.AddScoped<VerifierService>();
 builder.Services.AddSingleton<BackgroundJobManager>();
+builder.Services.AddSingleton<DashboardAccessService>();
 
 // Configure ScraperService with Worker Mode if applicable
 builder.Services.AddScoped<ScraperService>(sp => {

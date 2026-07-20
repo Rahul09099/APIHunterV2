@@ -4,6 +4,7 @@ using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Data.Models;
 using UnsecuredAPIKeys.Services;
+using UnsecuredAPIKeys.WebAPI.Services;
 
 namespace UnsecuredAPIKeys.WebAPI.Controllers;
 
@@ -13,17 +14,24 @@ public class ConfigController : ControllerBase
 {
     private readonly DBContext _dbContext;
     private readonly DatabaseService _dbService;
+    private readonly DashboardAccessService _accessService;
 
-    public ConfigController(DBContext dbContext, DatabaseService dbService)
+    public ConfigController(DBContext dbContext, DatabaseService dbService, DashboardAccessService accessService)
     {
         _dbContext = dbContext;
         _dbService = dbService;
+        _accessService = accessService;
     }
 
-    private async Task<TelegramSubscriber?> GetAuthenticatedUser(string nodeToken)
+    private async Task<bool> IsAdministratorAsync(string? nodeToken, string? accessToken)
     {
-        if (string.IsNullOrEmpty(nodeToken)) return null;
-        return await _dbContext.TelegramSubscribers.FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
+        if (_accessService.TryGetSession(accessToken, out var session) && session is not null)
+        {
+            return session.Role == DashboardAccessRole.Admin;
+        }
+
+        if (string.IsNullOrEmpty(nodeToken)) return false;
+        return await _dbContext.TelegramSubscribers.AnyAsync(s => s.NodeToken == nodeToken && s.IsAdmin);
     }
 
     /// <summary>
@@ -32,8 +40,11 @@ public class ConfigController : ControllerBase
     [HttpPost("github-token")]
     public async Task<IActionResult> AddGitHubToken(
         [FromBody] AddTokenRequest request,
-        [FromHeader(Name = "X-Node-Token")] string? nodeToken = null)
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken = null,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken = null)
     {
+        if (!await IsAdministratorAsync(nodeToken, accessToken)) return Unauthorized("Admin access required");
+
         if (string.IsNullOrWhiteSpace(request.Token))
         {
             return BadRequest(new { message = "Token is required" });
@@ -48,20 +59,11 @@ public class ConfigController : ControllerBase
             return Conflict(new { message = "Token already exists" });
         }
 
-        // Optionally associate with a user if token provided
-        long? addedBy = null;
-        if (!string.IsNullOrEmpty(nodeToken))
-        {
-            var user = await GetAuthenticatedUser(nodeToken);
-            addedBy = user?.TelegramId;
-        }
-
         var token = new SearchProviderToken
         {
             Token = request.Token,
             SearchProvider = SearchProviderEnum.GitHub,
-            IsEnabled = true,
-            AddedByTelegramId = addedBy
+            IsEnabled = true
         };
 
         _dbContext.SearchProviderTokens.Add(token);
@@ -76,10 +78,10 @@ public class ConfigController : ControllerBase
     [HttpDelete("github-token/{id}")]
     public async Task<IActionResult> DeleteGitHubToken(
         int id,
-        [FromHeader(Name = "X-Node-Token")] string nodeToken)
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+        if (!await IsAdministratorAsync(nodeToken, accessToken)) return Unauthorized("Admin access required");
 
         var token = await _dbContext.SearchProviderTokens.FindAsync(id);
         
@@ -100,10 +102,10 @@ public class ConfigController : ControllerBase
     [HttpPost("search-query")]
     public async Task<IActionResult> AddSearchQuery(
         [FromBody] AddQueryRequest request,
-        [FromHeader(Name = "X-Node-Token")] string nodeToken)
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+        if (!await IsAdministratorAsync(nodeToken, accessToken)) return Unauthorized("Admin access required");
 
         if (string.IsNullOrWhiteSpace(request.Query))
         {
@@ -129,10 +131,10 @@ public class ConfigController : ControllerBase
     [HttpDelete("search-query/{id}")]
     public async Task<IActionResult> DeleteSearchQuery(
         int id,
-        [FromHeader(Name = "X-Node-Token")] string nodeToken)
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+        if (!await IsAdministratorAsync(nodeToken, accessToken)) return Unauthorized("Admin access required");
 
         var query = await _dbContext.SearchQueries.FindAsync(id);
         
@@ -153,10 +155,10 @@ public class ConfigController : ControllerBase
     [HttpPatch("search-query/{id}/toggle")]
     public async Task<IActionResult> ToggleSearchQuery(
         int id,
-        [FromHeader(Name = "X-Node-Token")] string nodeToken)
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+        if (!await IsAdministratorAsync(nodeToken, accessToken)) return Unauthorized("Admin access required");
 
         var query = await _dbContext.SearchQueries.FindAsync(id);
         
@@ -181,20 +183,14 @@ public class ConfigController : ControllerBase
     public async Task<IActionResult> ExportKeys(
         [FromQuery] string format = "json",
         [FromHeader(Name = "X-Node-Token")] string? nodeTokenHeader = null,
-        [FromQuery] string? nodeToken = null)
+        [FromQuery] string? nodeToken = null,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken = null)
     {
         var token = nodeTokenHeader ?? nodeToken ?? "";
-        var user = await GetAuthenticatedUser(token);
-        if (user == null) return Unauthorized("Node Token required for export");
+        if (!await IsAdministratorAsync(token, accessToken)) return Unauthorized("Admin access required for export");
 
         var query = _dbContext.APIKeys
             .Where(k => k.Status == ApiStatusEnum.Valid);
-
-        // If not admin, filter by the user who discovered them
-        if (!user.IsAdmin)
-        {
-            query = query.Where(k => k.DiscoveredByTelegramId == user.TelegramId);
-        }
 
         var validKeys = await query
             .Select(k => new
@@ -204,25 +200,73 @@ public class ConfigController : ControllerBase
                 ApiType = (int)k.ApiType,
                 ApiTypeName = k.ApiType.ToString(),
                 Status = k.Status.ToString(),
+                SearchProvider = k.SearchProvider.ToString(),
                 k.Balance,
                 k.AccountTier,
                 k.ValidationResponse,
                 k.Metadata,
+                k.FirstFoundUTC,
+                k.LastFoundUTC,
                 k.LastCheckedUTC,
-                k.FirstFoundUTC
+                k.TimesDisplayed,
+                k.ErrorCount,
+                k.DiscoveredByTelegramId,
+                k.AwsAccountId,
+                k.AwsUserArn,
+                k.AwsUserId,
+                k.AwsCredentialType,
+                k.AwsAttachedPolicies,
+                k.AwsRiskLevel,
+                k.AwsIsRootAccount
             })
             .ToListAsync();
 
-        if (format.ToLower() == "csv")
+        if (format.Equals("csv", StringComparison.OrdinalIgnoreCase) ||
+            format.Equals("excel", StringComparison.OrdinalIgnoreCase) ||
+            format.Equals("xlsx", StringComparison.OrdinalIgnoreCase))
         {
-            var csv = "Id,ApiKey,ApiType,ApiTypeName,Balance,Tier,ValidationResponse,LastVerifiedAt,CreatedAt\n";
-            csv += string.Join("\n", validKeys.Select(k => 
-                $"{k.Id},\"{k.ApiKey}\",{k.ApiType},{k.ApiTypeName},\"{k.Balance}\",\"{k.AccountTier}\",\"{k.ValidationResponse}\",{k.LastCheckedUTC:O},{k.FirstFoundUTC:O}"));
-            
-            return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", "valid_keys.csv");
+            var csv = "Id,ApiKey,ApiType,ApiTypeName,Status,SearchProvider,Balance,AccountTier,ValidationResponse,Metadata,FirstFoundUTC,LastFoundUTC,LastCheckedUTC,TimesDisplayed,ErrorCount,DiscoveredByTelegramId,AwsAccountId,AwsUserArn,AwsUserId,AwsCredentialType,AwsAttachedPolicies,AwsRiskLevel,AwsIsRootAccount\n";
+            csv += string.Join("\n", validKeys.Select(k => string.Join(",", new[]
+            {
+                k.Id.ToString(),
+                Csv(k.ApiKey),
+                k.ApiType.ToString(),
+                Csv(k.ApiTypeName),
+                Csv(k.Status),
+                Csv(k.SearchProvider),
+                Csv(k.Balance),
+                Csv(k.AccountTier),
+                Csv(k.ValidationResponse),
+                Csv(k.Metadata),
+                Csv(k.FirstFoundUTC.ToString("O")),
+                Csv(k.LastFoundUTC.ToString("O")),
+                Csv(k.LastCheckedUTC?.ToString("O")),
+                k.TimesDisplayed.ToString(),
+                k.ErrorCount.ToString(),
+                k.DiscoveredByTelegramId?.ToString() ?? "",
+                Csv(k.AwsAccountId),
+                Csv(k.AwsUserArn),
+                Csv(k.AwsUserId),
+                Csv(k.AwsCredentialType),
+                Csv(k.AwsAttachedPolicies),
+                Csv(k.AwsRiskLevel),
+                k.AwsIsRootAccount.ToString()
+            })));
+
+            var fileName = format.Equals("excel", StringComparison.OrdinalIgnoreCase) || format.Equals("xlsx", StringComparison.OrdinalIgnoreCase)
+                ? "api_key_results.csv"
+                : "api_key_results.csv";
+            return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
         }
 
         return Ok(validKeys);
+    }
+
+    private static string Csv(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "\"\"";
+        var sanitized = value.Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ");
+        return $"\"{sanitized}\"";
     }
 
     /// <summary>
@@ -231,10 +275,10 @@ public class ConfigController : ControllerBase
     [HttpPost("reset-database")]
     public async Task<IActionResult> ResetDatabase(
         [FromBody] ResetRequest request,
-        [FromHeader(Name = "X-Node-Token")] string nodeToken)
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+        if (!await IsAdministratorAsync(nodeToken, accessToken)) return Unauthorized("Admin access required");
 
         if (request.Confirmation != "CONFIRM_RESET")
         {

@@ -13,6 +13,12 @@ services:
         sync: false
       - key: TELEGRAM_ADMIN_CHAT_ID
         sync: false
+      - key: USER_ACCESS_CODE
+        sync: false
+      - key: ADMIN_ACCESS_CODE
+        sync: false
+      - key: ACCESS_SESSION_HOURS
+        value: 12
       - key: POSTGRES_CONNECTION_STRING
         sync: false
       - key: PORT

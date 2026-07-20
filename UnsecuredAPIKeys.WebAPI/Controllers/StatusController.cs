@@ -4,6 +4,7 @@ using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Data.Models;
 using UnsecuredAPIKeys.Services;
+using UnsecuredAPIKeys.WebAPI.Services;
 
 namespace UnsecuredAPIKeys.WebAPI.Controllers;
 
@@ -13,29 +14,40 @@ public class StatusController : ControllerBase
 {
     private readonly DBContext _dbContext;
     private readonly DatabaseService _dbService;
+    private readonly DashboardAccessService _accessService;
 
-    public StatusController(DBContext dbContext, DatabaseService dbService)
+    public StatusController(DBContext dbContext, DatabaseService dbService, DashboardAccessService accessService)
     {
         _dbContext = dbContext;
         _dbService = dbService;
+        _accessService = accessService;
     }
 
-    private async Task<TelegramSubscriber?> GetAuthenticatedUser(string nodeToken)
+    private async Task<AccessContext?> GetAccess(string? nodeToken, string? accessToken)
     {
+        if (_accessService.TryGetSession(accessToken, out var session) && session is not null)
+        {
+            return new AccessContext(session.Role == DashboardAccessRole.Admin, null, true);
+        }
+
         if (string.IsNullOrEmpty(nodeToken)) return null;
-        return await _dbContext.TelegramSubscribers.FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
+        var subscriber = await _dbContext.TelegramSubscribers.FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
+        return subscriber is null ? null : new AccessContext(subscriber.IsAdmin, subscriber.TelegramId, false);
     }
 
     /// <summary>
     /// Get overall statistics
     /// </summary>
     [HttpGet]
-    public async Task<IActionResult> GetStatus([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> GetStatus(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null) return Unauthorized("Invalid Node Token");
+        var access = await GetAccess(nodeToken, accessToken);
+        if (access is null) return Unauthorized("Valid access code session required");
 
-        var stats = await _dbService.GetCategorizedStatisticsAsync(_dbContext, user.IsAdmin ? null : user.TelegramId);
+        var stats = await _dbService.GetCategorizedStatisticsAsync(_dbContext,
+            !access.IsDashboardSession && !access.IsAdmin ? access.TelegramId : null);
         
         return Ok(new
         {
@@ -53,12 +65,15 @@ public class StatusController : ControllerBase
     /// Get detailed statistics by category
     /// </summary>
     [HttpGet("detailed")]
-    public async Task<IActionResult> GetDetailedStatus([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> GetDetailedStatus(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null) return Unauthorized("Invalid Node Token");
+        var access = await GetAccess(nodeToken, accessToken);
+        if (access is null) return Unauthorized("Valid access code session required");
 
-        var stats = await _dbService.GetCategorizedStatisticsAsync(_dbContext, user.IsAdmin ? null : user.TelegramId);
+        var stats = await _dbService.GetCategorizedStatisticsAsync(_dbContext,
+            !access.IsDashboardSession && !access.IsAdmin ? access.TelegramId : null);
         return Ok(stats);
     }
 
@@ -67,11 +82,12 @@ public class StatusController : ControllerBase
     /// </summary>
     [HttpGet("api-type/{apiType}")]
     public async Task<IActionResult> GetApiTypeStats(
-        [FromHeader(Name = "X-Node-Token")] string nodeToken,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken,
         string apiType)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null) return Unauthorized("Invalid Node Token");
+        var access = await GetAccess(nodeToken, accessToken);
+        if (access is null) return Unauthorized("Valid access code session required");
 
         if (!Enum.TryParse<ApiTypeEnum>(apiType, true, out var apiTypeEnum))
         {
@@ -79,9 +95,9 @@ public class StatusController : ControllerBase
         }
 
         var query = _dbContext.APIKeys.Where(k => k.ApiType == apiTypeEnum);
-        if (!user.IsAdmin)
+        if (!access.IsDashboardSession && !access.IsAdmin)
         {
-            query = query.Where(k => k.DiscoveredByTelegramId == user.TelegramId);
+            query = query.Where(k => k.DiscoveredByTelegramId == access.TelegramId);
         }
 
         var keysCount = await query
@@ -102,18 +118,20 @@ public class StatusController : ControllerBase
     /// </summary>
     [HttpGet("recent-keys")]
     public async Task<IActionResult> GetRecentKeys(
-        [FromHeader(Name = "X-Node-Token")] string nodeToken,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken,
         [FromQuery] int limit = 100)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null) return Unauthorized("Invalid Node Token");
+        var access = await GetAccess(nodeToken, accessToken);
+        if (access is null) return Unauthorized("Valid access code session required");
 
         var query = _dbContext.APIKeys.AsQueryable();
 
-        // If not admin, only show keys discovered by this subscriber
-        if (!user.IsAdmin)
+        // Telegram subscribers retain their own-result filter. Dashboard users see
+        // aggregate records but normal sessions receive a masked key value below.
+        if (!access.IsDashboardSession && !access.IsAdmin)
         {
-            query = query.Where(k => k.DiscoveredByTelegramId == user.TelegramId);
+            query = query.Where(k => k.DiscoveredByTelegramId == access.TelegramId);
         }
 
         var keys = await query
@@ -126,33 +144,75 @@ public class StatusController : ControllerBase
                 ApiType = (int)k.ApiType,
                 ApiTypeName = k.ApiType.ToString(),
                 Status = k.Status.ToString(),
-                k.FirstFoundUTC,
-                k.LastCheckedUTC,
+                SearchProvider = k.SearchProvider.ToString(),
                 k.Balance,
                 k.AccountTier,
                 k.ValidationResponse,
+                k.Metadata,
+                k.FirstFoundUTC,
+                k.LastFoundUTC,
+                k.LastCheckedUTC,
+                k.TimesDisplayed,
+                k.ErrorCount,
+                k.DiscoveredByTelegramId,
+                k.AwsAccountId,
+                k.AwsUserArn,
+                k.AwsUserId,
+                k.AwsCredentialType,
+                k.AwsAttachedPolicies,
+                k.AwsRiskLevel,
+                k.AwsIsRootAccount,
                 keyPreview = k.ApiKey
             })
             .ToListAsync();
 
-        return Ok(keys);
+        var mayViewRawKeys = access.IsAdmin || !access.IsDashboardSession;
+        return Ok(keys.Select(k => new
+        {
+            k.Id,
+            apiKey = mayViewRawKeys ? k.ApiKey : null,
+            k.ApiType,
+            k.ApiTypeName,
+            k.Status,
+            k.SearchProvider,
+            k.Balance,
+            k.AccountTier,
+            k.ValidationResponse,
+            k.Metadata,
+            k.FirstFoundUTC,
+            k.LastFoundUTC,
+            k.LastCheckedUTC,
+            k.TimesDisplayed,
+            k.ErrorCount,
+            k.DiscoveredByTelegramId,
+            k.AwsAccountId,
+            k.AwsUserArn,
+            k.AwsUserId,
+            k.AwsCredentialType,
+            k.AwsAttachedPolicies,
+            k.AwsRiskLevel,
+            k.AwsIsRootAccount,
+            keyPreview = mayViewRawKeys ? k.keyPreview : MaskApiKey(k.ApiKey)
+        }));
     }
 
     /// <summary>
     /// Get valid keys count by API type
     /// </summary>
     [HttpGet("valid-keys")]
-    public async Task<IActionResult> GetValidKeys([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> GetValidKeys(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null) return Unauthorized("Invalid Node Token");
+        var access = await GetAccess(nodeToken, accessToken);
+        if (access is null) return Unauthorized("Valid access code session required");
 
         var query = _dbContext.APIKeys
             .Where(k => k.Status == ApiStatusEnum.Valid);
 
-        if (!user.IsAdmin)
+        if (!access.IsDashboardSession && !access.IsAdmin)
         {
-            query = query.Where(k => k.DiscoveredByTelegramId == user.TelegramId);
+            query = query.Where(k => k.DiscoveredByTelegramId == access.TelegramId);
         }
 
         var validKeys = await query
@@ -172,18 +232,15 @@ public class StatusController : ControllerBase
     /// Get GitHub tokens status
     /// </summary>
     [HttpGet("github-tokens")]
-    public async Task<IActionResult> GetGitHubTokens([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> GetGitHubTokens(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null) return Unauthorized("Invalid Node Token");
+        var access = await GetAccess(nodeToken, accessToken);
+        if (access is null || !access.IsAdmin) return Unauthorized("Admin access required");
 
         var query = _dbContext.SearchProviderTokens
             .Where(t => t.SearchProvider == SearchProviderEnum.GitHub);
-
-        if (!user.IsAdmin)
-        {
-            query = query.Where(t => t.AddedByTelegramId == user.TelegramId);
-        }
 
         var tokens = await query
             .Select(t => new
@@ -202,10 +259,12 @@ public class StatusController : ControllerBase
     /// Get search queries
     /// </summary>
     [HttpGet("search-queries")]
-    public async Task<IActionResult> GetSearchQueries([FromHeader(Name = "X-Node-Token")] string nodeToken)
+    public async Task<IActionResult> GetSearchQueries(
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken)
     {
-        var user = await GetAuthenticatedUser(nodeToken);
-        if (user == null || !user.IsAdmin) return Unauthorized("Admin access required");
+        var access = await GetAccess(nodeToken, accessToken);
+        if (access is null || !access.IsAdmin) return Unauthorized("Admin access required");
 
         var queries = await _dbContext.SearchQueries
             .Select(q => new
@@ -220,20 +279,13 @@ public class StatusController : ControllerBase
         return Ok(queries);
     }
 
-    /// <summary>
-    /// Authenticate a user by their Telegram ID (called by Telegram WebApp for auto-login)
-    /// </summary>
-    [HttpGet("token-by-telegram/{telegramId}")]
-    public async Task<IActionResult> GetTokenByTelegramId(long telegramId)
+    private static string MaskApiKey(string apiKey)
     {
-        var subscriber = await _dbContext.TelegramSubscribers
-            .FirstOrDefaultAsync(s => s.TelegramId == telegramId);
+        if (string.IsNullOrWhiteSpace(apiKey)) return "***";
+        if (apiKey.Length <= 8) return new string('*', apiKey.Length);
 
-        if (subscriber == null || string.IsNullOrEmpty(subscriber.NodeToken))
-        {
-            return NotFound(new { message = "No registered node token found for this Telegram ID" });
-        }
-
-        return Ok(new { token = subscriber.NodeToken });
+        return $"{apiKey[..4]}{new string('*', Math.Min(12, apiKey.Length - 8))}{apiKey[^4..]}";
     }
+
+    private sealed record AccessContext(bool IsAdmin, long? TelegramId, bool IsDashboardSession);
 }

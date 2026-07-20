@@ -1016,13 +1016,19 @@ public class DatabaseService(DBContext dbContext)
             ApiTypeName = k.ApiType.ToString(),
             Status = (int)k.Status,
             StatusName = k.Status.ToString(),
+            SearchProvider = k.SearchProvider.ToString(),
             k.Balance,
             k.AccountTier,
+            k.FirstFoundUTC,
+            k.LastFoundUTC,
+            k.LastCheckedUTC,
+            k.ErrorCount,
             FirstFoundIST = k.FirstFoundUTC.ToIst().ToString("yyyy-MM-dd HH:mm:ss"),
             LastCheckedIST = k.LastCheckedUTC?.ToIst().ToString("yyyy-MM-dd HH:mm:ss"),
             k.TimesDisplayed,
             k.ValidationResponse,
             k.Metadata,
+            k.DiscoveredByTelegramId,
             AwsMetadata = k.AwsAccountId != null ? (object?)new
             {
                 k.AwsAccountId,
@@ -1054,15 +1060,14 @@ public class DatabaseService(DBContext dbContext)
     {
         var lines = new List<string>
         {
-            "Id,ApiKey,Type,TypeName,Status,StatusName,Balance,Tier,ValidationResponse," +
-            "AwsAccountId,AwsUserArn,AwsCredentialType,AwsRiskLevel,AwsIsRootAccount,AwsAttachedPolicies," +
+            "Id,ApiKey,Type,TypeName,Status,StatusName,SearchProvider,Balance,Tier,ValidationResponse,Metadata," +
+            "FirstFoundUTC,LastFoundUTC,LastCheckedUTC,TimesDisplayed,ErrorCount,DiscoveredByTelegramId," +
+            "AwsAccountId,AwsUserArn,AwsUserId,AwsCredentialType,AwsRiskLevel,AwsIsRootAccount,AwsAttachedPolicies," +
             "FirstFoundIST,LastCheckedIST,Source,SourceFoundIST"
         };
 
         foreach (var key in keys)
         {
-            var valResponse = key.ValidationResponse?.Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ") ?? "";
-
             // Format AWS attached policies as semicolon-separated string
             var policies = string.Empty;
             if (!string.IsNullOrEmpty(key.AwsAttachedPolicies))
@@ -1081,25 +1086,46 @@ public class DatabaseService(DBContext dbContext)
             if (key.References == null || !key.References.Any())
             {
                 // Export at least one line even if no references exist
-                lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\"," +
-                          $"\"{key.AwsAccountId ?? ""}\",\"{key.AwsUserArn ?? ""}\",\"{key.AwsCredentialType ?? ""}\"," +
-                          $"\"{key.AwsRiskLevel ?? ""}\",{key.AwsIsRootAccount},\"{policies}\"," +
-                          $"\"{key.FirstFoundUTC.ToIst():yyyy-MM-dd HH:mm:ss}\",\"{key.LastCheckedUTC?.ToIst():yyyy-MM-dd HH:mm:ss}\",\"\",");
+                lines.Add(string.Join(",", new[]
+                {
+                    key.Id.ToString(), CsvField(key.ApiKey), ((int)key.ApiType).ToString(), CsvField(key.ApiType.ToString()),
+                    ((int)key.Status).ToString(), CsvField(key.Status.ToString()), CsvField(key.SearchProvider.ToString()),
+                    CsvField(key.Balance), CsvField(key.AccountTier), CsvField(key.ValidationResponse), CsvField(key.Metadata),
+                    CsvField(key.FirstFoundUTC.ToString("O")), CsvField(key.LastFoundUTC.ToString("O")), CsvField(key.LastCheckedUTC?.ToString("O")),
+                    key.TimesDisplayed.ToString(), key.ErrorCount.ToString(), key.DiscoveredByTelegramId?.ToString() ?? "",
+                    CsvField(key.AwsAccountId), CsvField(key.AwsUserArn), CsvField(key.AwsUserId), CsvField(key.AwsCredentialType),
+                    CsvField(key.AwsRiskLevel), key.AwsIsRootAccount.ToString(), CsvField(policies),
+                    CsvField(key.FirstFoundUTC.ToIst().ToString("yyyy-MM-dd HH:mm:ss")), CsvField(key.LastCheckedUTC?.ToIst().ToString("yyyy-MM-dd HH:mm:ss")), "\"\"", "\"\""
+                }));
             }
             else
             {
                 foreach (var r in key.References)
                 {
                     var source = r.FileURL ?? (string.IsNullOrWhiteSpace(r.RepoURL) ? "" : $"{r.RepoURL}/blob/{r.Branch ?? "main"}/{r.FilePath}");
-                    lines.Add($"{key.Id},\"{key.ApiKey}\",{(int)key.ApiType},{key.ApiType},{(int)key.Status},{key.Status},\"{key.Balance}\",\"{key.AccountTier}\",\"{valResponse}\"," +
-                              $"\"{key.AwsAccountId ?? ""}\",\"{key.AwsUserArn ?? ""}\",\"{key.AwsCredentialType ?? ""}\"," +
-                              $"\"{key.AwsRiskLevel ?? ""}\",{key.AwsIsRootAccount},\"{policies}\"," +
-                              $"\"{key.FirstFoundUTC.ToIst():yyyy-MM-dd HH:mm:ss}\",\"{key.LastCheckedUTC?.ToIst():yyyy-MM-dd HH:mm:ss}\",\"{source}\",\"{r.FoundUTC.ToIst():yyyy-MM-dd HH:mm:ss}\"");
+                    lines.Add(string.Join(",", new[]
+                    {
+                        key.Id.ToString(), CsvField(key.ApiKey), ((int)key.ApiType).ToString(), CsvField(key.ApiType.ToString()),
+                        ((int)key.Status).ToString(), CsvField(key.Status.ToString()), CsvField(key.SearchProvider.ToString()),
+                        CsvField(key.Balance), CsvField(key.AccountTier), CsvField(key.ValidationResponse), CsvField(key.Metadata),
+                        CsvField(key.FirstFoundUTC.ToString("O")), CsvField(key.LastFoundUTC.ToString("O")), CsvField(key.LastCheckedUTC?.ToString("O")),
+                        key.TimesDisplayed.ToString(), key.ErrorCount.ToString(), key.DiscoveredByTelegramId?.ToString() ?? "",
+                        CsvField(key.AwsAccountId), CsvField(key.AwsUserArn), CsvField(key.AwsUserId), CsvField(key.AwsCredentialType),
+                        CsvField(key.AwsRiskLevel), key.AwsIsRootAccount.ToString(), CsvField(policies),
+                        CsvField(key.FirstFoundUTC.ToIst().ToString("yyyy-MM-dd HH:mm:ss")), CsvField(key.LastCheckedUTC?.ToString("yyyy-MM-dd HH:mm:ss")),
+                        CsvField(source), CsvField(r.FoundUTC.ToIst().ToString("yyyy-MM-dd HH:mm:ss"))
+                    }));
                 }
             }
         }
 
         await File.WriteAllLinesAsync(filePath, lines);
+    }
+
+    private static string CsvField(string? value)
+    {
+        var sanitized = (value ?? string.Empty).Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ");
+        return $"\"{sanitized}\"";
     }
 
     public async Task ExportServerCredentialsAsync(DBContext dbContext, string filePath, string format, string? typeFilter = null, string? riskFilter = null, string? authStatusFilter = null)

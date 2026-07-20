@@ -65,6 +65,14 @@ This guide will walk you through deploying the UnsecuredAPIKeys Web API to Rende
    - `DATABASE_PATH` = `/app/data/unsecuredapikeys.db`
    - `TELEGRAM_BOT_TOKEN` = `your_bot_token_here`
    - `TELEGRAM_ADMIN_CHAT_ID` = `your_chat_id_here`
+   - `USER_ACCESS_CODE` = a code for normal dashboard users
+   - `ADMIN_ACCESS_CODE` = a different, strong code for dashboard administrators
+   - `ACCESS_SESSION_HOURS` = `12` (optional; valid range is 1–24)
+
+   Do not add these access codes to source code or GitHub. Render stores `sync: false`
+   variables securely and supplies them only at runtime. A normal-user session shows
+   masked API keys and never exposes source references; an administrator session can
+   use the operational and export controls.
 
 6. **Advanced Settings** (Optional but Recommended):
    - **Health Check Path**: `/health`
@@ -114,8 +122,14 @@ This guide will walk you through deploying the UnsecuredAPIKeys Web API to Rende
 # Check health
 curl https://your-app.onrender.com/health
 
-# Get status
-curl https://your-app.onrender.com/api/status
+# Sign in, then copy the returned accessToken into X-Access-Token.
+curl -X POST https://your-app.onrender.com/api/access/login \
+  -H "Content-Type: application/json" \
+  -d '{"accessCode":"your-access-code"}'
+
+# Get status using the session token from login.
+curl https://your-app.onrender.com/api/status \
+  -H "X-Access-Token: YOUR_SESSION_TOKEN"
 
 # Start scraper
 curl -X POST https://your-app.onrender.com/api/scraper/start
@@ -163,6 +177,11 @@ curl https://your-app.onrender.com/api/config/export-keys?format=csv
 - `GET /api/status/valid-keys` - Valid keys count
 - `GET /api/status/github-tokens` - GitHub tokens status
 - `GET /api/status/search-queries` - Search queries
+
+### **Dashboard Access Endpoints**
+- `POST /api/access/login` - Exchange an environment-configured access code for a short-lived session token
+- `GET /api/access/me` - Check the signed-in role
+- `POST /api/access/logout` - Revoke the current session token
 
 ### **Configuration Endpoints**
 - `POST /api/config/github-token` - Add GitHub token
