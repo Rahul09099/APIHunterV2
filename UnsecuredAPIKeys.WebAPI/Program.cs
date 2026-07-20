@@ -38,14 +38,8 @@ else
 // Detecting Mode
 var isWorkerMode = string.Equals(Environment.GetEnvironmentVariable("IS_WORKER_MODE"), "true", StringComparison.OrdinalIgnoreCase);
 
-// HARDCODED MASTER URL OVERRIDE
-// Set your master URL here to force all workers to connect to it,
-// completely ignoring any old "MASTER_API_URL" settings inside their local .env files!
-const string HardcodedMasterUrl = "https://unsecuredapikeys-api-aezg.onrender.com";
-
-var masterApiUrl = !string.IsNullOrEmpty(HardcodedMasterUrl) && HardcodedMasterUrl != "https://your-master-node.onrender.com"
-    ? HardcodedMasterUrl 
-    : Environment.GetEnvironmentVariable("MASTER_API_URL");
+// Workers use the master endpoint supplied by deployment configuration.
+var masterApiUrl = Environment.GetEnvironmentVariable("MASTER_API_URL");
 
 var nodeToken = Environment.GetEnvironmentVariable("NODE_TOKEN");
 

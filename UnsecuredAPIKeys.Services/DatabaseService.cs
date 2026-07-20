@@ -401,9 +401,9 @@ public class DatabaseService(DBContext dbContext)
                     ""Domain"" VARCHAR(255),
                     ""NetworkStatus"" VARCHAR(50)  NOT NULL DEFAULT 'Unknown',
                     ""AuthenticationStatus"" VARCHAR(50)  NOT NULL DEFAULT 'Untested',
-                    ""ServerMetadata"" JSONB        NOT NULL DEFAULT '{{}}',
-                    ""GeolocationData"" JSONB        NOT NULL DEFAULT '{{}}',
-                    ""OSINTData"" JSONB        NOT NULL DEFAULT '{{}}',
+                    ""ServerMetadata"" JSONB        NOT NULL DEFAULT jsonb_build_object(),
+                    ""GeolocationData"" JSONB        NOT NULL DEFAULT jsonb_build_object(),
+                    ""OSINTData"" JSONB        NOT NULL DEFAULT jsonb_build_object(),
                     ""RiskLevel"" VARCHAR(20)  NOT NULL DEFAULT 'Low',
                     ""IsHoneypot"" BOOLEAN      NOT NULL DEFAULT FALSE,
                     ""SourceRepository"" VARCHAR(500),
@@ -422,9 +422,9 @@ public class DatabaseService(DBContext dbContext)
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""Domain"" VARCHAR(255);
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""NetworkStatus"" VARCHAR(50) NOT NULL DEFAULT 'Unknown';
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""AuthenticationStatus"" VARCHAR(50) NOT NULL DEFAULT 'Untested';
-                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""ServerMetadata"" JSONB NOT NULL DEFAULT '{{}}';
-                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""GeolocationData"" JSONB NOT NULL DEFAULT '{{}}';
-                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""OSINTData"" JSONB NOT NULL DEFAULT '{{}}';
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""ServerMetadata"" JSONB NOT NULL DEFAULT jsonb_build_object();
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""GeolocationData"" JSONB NOT NULL DEFAULT jsonb_build_object();
+                ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""OSINTData"" JSONB NOT NULL DEFAULT jsonb_build_object();
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""RiskLevel"" VARCHAR(20) NOT NULL DEFAULT 'Low';
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""IsHoneypot"" BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE ""ServerCredentials"" ADD COLUMN IF NOT EXISTS ""SourceRepository"" VARCHAR(500);
