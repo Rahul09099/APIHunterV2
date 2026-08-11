@@ -4,6 +4,10 @@ using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.Services.Telegram;
 using UnsecuredAPIKeys.WebAPI.Services;
 
+// Disable file system watchers BEFORE WebApplication.CreateBuilder runs to prevent inotify limit (128) container crash on Render/Docker
+Environment.SetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE", "false");
+Environment.SetEnvironmentVariable("DOTNET_USE_POLLING_FILE_WATCHER", "true");
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Disable reloadOnChange FileSystemWatcher to prevent inotify limit (128) container crash (Status 139) on Render/Docker

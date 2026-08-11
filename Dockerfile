@@ -22,6 +22,8 @@ RUN mkdir -p /app/data
 # Set environment variables
 ENV ASPNETCORE_URLS=http://+:8080
 ENV DATABASE_PATH=/app/data/unsecuredapikeys.db
+ENV DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
 
 # Expose port (Render assigns this dynamically)
 EXPOSE $PORT
