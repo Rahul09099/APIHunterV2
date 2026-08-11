@@ -26,4 +26,9 @@ public class SearchQueryDTO
     public long Id { get; set; }
     public string Query { get; set; } = string.Empty;
     public bool IsEnabled { get; set; }
+    public DateTime LastSearchUTC { get; set; }
+    /// <summary>Propagated to workers so pushed:> filter uses the real incremental window.</summary>
+    public DateTime? LastSuccessfulSearchUTC { get; set; }
+    /// <summary>Propagated to workers so LastRepoPushedSeenUTC checkpoint is not lost on sync.</summary>
+    public DateTime? LastRepoPushedSeenUTC { get; set; }
 }

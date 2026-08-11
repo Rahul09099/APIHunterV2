@@ -38,22 +38,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS "IX_TelegramSubscribers_NodeToken"
 -- SECTION 2: SEARCH QUERIES
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS "SearchQueries" (
-    "Id"                   SERIAL PRIMARY KEY,
-    "Query"                TEXT NOT NULL DEFAULT '',
-    "IsEnabled"            BOOLEAN DEFAULT TRUE,
-    "SearchResultsCount"   INTEGER DEFAULT 0,
-    "LastSearchUTC"        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    "LastDeepSearchDateUTC" TIMESTAMP WITH TIME ZONE
+    "Id"                      SERIAL PRIMARY KEY,
+    "Query"                   TEXT NOT NULL DEFAULT '',
+    "IsEnabled"               BOOLEAN DEFAULT TRUE,
+    "SearchResultsCount"      INTEGER DEFAULT 0,
+    "LastSearchUTC"           TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    "LastDeepSearchDateUTC"   TIMESTAMP WITH TIME ZONE,
+    "LastSuccessfulSearchUTC" TIMESTAMP WITH TIME ZONE,
+    "LastRepoPushedSeenUTC"   TIMESTAMP WITH TIME ZONE
 );
 
-ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "Query"                TEXT NOT NULL DEFAULT '';
-ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "IsEnabled"            BOOLEAN DEFAULT TRUE;
-ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "SearchResultsCount"   INTEGER DEFAULT 0;
-ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "LastSearchUTC"        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "LastDeepSearchDateUTC" TIMESTAMP WITH TIME ZONE;
+ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "Query"                   TEXT NOT NULL DEFAULT '';
+ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "IsEnabled"               BOOLEAN DEFAULT TRUE;
+ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "SearchResultsCount"      INTEGER DEFAULT 0;
+ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "LastSearchUTC"           TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "LastDeepSearchDateUTC"   TIMESTAMP WITH TIME ZONE;
+ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "LastSuccessfulSearchUTC" TIMESTAMP WITH TIME ZONE;
+ALTER TABLE "SearchQueries" ADD COLUMN IF NOT EXISTS "LastRepoPushedSeenUTC"   TIMESTAMP WITH TIME ZONE;
 
 CREATE INDEX IF NOT EXISTS "IX_SearchQueries_IsEnabled_LastSearchUTC"
     ON "SearchQueries" ("IsEnabled", "LastSearchUTC");
+CREATE INDEX IF NOT EXISTS "IX_SearchQueries_IsEnabled_LastSuccessfulSearchUTC"
+    ON "SearchQueries" ("IsEnabled", "LastSuccessfulSearchUTC");
 
 -- =============================================================================
 -- SECTION 3: SEARCH PROVIDER TOKENS
@@ -167,24 +173,25 @@ CREATE INDEX IF NOT EXISTS "IX_APIKeys_AwsRiskLevel"
 -- SECTION 5: REPO REFERENCES
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS "RepoReferences" (
-    "Id"            SERIAL PRIMARY KEY,
-    "APIKeyId"      BIGINT NOT NULL DEFAULT 0,
-    "RepoURL"       TEXT,
-    "RepoOwner"     TEXT,
-    "RepoName"      TEXT,
+    "Id"              SERIAL PRIMARY KEY,
+    "APIKeyId"        BIGINT NOT NULL DEFAULT 0,
+    "RepoURL"         TEXT,
+    "RepoOwner"       TEXT,
+    "RepoName"        TEXT,
     "RepoDescription" TEXT,
-    "RepoId"        BIGINT DEFAULT 0,
-    "FileURL"       TEXT,
-    "FileName"      TEXT,
-    "FilePath"      TEXT,
-    "FileSHA"       TEXT,
-    "ApiContentUrl" TEXT,
-    "CodeContext"   TEXT,
-    "LineNumber"    INTEGER DEFAULT 0,
-    "SearchQueryId" BIGINT DEFAULT 0,
-    "FoundUTC"      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    "Provider"      TEXT,
-    "Branch"        TEXT DEFAULT 'main'
+    "RepoId"          BIGINT DEFAULT 0,
+    "FileURL"         TEXT,
+    "FileName"        TEXT,
+    "FilePath"        TEXT,
+    "FileSHA"         TEXT,
+    "ApiContentUrl"   TEXT,
+    "CodeContext"     TEXT,
+    "LineNumber"      INTEGER DEFAULT 0,
+    "SearchQueryId"   BIGINT DEFAULT 0,
+    "FoundUTC"        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    "Provider"        TEXT,
+    "Branch"          TEXT DEFAULT 'main',
+    "RepoPushedAt"    TIMESTAMP WITH TIME ZONE
 );
 
 ALTER TABLE "RepoReferences" ADD COLUMN IF NOT EXISTS "APIKeyId"       BIGINT NOT NULL DEFAULT 0;
@@ -204,6 +211,7 @@ ALTER TABLE "RepoReferences" ADD COLUMN IF NOT EXISTS "SearchQueryId"  BIGINT DE
 ALTER TABLE "RepoReferences" ADD COLUMN IF NOT EXISTS "FoundUTC"       TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE "RepoReferences" ADD COLUMN IF NOT EXISTS "Provider"       TEXT;
 ALTER TABLE "RepoReferences" ADD COLUMN IF NOT EXISTS "Branch"         TEXT DEFAULT 'main';
+ALTER TABLE "RepoReferences" ADD COLUMN IF NOT EXISTS "RepoPushedAt"    TIMESTAMP WITH TIME ZONE;
 
 CREATE INDEX IF NOT EXISTS "IX_RepoReferences_ApiKeyId"
     ON "RepoReferences" ("APIKeyId");

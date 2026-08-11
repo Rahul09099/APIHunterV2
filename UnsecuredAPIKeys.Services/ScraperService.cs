@@ -219,6 +219,7 @@ public class ScraperService
         
         var allQueries = await _dbContext.SearchQueries
             .Where(q => q.IsEnabled)
+            .OrderBy(q => q.LastSearchUTC)
             .ToListAsync(cancellationToken);
 
         var queriesToRun = allQueries
@@ -435,8 +436,11 @@ public class ScraperService
             return;
         }
 
-        // 3. Identify queries to use
-        var queriesToRun = syncData?.Queries?.Where(q => q.IsEnabled).ToList() ?? new List<SearchQueryDTO>();
+        // 3. Identify queries to use — ordered by LastSearchUTC ASC to match master priority
+        var queriesToRun = syncData?.Queries?
+            .Where(q => q.IsEnabled)
+            .OrderBy(q => q.LastSearchUTC)
+            .ToList() ?? new List<SearchQueryDTO>();
         if (queriesToRun.Count == 0)
         {
             _logger?.LogWarning("No enabled search queries found on master. Worker is idling.");
@@ -450,7 +454,17 @@ public class ScraperService
         {
             if (ct.IsCancellationRequested) break;
 
-            var queryModel = new SearchQuery { Id = qDto.Id, Query = qDto.Query, IsEnabled = qDto.IsEnabled };
+            // Hydrate all checkpoint fields from master DTO so the worker's pushed:> filter
+            // uses the real incremental window instead of falling back to 7-day default.
+            var queryModel = new SearchQuery
+            {
+                Id = qDto.Id,
+                Query = qDto.Query,
+                IsEnabled = qDto.IsEnabled,
+                LastSearchUTC = qDto.LastSearchUTC,
+                LastSuccessfulSearchUTC = qDto.LastSuccessfulSearchUTC,
+                LastRepoPushedSeenUTC = qDto.LastRepoPushedSeenUTC
+            };
 
             // Acquire distributed lock — skip if Master or another worker is already on this query
             if (!await TryAcquireScrapeQueryLockAsync(queryModel.Id, ct))
@@ -822,7 +836,7 @@ public class ScraperService
         AnsiConsole.WriteLine();
     }
 
-    private async Task SearchPartitionAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string partitionType, string partitionValue, DeepSearchStats stats, long? discoveredBy)
+    private async Task<SearchResponse?> SearchPartitionAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string partitionType, string partitionValue, DeepSearchStats stats, long? discoveredBy)
     {
         // Get or create progress record
         var progress = await _dbContext.DeepSearchProgress
@@ -856,7 +870,7 @@ public class ScraperService
         if (progress.IsCompleted)
         {
             Console.WriteLine($"[dim]→ Skipping {partitionValue} ({partitionType}) - already completed[/]");
-            return;
+            return null;
         }
         
         string filter = $"{partitionType}:{partitionValue}";
@@ -891,18 +905,28 @@ public class ScraperService
             var sizeBuckets = new[] { "0..500", "501..2000", "2001..5000", "5001..15000", ">15000" };
             foreach (var bucket in sizeBuckets)
             {
-                if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                if (_cancellationTokenSource!.Token.IsCancellationRequested) break;
                 string subFilter = $"{filter} size:{bucket}";
                 await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy);
             }
 
-            // Subdivision Strategy 2: Common Paths (as requested by user)
+            // Subdivision Strategy 2: Common Paths
             var paths = new[] { "config", "src", ".env", "keys", "deploy", "setup" };
             foreach (var path in paths)
             {
-                if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                if (_cancellationTokenSource!.Token.IsCancellationRequested) break;
                 string subFilter = $"{filter} path:{path}";
                 await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy);
+            }
+
+            // Subdivision Strategy 3: Adaptive Date Partitioning (Recursive Bisection)
+            DateTime now = DateTime.UtcNow;
+            for (int i = 0; i < 4; i++) // 4 x 7-day windows = past 28 days
+            {
+                if (_cancellationTokenSource!.Token.IsCancellationRequested) break;
+                DateTime windowEnd = now.AddDays(-i * 7);
+                DateTime windowStart = windowEnd.AddDays(-7);
+                await SearchDateRangePartitionAsync(tokens, query, cursor, filter, windowStart, windowEnd, stats, discoveredBy);
             }
 
             progress.IsCompleted = true; // The parent partition is effectively "managed" by sub-partitions now
@@ -914,15 +938,50 @@ public class ScraperService
         
         if (!IsWorkerMode)
         {
-            await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+            await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
         }
 
         // Small delay between searches to be polite
-        await Task.Delay(1000, _cancellationTokenSource.Token);
+        await Task.Delay(1000, _cancellationTokenSource!.Token);
 
         // MEMORY OPTIMIZATION
         GC.Collect();
         GC.WaitForPendingFinalizers();
+
+        return response;
+    }
+
+    private async Task SearchDateRangePartitionAsync(
+        List<SearchProviderToken> tokens, 
+        SearchQuery query, 
+        TokenCursor cursor, 
+        string baseFilter, 
+        DateTime startDate, 
+        DateTime endDate, 
+        DeepSearchStats stats, 
+        long? discoveredBy)
+    {
+        if (_cancellationTokenSource!.Token.IsCancellationRequested) return;
+
+        string dateRangeStr = $"{startDate:yyyy-MM-dd}..{endDate:yyyy-MM-dd}";
+        string dateFilter = $"{baseFilter} pushed:{dateRangeStr}";
+        
+        var response = await SearchPartitionAsync(tokens, query, cursor, "date-partition", dateFilter, stats, discoveredBy);
+
+        // If this date-range sub-partition STILL hit the 1,000 ceiling and range is >= 1 day, bisect it recursively!
+        if (response != null && response.HitLimit && (endDate - startDate).TotalDays >= 1)
+        {
+            int midDays = (int)Math.Max(1, Math.Floor((endDate - startDate).TotalDays / 2.0));
+            DateTime midDate = startDate.AddDays(midDays);
+
+            Console.WriteLine($"[yellow]⚠ Date window {dateRangeStr} hit 1,000 ceiling. Bisecting into [{startDate:yyyy-MM-dd}..{midDate:yyyy-MM-dd}] & [{midDate.AddDays(1):yyyy-MM-dd}..{endDate:yyyy-MM-dd}]...[/]");
+
+            await SearchDateRangePartitionAsync(tokens, query, cursor, baseFilter, startDate, midDate, stats, discoveredBy);
+            if (midDate.AddDays(1) <= endDate)
+            {
+                await SearchDateRangePartitionAsync(tokens, query, cursor, baseFilter, midDate.AddDays(1), endDate, stats, discoveredBy);
+            }
+        }
     }
 
     private async Task<SearchResponse?> RunScrapingCycleUtilsAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string? extraParams, long? discoveredBy, int startPage = 1)
@@ -999,7 +1058,26 @@ public class ScraperService
         _newKeysFound = 0;
         _duplicateKeysFound = 0;
 
-        string displayQuery = query.Query + (extraParams != null ? $" {extraParams}" : "");
+        // Build dynamic pushed:> filter based on last successful scrape checkpoint.
+        // This prevents blind spots if the scraper is down for extended periods:
+        //   - If we have a recorded successful search, start the window 1 day before it (overlap to catch indexing lag)
+        //   - If no checkpoint exists (first run), default to 7 days ago
+        // The filter is only injected on page 1 of primary (non-partitioned) searches.
+        string? pushedFilter = null;
+        if (startPage == 1 && string.IsNullOrEmpty(extraParams))
+        {
+            var windowStart = query.LastSuccessfulSearchUTC.HasValue
+                ? query.LastSuccessfulSearchUTC.Value.AddDays(-1)  // 1-day overlap for indexing lag
+                : DateTime.UtcNow.AddDays(-7);                     // first-run default: 7-day lookback
+            pushedFilter = $"pushed:>{windowStart:yyyy-MM-dd}";
+        }
+
+        // Compose the effective extra params (pushed filter takes precedence, then caller params)
+        string? effectiveParams = pushedFilter != null
+            ? (string.IsNullOrEmpty(extraParams) ? pushedFilter : $"{pushedFilter} {extraParams}")
+            : extraParams;
+
+        string displayQuery = query.Query + (effectiveParams != null ? $" {effectiveParams}" : "");
         Console.WriteLine($"[cyan]Searching: {Markup.Escape(displayQuery)}[/]");
 
         // Update last search time (Only for Master)
@@ -1015,12 +1093,33 @@ public class ScraperService
 
         try
         {
-            response = await _searchProvider.SearchAsync(query, token, extraParams, startPage);
+            response = await _searchProvider.SearchAsync(query, token, effectiveParams, startPage);
             
             // Update results count stat on Master if we got a response
             if (!IsWorkerMode && response != null && startPage == 1 && string.IsNullOrEmpty(extraParams))
             {
                 query.SearchResultsCount = response.TotalResultsCount;
+
+                // Checkpoint: LastRepoPushedSeenUTC tracks the most recently pushed repo seen
+                // in this search batch. Uses RepoPushedAt from GitHub (item.Repository.PushedAt),
+                // NOT FoundUTC which is generated locally by the scraper.
+                var checkpointResults = response.Results?.ToList();
+                if (checkpointResults != null && checkpointResults.Count > 0)
+                {
+                    var latestRepoPush = checkpointResults
+                        .Where(r => r.RepoPushedAt.HasValue)
+                        .Select(r => r.RepoPushedAt!.Value.UtcDateTime)
+                        .DefaultIfEmpty()
+                        .Max();
+
+                    if (latestRepoPush != default &&
+                        (!query.LastRepoPushedSeenUTC.HasValue || latestRepoPush > query.LastRepoPushedSeenUTC.Value))
+                    {
+                        query.LastRepoPushedSeenUTC = latestRepoPush;
+                    }
+                }
+
+                // NOTE: LastSuccessfulSearchUTC is updated AFTER processing completes (see end of method)
                 _dbContext.SearchQueries.Update(query);
                 await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
             }
@@ -1043,6 +1142,8 @@ public class ScraperService
 
         // Process results in parallel with a concurrency limit
         var discoveries = new System.Collections.Concurrent.ConcurrentBag<NodeReportDto>();
+        int processingFailures = 0; // Atomic counter; checkpoint only advances if this stays 0
+
         
         // Use a more memory-efficient approach by processing in chunks
         const int chunkSize = 50;
@@ -1067,6 +1168,12 @@ public class ScraperService
                         foreach (var discovery in found) discoveries.Add(discovery);
                     }
                 }
+                catch (Exception ex)
+                {
+                    // Track failures without swallowing — checkpoint will not advance if any file fails
+                    Interlocked.Increment(ref processingFailures);
+                    _logger?.LogError(ex, "Error processing result: {Url}", repoRef.FileURL);
+                }
                 finally
                 {
                     _parallelSemaphore.Release();
@@ -1083,6 +1190,21 @@ public class ScraperService
         if (IsWorkerMode && discoveries.Any())
         {
             await ReportBulkDiscoveryAsync(discoveries.ToList());
+        }
+
+        // Advance LastSuccessfulSearchUTC only when:
+        //   1. GitHub returned at least one result (search itself was not empty)
+        //   2. All file-processing tasks completed without exceptions
+        // This gives the exact guarantee: checkpoint = "all files processed successfully"
+        if (!IsWorkerMode && resultsList.Count > 0 && processingFailures == 0)
+        {
+            query.LastSuccessfulSearchUTC = DateTime.UtcNow;
+            _dbContext.SearchQueries.Update(query);
+            await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
+        }
+        else if (!IsWorkerMode && processingFailures > 0)
+        {
+            Console.WriteLine($"[yellow]Checkpoint not advanced: {processingFailures} file(s) failed to process.[/]");
         }
 
         // Summary

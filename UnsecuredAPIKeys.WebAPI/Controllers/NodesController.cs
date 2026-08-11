@@ -88,7 +88,7 @@ public class NodesController : ControllerBase
 
         var allQueries = await _dbContext.SearchQueries
             .Where(q => q.IsEnabled)
-            .OrderBy(q => q.Id)           // stable ordering
+            .OrderBy(q => q.Id)           // stable ordering for partitioning
             .ToListAsync();
 
         List<SearchQuery> assignedQueries;
@@ -122,7 +122,10 @@ public class NodesController : ControllerBase
             { 
                 Id = q.Id, 
                 Query = q.Query, 
-                IsEnabled = q.IsEnabled 
+                IsEnabled = q.IsEnabled,
+                LastSearchUTC = q.LastSearchUTC,          // Workers use this for priority ordering
+                LastSuccessfulSearchUTC = q.LastSuccessfulSearchUTC, // Workers use this for pushed:> window
+                LastRepoPushedSeenUTC = q.LastRepoPushedSeenUTC      // Workers preserve repo push checkpoint
             }).ToList(),
             // Expose partition info so workers can log it
             NodeIndex  = nodeIndex < 0 ? 0 : nodeIndex,

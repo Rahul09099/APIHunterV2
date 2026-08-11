@@ -306,7 +306,10 @@ public class DatabaseService(DBContext dbContext)
                 ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""SearchResultsCount"" INTEGER DEFAULT 0;
                 ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""LastSearchUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
                 ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""LastDeepSearchDateUTC"" TIMESTAMP WITH TIME ZONE;
-                CREATE INDEX IF NOT EXISTS ""IX_SearchQueries_IsEnabled_LastSearchUTC"" ON ""SearchQueries"" (""IsEnabled"", ""LastSearchUTC"");");
+                ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""LastSuccessfulSearchUTC"" TIMESTAMP WITH TIME ZONE;
+                ALTER TABLE ""SearchQueries"" ADD COLUMN IF NOT EXISTS ""LastRepoPushedSeenUTC"" TIMESTAMP WITH TIME ZONE;
+                CREATE INDEX IF NOT EXISTS ""IX_SearchQueries_IsEnabled_LastSearchUTC"" ON ""SearchQueries"" (""IsEnabled"", ""LastSearchUTC"");
+                CREATE INDEX IF NOT EXISTS ""IX_SearchQueries_IsEnabled_LastSuccessfulSearchUTC"" ON ""SearchQueries"" (""IsEnabled"", ""LastSuccessfulSearchUTC"");");
 
             // 3. SearchProviderTokens
             await context.Database.ExecuteSqlRawAsync(@"
@@ -364,6 +367,8 @@ public class DatabaseService(DBContext dbContext)
                 ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""FoundUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
                 ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""Provider"" TEXT;
                 ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""Branch"" TEXT DEFAULT 'main';
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""RepoPushedAt"" TIMESTAMP WITH TIME ZONE;
+                ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""RepoDescription"" TEXT;
                 CREATE INDEX IF NOT EXISTS ""IX_RepoReferences_ApiKeyId"" ON ""RepoReferences"" (""APIKeyId"");");
 
             // 6. DeepSearchProgress (Aggressive Reset for Stability)
