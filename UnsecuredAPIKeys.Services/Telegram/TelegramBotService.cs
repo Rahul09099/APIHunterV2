@@ -58,7 +58,14 @@ public class TelegramBotService : BackgroundService
     {
         if (_botClient == null) return;
 
-        _logger.LogInformation("Telegram Bot Service is starting...");
+        var isWorkerMode = string.Equals(Environment.GetEnvironmentVariable("IS_WORKER_MODE"), "true", StringComparison.OrdinalIgnoreCase);
+        if (isWorkerMode)
+        {
+            _logger.LogInformation("IS_WORKER_MODE is true. Telegram Bot long-polling disabled on worker node.");
+            return;
+        }
+
+        _logger.LogInformation("Telegram Bot Service is starting on Master node...");
 
         var receiverOptions = new ReceiverOptions
         {
@@ -606,10 +613,16 @@ public class TelegramBotService : BackgroundService
         }
     }
 
-    private Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+    private async Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
     {
+        if (exception is Telegram.Bot.Exceptions.ApiRequestException apiEx && apiEx.ErrorCode == 409)
+        {
+            _logger.LogWarning("Telegram Bot 409 Conflict: Another instance is polling getUpdates with the same bot token. Retrying in 10 seconds...");
+            await Task.Delay(10000, cancellationToken);
+            return;
+        }
+
         _logger.LogError(exception, "Telegram Bot API Polling Error");
-        return Task.CompletedTask;
     }
 
     #region Command Handlers
