@@ -57,7 +57,7 @@ var nodeToken = Environment.GetEnvironmentVariable("NODE_TOKEN");
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<DatabaseService>();
 builder.Services.AddScoped<VerifierService>();
-builder.Services.AddSingleton<JobManagerService>();
+builder.Services.AddSingleton<BackgroundJobManager>();
 builder.Services.AddSingleton<DashboardAccessService>();
 
 if (isWorkerMode)
