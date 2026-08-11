@@ -10,11 +10,12 @@ Environment.SetEnvironmentVariable("DOTNET_USE_POLLING_FILE_WATCHER", "true");
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Dynamically bind to Render's PORT environment variable (e.g. 10000)
+// Dynamically bind to Render's PORT environment variable (e.g. 10000) on 0.0.0.0 IPv4 & IPv6
 var renderPort = Environment.GetEnvironmentVariable("PORT");
 if (!string.IsNullOrEmpty(renderPort))
 {
-    builder.WebHost.UseUrls($"http://*:{renderPort}");
+    Environment.SetEnvironmentVariable("ASPNETCORE_URLS", $"http://0.0.0.0:{renderPort}");
+    builder.WebHost.UseUrls($"http://0.0.0.0:{renderPort}", $"http://[::]:{renderPort}");
 }
 
 // Disable reloadOnChange FileSystemWatcher to prevent inotify limit (128) container crash (Status 139) on Render/Docker
