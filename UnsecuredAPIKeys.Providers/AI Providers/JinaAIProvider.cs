@@ -1,6 +1,12 @@
-using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
 using UnsecuredAPIKeys.Providers.Common;
@@ -9,27 +15,12 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
     /// Provider for Jina AI API keys — embeddings, rerankers, and search foundation models.
-    /// Acquired by Elastic in October 2025. API at api.jina.ai still active.
-    ///
     /// Key format: jina_{alphanumeric}
-    ///   - Confirmed prefix "jina_" from official docs, Qdrant example: "jina_xxxxxxxxxxx"
-    ///   - GitGuardian confirms: Prefixed=True, High recall=True
-    ///   - Typical length: jina_ (5) + ~40-60 alphanumeric chars
-    ///
     /// Auth: Authorization: Bearer {apiKey}
-    ///   Confirmed from Qdrant docs: headers = {"Authorization": f"Bearer {JINA_API_KEY}"}
-    ///
     /// Verification: POST https://api.jina.ai/v1/embeddings
-    ///   - Uses jina-embeddings-v4 (latest model, confirmed from Qdrant docs May 2025)
-    ///   - Minimal input: ["test"] — costs ~1 token
-    ///   - DEFINITELY requires auth — 401 without valid key
-    ///   - Valid response: 200 { "model": "...", "data": [...], "usage": { "prompt_tokens": N, "total_tokens": N } }
-    ///   - Invalid key: 401 Unauthorized
-    ///   - Quota exhausted: 402 Payment Required (key is valid but no tokens left)
-    ///   - Rate limited: 429 (key is valid)
-    ///
-    /// Balance: Token-based prepaid model. No balance API endpoint.
-    ///   Free tier: 1M tokens on signup. Top-up available at jina.ai/embeddings.
+    ///   - Uses jina-embeddings-v4 with minimal input ["test"]
+    /// Token billing: 10M free tokens on signup (per official docs). Top-up available at jina.ai.
+    /// Docs: https://api.jina.ai/docs
     /// </summary>
     [ApiProvider]
     public class JinaAIProvider : BaseApiKeyProvider
@@ -39,14 +30,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            // Primary pattern — confirmed jina_ prefix, flexible length (20+ after prefix)
-            @"jina_[A-Za-z0-9]{20,}",
-
-            // Environment variable names — most common leak pattern
-            @"JINA_API_KEY",
-            @"JINA_AI_API_KEY",
-
-            // Context-aware value extraction patterns
+            @"\bjina_[A-Za-z0-9]{20,}\b",
             @"JINA_API_KEY\s*[=:]\s*['""]?(jina_[A-Za-z0-9]{20,})['""]?",
             @"JINA_AI_API_KEY\s*[=:]\s*['""]?(jina_[A-Za-z0-9]{20,})['""]?"
         ];
@@ -58,13 +42,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // POST /v1/embeddings — DEFINITELY requires auth (confirmed from multiple sources)
-                // Using jina-embeddings-v4 (latest model as of May 2025, per Qdrant docs)
-                // Minimal input ["test"] costs ~1 token — negligible cost
                 const string body = """{"model":"jina-embeddings-v4","input":["test"]}""";
 
-                using var request = new HttpRequestMessage(HttpMethod.Post,
-                    "https://api.jina.ai/v1/embeddings");
+                using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.jina.ai/v1/embeddings");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
                 request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
@@ -74,18 +54,25 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 _logger?.LogDebug("Jina AI embeddings response: Status={StatusCode}, Body={Body}",
                     response.StatusCode, TruncateResponse(responseBody));
 
+                ValidationResult result;
+
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Valid Jina AI key");
+                    result = ValidationResult.Success(response.StatusCode, "Valid Jina AI key");
+                    result.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["api_operation_tested"] = true,
+                        ["api_operation_working"] = true,
+                        ["operation"] = "embeddings",
+                        ["tested_model"] = "jina-embeddings-v4"
+                    };
 
                     try
                     {
-                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                        // OpenAI-compatible response:
-                        // { "model": "jina-embeddings-v4", "data": [...], "usage": { "prompt_tokens": 1, "total_tokens": 1 } }
+                        using var doc = JsonDocument.Parse(responseBody);
                         if (doc.RootElement.TryGetProperty("usage", out var usage))
                         {
-                            // Try total_tokens first, fall back to prompt_tokens
                             int tokenCount = 0;
                             if (usage.TryGetProperty("total_tokens", out var total))
                                 tokenCount = total.GetInt32();
@@ -100,39 +87,93 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         {
                             result.Detail = $"Valid Jina AI key — {data.GetArrayLength()} embedding(s) returned";
                         }
-                        else
-                        {
-                            result.Detail = "Valid Jina AI key";
-                        }
-
-                        // No balance API — token balance only visible in dashboard
-                        result.Balance = "N/A (check jina.ai dashboard)";
                     }
-                    catch { result.Detail = "Valid Jina AI key"; }
+                    catch
+                    {
+                        result.Detail = "Valid Jina AI key";
+                    }
 
+                    result.Balance = "N/A (check Jina AI billing/dashboard)";
+                    result.RawResponse = responseBody;
                     return result;
                 }
 
-                // 402 = valid key but token quota exhausted
-                if ((int)response.StatusCode == 402)
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    var result = ValidationResult.Success(response.StatusCode,
-                        "Valid Jina AI key — token quota exhausted");
-                    result.IsQuotaExceeded = true;
-                    result.Balance = "0 tokens remaining — top up at jina.ai/embeddings";
+                    result = ValidationResult.IsUnauthorized(response.StatusCode, "Invalid Jina AI API key");
+                    result.RawResponse = responseBody;
                     return result;
                 }
 
-                return response.StatusCode switch
+                if (response.StatusCode == HttpStatusCode.Forbidden)
                 {
-                    System.Net.HttpStatusCode.Unauthorized or
-                    System.Net.HttpStatusCode.Forbidden =>
-                        ValidationResult.IsUnauthorized(response.StatusCode),
-                    (System.Net.HttpStatusCode)429 =>
-                        ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)"),
-                    _ => ValidationResult.HasHttpError(response.StatusCode,
-                        $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}")
-                };
+                    if (responseBody.Contains("AUTHZ_INSUFFICIENT_BALANCE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result = ValidationResult.Success(response.StatusCode, "Valid Jina AI key — insufficient account balance");
+                        result.IsQuotaExceeded = true;
+                        result.Balance = "Insufficient balance";
+                        result.Metadata = new Dictionary<string, object>
+                        {
+                            ["authentication_valid"] = true,
+                            ["api_operation_tested"] = true,
+                            ["api_operation_working"] = false,
+                            ["operation"] = "embeddings",
+                            ["tested_model"] = "jina-embeddings-v4"
+                        };
+                        result.RawResponse = responseBody;
+                        return result;
+                    }
+
+                    if (responseBody.Contains("AUTHZ_RESOURCE_LIMIT_EXCEEDED", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result = new ValidationResult
+                        {
+                            Status = ValidationAttemptStatus.ValidationUnavailable,
+                            HttpStatusCode = response.StatusCode,
+                            Detail = "Jina AI resource limit exceeded; key validity could not be determined."
+                        };
+                        result.RawResponse = responseBody;
+                        return result;
+                    }
+
+                    result = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = "Jina AI request forbidden; key validity could not be conclusively determined."
+                    };
+                    result.RawResponse = responseBody;
+                    return result;
+                }
+
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    result = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = "Jina AI rate limit exceeded."
+                    };
+                    result.RawResponse = responseBody;
+                    return result;
+                }
+
+                if ((int)response.StatusCode >= 500)
+                {
+                    result = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = $"Jina AI service unavailable (HTTP {(int)response.StatusCode})"
+                    };
+                    result.RawResponse = responseBody;
+                    return result;
+                }
+
+                result = ValidationResult.HasHttpError(response.StatusCode,
+                    $"Jina AI request failed: {TruncateResponse(responseBody)}");
+                result.RawResponse = responseBody;
+                return result;
             }
             catch (Exception ex)
             {
@@ -142,10 +183,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            // Jina keys always start with jina_ — confirmed from official docs and examples
-            // Minimum total length: jina_ (5) + 20 chars = 25
             return !string.IsNullOrWhiteSpace(apiKey) &&
-                   apiKey.StartsWith("jina_") &&
+                   apiKey.StartsWith("jina_", StringComparison.Ordinal) &&
                    apiKey.Length >= 25;
         }
     }

@@ -65,18 +65,23 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 _logger?.LogDebug("AssemblyAI API response: Status={StatusCode}, Body={Body}",
                     response.StatusCode, TruncateResponse(responseBody));
 
+                ValidationResult result;
+
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Valid AssemblyAI key");
+                    result = ValidationResult.Success(response.StatusCode, "Valid AssemblyAI key");
 
                     try
                     {
                         using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                        // Response: { "transcripts": [...], "page_details": { "result_count": N, "limit": 1, ... } }
-                        if (doc.RootElement.TryGetProperty("page_details", out var pageDetails) &&
+                        var root = doc.RootElement;
+                        var metadata = new Dictionary<string, object>();
+
+                        if (root.TryGetProperty("page_details", out var pageDetails) &&
                             pageDetails.TryGetProperty("result_count", out var count))
                         {
                             int transcriptCount = count.GetInt32();
+                            metadata["transcript_count"] = transcriptCount;
                             result.Detail = transcriptCount > 0
                                 ? $"Valid AssemblyAI key — {transcriptCount} transcript(s) on account"
                                 : "Valid AssemblyAI key — no transcripts yet";
@@ -86,32 +91,53 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                             result.Detail = "Valid AssemblyAI key";
                         }
 
-                        // No balance endpoint available via API
+                        if (root.TryGetProperty("transcripts", out var transcripts) &&
+                            transcripts.ValueKind == System.Text.Json.JsonValueKind.Array &&
+                            transcripts.GetArrayLength() > 0)
+                        {
+                            var first = transcripts[0];
+                            if (first.TryGetProperty("status", out var st))
+                            {
+                                metadata["latest_transcript_status"] = st.GetString() ?? "unknown";
+                            }
+                            if (first.TryGetProperty("error", out var err) && err.ValueKind != System.Text.Json.JsonValueKind.Null)
+                            {
+                                metadata["latest_transcript_error"] = err.GetString() ?? string.Empty;
+                            }
+                        }
+
+                        result.Metadata = metadata;
                         result.Balance = "N/A (check assemblyai.com dashboard)";
                     }
                     catch { result.Detail = "Valid AssemblyAI key"; }
-
-                    return result;
+                }
+                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                         responseBody.Contains("Authentication error") ||
+                         responseBody.Contains("API token missing"))
+                {
+                    result = ValidationResult.IsUnauthorized(response.StatusCode, "Invalid AssemblyAI API key");
+                }
+                else if ((int)response.StatusCode == 429)
+                {
+                    result = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = "AssemblyAI rate limit exceeded (HTTP 429)"
+                    };
+                }
+                else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    result = ValidationResult.IsUnauthorized(response.StatusCode, "AssemblyAI key access forbidden");
+                }
+                else
+                {
+                    result = ValidationResult.HasHttpError(response.StatusCode,
+                        $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}");
                 }
 
-                // Check for AssemblyAI-specific error message in body
-                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
-                    responseBody.Contains("Authentication error") ||
-                    responseBody.Contains("API token missing"))
-                {
-                    return ValidationResult.IsUnauthorized(response.StatusCode,
-                        "Invalid AssemblyAI API key");
-                }
-
-                return response.StatusCode switch
-                {
-                    System.Net.HttpStatusCode.Forbidden =>
-                        ValidationResult.IsUnauthorized(response.StatusCode),
-                    (System.Net.HttpStatusCode)429 =>
-                        ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)"),
-                    _ => ValidationResult.HasHttpError(response.StatusCode,
-                        $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}")
-                };
+                result.RawResponse = responseBody;
+                return result;
             }
             catch (Exception ex)
             {

@@ -1,3 +1,10 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
@@ -7,23 +14,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
     /// Provider for Fal.ai API keys — fast serverless image and video generation.
-    ///
-    /// Key format: plain alphanumeric string, stored in FAL_KEY env var.
-    /// No fixed prefix — keys are generated from fal.ai/dashboard/keys.
-    ///
-    /// Auth: Authorization: Key {apiKey}   (NOT Bearer — confirmed from official docs)
+    /// Auth: Authorization: Key {apiKey}   (NOT Bearer)
     /// Docs: https://fal.ai/docs/reference/platform-apis/authentication
-    ///
-    /// Verification strategy:
-    ///   Primary:  GET https://api.fal.ai/v1/models?limit=1
-    ///             Requires API scope key. Returns { "models": [...] } on success.
-    ///             Returns 401/403 on invalid key.
-    ///
-    ///   Balance:  GET https://api.fal.ai/v1/account/billing?expand=credits
-    ///             Requires ADMIN scope key. Returns credit balance.
-    ///             Falls back gracefully if key only has API scope.
-    ///
-    /// Note: fal uses a prepaid credit model — credits purchased in advance.
     /// </summary>
     [ApiProvider]
     public class FalAIProvider : BaseApiKeyProvider
@@ -33,14 +25,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            // FAL_KEY is the canonical env var name — most common leak pattern
-            @"FAL_KEY",
-            @"FAL_API_KEY",
-
-            // Keys are alphanumeric, typically 32-64 chars, no fixed prefix
-            // Only match when adjacent to fal-related context to reduce false positives
-            @"fal[_-]?key\s*[=:]\s*['""]?([A-Za-z0-9_\-]{32,})['""]?",
-            @"FAL_KEY\s*[=:]\s*['""]?([A-Za-z0-9_\-]{32,})['""]?"
+            @"FAL_KEY\s*[:=]\s*['""]?([A-Za-z0-9_\-]{32,})['""]?",
+            @"FAL_API_KEY\s*[:=]\s*['""]?([A-Za-z0-9_\-]{32,})['""]?",
+            @"fal[._-]?api[._-]?key\s*[:=]\s*['""]?([A-Za-z0-9_\-]{32,})['""]?"
         ];
 
         public FalAIProvider() : base() { }
@@ -51,10 +38,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             try
             {
                 // Primary verification: GET /v1/models — requires API scope key
-                // Returns 401/403 for invalid keys, 200 with model list for valid keys
-                using var request = new HttpRequestMessage(HttpMethod.Get,
-                    "https://api.fal.ai/v1/models?limit=5");
-                // Fal.ai uses "Key" prefix, NOT "Bearer"
+                using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.fal.ai/v1/models?limit=5");
                 request.Headers.Add("Authorization", $"Key {apiKey}");
 
                 var response = await httpClient.SendAsync(request);
@@ -63,41 +47,45 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 _logger?.LogDebug("Fal.ai models response: Status={StatusCode}, Body={Body}",
                     response.StatusCode, TruncateResponse(responseBody));
 
+                ValidationResult result;
+
                 if (!IsSuccessStatusCode(response.StatusCode))
                 {
-                    return response.StatusCode switch
+                    result = response.StatusCode switch
                     {
-                        System.Net.HttpStatusCode.Unauthorized or
-                        System.Net.HttpStatusCode.Forbidden =>
-                            ValidationResult.IsUnauthorized(response.StatusCode),
-                        (System.Net.HttpStatusCode)429 =>
-                            ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)"),
+                        HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
+                            ValidationResult.IsUnauthorized(response.StatusCode, "Invalid Fal.ai API key"),
+                        (HttpStatusCode)429 =>
+                            new ValidationResult
+                            {
+                                Status = ValidationAttemptStatus.ValidationUnavailable,
+                                HttpStatusCode = response.StatusCode,
+                                Detail = "Fal.ai rate limit exceeded (HTTP 429)"
+                            },
                         _ => ValidationResult.HasHttpError(response.StatusCode,
                             $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}")
                     };
+                    result.RawResponse = responseBody;
+                    return result;
                 }
 
-                var result = ValidationResult.Success(response.StatusCode, "Valid Fal.ai key");
+                result = ValidationResult.Success(response.StatusCode, "Valid Fal.ai key");
 
                 try
                 {
-                    using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                    // Response: { "models": [...], "next": "..." }
-                    if (doc.RootElement.TryGetProperty("models", out var models))
+                    using var doc = JsonDocument.Parse(responseBody);
+                    if (doc.RootElement.TryGetProperty("models", out var models) && models.ValueKind == JsonValueKind.Array)
                     {
                         var count = models.GetArrayLength();
                         result.Detail = $"Valid Fal.ai key — {count} model(s) returned";
                     }
-                    else
-                    {
-                        result.Detail = "Valid Fal.ai key";
-                    }
                 }
                 catch { result.Detail = "Valid Fal.ai key"; }
 
-                // Try to get credit balance (requires Admin scope — graceful fallback)
+                // Attempt to fetch balance (requires Admin scope)
                 await TryFetchBalanceAsync(apiKey, httpClient, result);
 
+                result.RawResponse = responseBody;
                 return result;
             }
             catch (Exception ex)
@@ -110,46 +98,63 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // Billing endpoint requires Admin scope key
-                // If key only has API scope, this returns 403 — we handle gracefully
                 using var billingRequest = new HttpRequestMessage(HttpMethod.Get,
                     "https://api.fal.ai/v1/account/billing?expand=credits");
                 billingRequest.Headers.Add("Authorization", $"Key {apiKey}");
 
                 var billingResponse = await httpClient.SendAsync(billingRequest);
+                string billingBody = await billingResponse.Content.ReadAsStringAsync();
+
+                _logger?.LogDebug("Fal.ai billing response: Status={Status}, Body={Body}",
+                    billingResponse.StatusCode, TruncateResponse(billingBody));
 
                 if (billingResponse.IsSuccessStatusCode)
                 {
-                    string billingBody = await billingResponse.Content.ReadAsStringAsync();
-                    using var billingDoc = System.Text.Json.JsonDocument.Parse(billingBody);
+                    using var billingDoc = JsonDocument.Parse(billingBody);
 
-                    // Response: { "credits": { "balance": 12.50, "currency": "USD" } }
                     if (billingDoc.RootElement.TryGetProperty("credits", out var credits))
                     {
-                        if (credits.TryGetProperty("balance", out var balance))
+                        if (credits.TryGetProperty("current_balance", out var balance) ||
+                            credits.TryGetProperty("balance", out balance))
                         {
                             string currency = credits.TryGetProperty("currency", out var curr)
                                 ? curr.GetString() ?? "USD" : "USD";
-                            result.Balance = $"{balance.GetDouble():N2} {currency} credits";
+
+                            if (balance.TryGetDouble(out var amountVal))
+                            {
+                                result.Balance = $"{amountVal:N2} {currency} credits";
+                            }
+                            else if (double.TryParse(balance.ToString(), out var parsedVal))
+                            {
+                                result.Balance = $"{parsedVal:N2} {currency} credits";
+                            }
                         }
                     }
                 }
+                else if (billingResponse.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    result.Balance = "N/A (billing access forbidden)";
+                }
+                else if (billingResponse.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    result.Balance = "N/A (billing authentication unavailable)";
+                }
                 else
                 {
-                    // 403 = API scope key (no admin access) — still valid key
-                    result.Balance = "N/A (Admin scope required for balance)";
+                    result.Balance = $"N/A (billing HTTP {(int)billingResponse.StatusCode})";
                 }
             }
             catch
             {
-                result.Balance = "N/A";
+                result.Balance = "N/A (failed to parse billing)";
             }
         }
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            // Fal.ai keys have no fixed prefix — just check reasonable length
-            return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length >= 32;
+            return !string.IsNullOrWhiteSpace(apiKey) &&
+                   apiKey.Length >= 32 &&
+                   apiKey.All(c => char.IsLetterOrDigit(c) || c == '_' || c == '-');
         }
     }
 }

@@ -29,123 +29,248 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(string apiKey, HttpClient httpClient)
         {
-            // 1. Discover models
+            // Step 1: Discover models — confirms authentication without consuming inference quota
             using var modelsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.openai.com/v1/models");
             modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
             var modelsResponse = await httpClient.SendAsync(modelsRequest);
             var modelsBody = await modelsResponse.Content.ReadAsStringAsync();
 
-            if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized ||
-                modelsResponse.StatusCode == HttpStatusCode.Forbidden)
+            // 401 → invalid key
+            if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized)
             {
-                return ValidationResult.IsUnauthorized(modelsResponse.StatusCode);
+                return ValidationResult.IsUnauthorized(modelsResponse.StatusCode,
+                    "Invalid or expired OpenAI API key");
             }
 
-            if (!modelsResponse.IsSuccessStatusCode)
+            // 403 → authenticated but access restricted; key may still be valid
+            if (modelsResponse.StatusCode == HttpStatusCode.Forbidden)
             {
-                return ValidationResult.HasHttpError(
-                    modelsResponse.StatusCode,
+                return ValidationResult.ValidationUnavailable(modelsResponse.StatusCode,
+                    "OpenAI API key forbidden (403) — permission or project restriction; key validity could not be conclusively determined");
+            }
+
+            // 429 → rate limited at the models step
+            if (modelsResponse.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                return ValidationResult.ValidationUnavailable(modelsResponse.StatusCode,
+                    "OpenAI models endpoint rate limited (429) — key validity could not be determined");
+            }
+
+            // 5xx → service unavailable
+            if ((int)modelsResponse.StatusCode >= 500)
+            {
+                return ValidationResult.ValidationUnavailable(modelsResponse.StatusCode,
+                    $"OpenAI service error ({modelsResponse.StatusCode}) — validation unavailable");
+            }
+
+            if (!IsSuccessStatusCode(modelsResponse.StatusCode))
+            {
+                return ValidationResult.HasHttpError(modelsResponse.StatusCode,
                     $"Model listing failed: {TruncateResponse(modelsBody)}");
             }
 
+            // Authentication confirmed — parse available models
             var discoveredModels = ParseOpenAIModels(modelsBody);
             if (discoveredModels == null || !discoveredModels.Any())
             {
-                return ValidationResult.Success(
-                    modelsResponse.StatusCode,
-                    "Valid key but no models returned");
+                // Authenticated but catalog empty or unparseable — still a valid key
+                var noModels = ValidationResult.Success(modelsResponse.StatusCode,
+                    "Valid OpenAI credential — no models returned in catalog");
+                noModels.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = false,
+                    ["models_parsed"] = discoveredModels != null
+                };
+                noModels.RawResponse = modelsBody;
+                return noModels;
             }
 
-            // 2. Select a model
-            var preferredModels = new[] { "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo" };
+            // Step 2: Minimal inference test — confirms the key can call chat completions.
+            // Use a positive allowlist of known chat-capable model prefixes rather than a negative
+            // exclusion heuristic. "Not matching a non-chat prefix" does not guarantee chat support.
+            var knownChatPrefixes = new[] { "gpt-4o", "gpt-4", "gpt-3.5", "o1", "o3", "o4", "chatgpt-" };
 
+            // Prefer the cheapest/most-available known chat model first
+            var preferredOrder = new[] { "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "o1-mini", "o3-mini" };
             var modelToUse = discoveredModels
                 .Select(m => m.ModelId)
-                .FirstOrDefault(id => preferredModels.Any(p => id.Contains(p)))
-                ?? discoveredModels.First().ModelId;
+                .FirstOrDefault(id => preferredOrder.Any(p => id.Contains(p, StringComparison.OrdinalIgnoreCase)));
 
-            // 3. Test chat completion
+            if (modelToUse == null)
+            {
+                // No known chat model found. Rather than blindly testing an arbitrary model and
+                // producing a misleading failure, report authentication as confirmed.
+                var authOnly = ValidationResult.Success(modelsResponse.StatusCode,
+                    "Valid OpenAI credential — authenticated, but no known chat-capable model is available for inference test");
+                authOnly.AvailableModels = discoveredModels;
+                authOnly.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = false,
+                    ["models_parsed"] = true,
+                    ["model_count"] = discoveredModels.Count
+                };
+                authOnly.RawResponse = modelsBody;
+                return authOnly;
+            }
+
             using var chatRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
             chatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-            var requestBody = new
-            {
-                model = modelToUse,
-                messages = new[]
-                {
-                    new { role = "user", content = "Hi" }
-                },
-                max_tokens = 5
-            };
-
             chatRequest.Content = new StringContent(
-                JsonSerializer.Serialize(requestBody),
-                System.Text.Encoding.UTF8,
-                "application/json");
+                JsonSerializer.Serialize(new
+                {
+                    model = modelToUse,
+                    messages = new[] { new { role = "user", content = "Hi" } },
+                    max_tokens = 5
+                }),
+                System.Text.Encoding.UTF8, "application/json");
 
             var chatResponse = await httpClient.SendAsync(chatRequest);
             var responseBody = await chatResponse.Content.ReadAsStringAsync();
 
             _logger?.LogDebug(
                 "OpenAI chat API response ({Model}): Status={StatusCode}, Body={Body}",
-                modelToUse,
-                chatResponse.StatusCode,
-                TruncateResponse(responseBody));
+                modelToUse, chatResponse.StatusCode, TruncateResponse(responseBody));
 
+            // Inference succeeded
             if (IsSuccessStatusCode(chatResponse.StatusCode))
             {
-                var result = ValidationResult.Success(chatResponse.StatusCode, discoveredModels);
+                var result = ValidationResult.Success(chatResponse.StatusCode,
+                    "Valid OpenAI credential — inference test successful");
                 result.AvailableModels = discoveredModels;
+                result.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = true,
+                    ["inference_working"] = true,
+                    ["tested_model"] = modelToUse
+                };
+                result.RawResponse = responseBody;
 
                 // Note: OpenAI has no official public billing API endpoint.
-                // The /dashboard/billing/credit_grants endpoint is undocumented,
-                // returns 404 for pay-as-you-go accounts, and should not be relied upon.
+                // /dashboard/billing/credit_grants is undocumented and returns 404 for PAYG accounts.
                 // Balance info is intentionally not fetched.
 
                 return result;
             }
 
-            if (chatResponse.StatusCode == HttpStatusCode.Unauthorized ||
-                chatResponse.StatusCode == HttpStatusCode.Forbidden)
+            // 401 during inference — inference was rejected, but /v1/models already succeeded.
+            // Authentication is confirmed; the inference request itself was refused.
+            // Do NOT return IsUnauthorized — that would contradict the /models 200 result.
+            if (chatResponse.StatusCode == HttpStatusCode.Unauthorized)
             {
-                return ValidationResult.IsUnauthorized(chatResponse.StatusCode);
+                var inferenceRejected = ValidationResult.ValidationUnavailable(chatResponse.StatusCode,
+                    "OpenAI credential authenticated (models check passed), but inference request was rejected (401) — possible project key scope restriction");
+                inferenceRejected.AvailableModels = discoveredModels;
+                inferenceRejected.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = true,
+                    ["inference_working"] = false,
+                    ["tested_model"] = modelToUse
+                };
+                inferenceRejected.RawResponse = responseBody;
+                return inferenceRejected;
             }
 
-            if ((int)chatResponse.StatusCode == 429 ||
-                chatResponse.StatusCode == HttpStatusCode.PaymentRequired)
+            // 403 during inference — authenticated but this operation/model is not permitted
+            if (chatResponse.StatusCode == HttpStatusCode.Forbidden)
             {
-                 // Check body for specific quota details if possible
-                 var details = "Valid key but quota/billing/rate limited";
-                 if (responseBody.Contains("insufficient_quota") || responseBody.Contains("billing_hard_limit_reached"))
-                 {
-                     details = "Valid key but insufficient quota";
-                 }
+                var forbidden = ValidationResult.ValidationUnavailable(chatResponse.StatusCode,
+                    "OpenAI credential authenticated but inference was forbidden (403) — project or model permission restriction");
+                forbidden.AvailableModels = discoveredModels;
+                forbidden.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = true,
+                    ["inference_working"] = false,
+                    ["tested_model"] = modelToUse
+                };
+                forbidden.RawResponse = responseBody;
+                return forbidden;
+            }
 
-                var limited = ValidationResult.Success(
-                    chatResponse.StatusCode,
-                    details);
+            // 402 — payment required; distinct from rate limiting
+            if (chatResponse.StatusCode == HttpStatusCode.PaymentRequired)
+            {
+                var payment = ValidationResult.Success(chatResponse.StatusCode,
+                    "Valid OpenAI credential — payment required (no active payment method or credit)");
+                payment.IsQuotaExceeded = true;
+                payment.AvailableModels = discoveredModels;
+                payment.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = true,
+                    ["inference_working"] = false,
+                    ["tested_model"] = modelToUse
+                };
+                payment.RawResponse = responseBody;
+                return payment;
+            }
 
+            // 429 — distinguish quota/billing exhaustion from plain rate limiting
+            if (chatResponse.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                bool isQuota = responseBody.Contains("insufficient_quota", StringComparison.OrdinalIgnoreCase) ||
+                               responseBody.Contains("billing_hard_limit_reached", StringComparison.OrdinalIgnoreCase);
+
+                if (isQuota)
+                {
+                    var quota = ValidationResult.Success(chatResponse.StatusCode,
+                        "Valid OpenAI credential — inference quota or billing limit reached");
+                    quota.IsQuotaExceeded = true;
+                    quota.AvailableModels = discoveredModels;
+                    quota.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["inference_tested"] = true,
+                        ["inference_working"] = false,
+                        ["tested_model"] = modelToUse
+                    };
+                    quota.RawResponse = responseBody;
+                    return quota;
+                }
+
+                // Plain rate limit — key validity is still known from /models step
+                var limited = ValidationResult.ValidationUnavailable(chatResponse.StatusCode,
+                    "OpenAI inference test rate limited (429) — credential validity confirmed by preceding models check");
                 limited.AvailableModels = discoveredModels;
+                limited.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = true,
+                    ["inference_working"] = false,
+                    ["tested_model"] = modelToUse
+                };
+                limited.RawResponse = responseBody;
                 return limited;
             }
 
-            // Check for quota error in 401/403 (sometimes happens with deactivated accounts)
-            if (responseBody.Contains("insufficient_quota") || 
-                responseBody.Contains("billing_hard_limit_reached"))
+            // Quota indicator found in body at other status codes (e.g. deactivated accounts)
+            if (responseBody.Contains("insufficient_quota", StringComparison.OrdinalIgnoreCase) ||
+                responseBody.Contains("billing_hard_limit_reached", StringComparison.OrdinalIgnoreCase))
             {
-                 var limited = ValidationResult.Success(
-                    chatResponse.StatusCode,
-                    "Valid key but insufficient quota (in error body)");
-                 limited.AvailableModels = discoveredModels;
-                 return limited;
+                var quota = ValidationResult.Success(chatResponse.StatusCode,
+                    "Valid OpenAI credential — quota or billing limit indicated in error body");
+                quota.IsQuotaExceeded = true;
+                quota.AvailableModels = discoveredModels;
+                quota.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = true,
+                    ["inference_working"] = false,
+                    ["tested_model"] = modelToUse
+                };
+                quota.RawResponse = responseBody;
+                return quota;
             }
 
-            var errorResult = ValidationResult.HasHttpError(
-                chatResponse.StatusCode,
-                $"API request failed: {TruncateResponse(responseBody)}");
-
+            var errorResult = ValidationResult.HasHttpError(chatResponse.StatusCode,
+                $"OpenAI inference test failed: {TruncateResponse(responseBody)}");
             errorResult.AvailableModels = discoveredModels;
+            errorResult.RawResponse = responseBody;
             return errorResult;
         }
 

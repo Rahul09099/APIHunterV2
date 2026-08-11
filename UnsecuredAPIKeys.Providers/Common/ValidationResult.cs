@@ -74,7 +74,10 @@ namespace UnsecuredAPIKeys.Providers.Common
 
         public static ValidationResult HasNetworkError(string detail) =>
             new() { Status = ValidationAttemptStatus.NetworkError, Detail = detail };
-        
+
+        public static ValidationResult ValidationUnavailable(HttpStatusCode statusCode, string? detail = null) =>
+            new() { Status = ValidationAttemptStatus.ValidationUnavailable, HttpStatusCode = statusCode, Detail = detail };
+
         public static ValidationResult HasProviderSpecificError(string detail) =>
             new() { Status = ValidationAttemptStatus.ProviderSpecificError, Detail = detail };
     }

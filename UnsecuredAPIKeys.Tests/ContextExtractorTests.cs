@@ -71,6 +71,9 @@ namespace UnsecuredAPIKeys.Tests
         [InlineData("pass: SuperSecret", "admin", "SuperSecret")]
         [InlineData("pwd='AnotherSecretPassword';", "user", "AnotherSecretPassword")]
         [InlineData("admin = 12345", "admin", "12345")]
+        [InlineData("password = \"my secret pass!\"", "admin", "my secret pass!")]
+        [InlineData("admin = \"P@ss w0rd 2026!\"", "admin", "P@ss w0rd 2026!")]
+        [InlineData("password = \"my secret pass!\"", "", "my secret pass!")]
         public void FindRelatedPassword_MatchesCommonPatterns(string context, string username, string expectedPassword)
         {
             var extractor = new ContextExtractor();
@@ -82,6 +85,8 @@ namespace UnsecuredAPIKeys.Tests
         [InlineData("host: 192.168.1.1", "192.168.1.1")]
         [InlineData("server='myhost.domain.com';", "myhost.domain.com")]
         [InlineData("10.0.0.5", "10.0.0.5")]
+        [InlineData("host: [2001:db8::1]", "2001:db8::1")]
+        [InlineData("2001:db8::1", "2001:db8::1")]
         public void FindRelatedHost_ExtractsCorrectly(string context, string expectedHost)
         {
             var extractor = new ContextExtractor();

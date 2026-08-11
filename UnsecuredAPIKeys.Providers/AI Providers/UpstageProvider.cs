@@ -1,6 +1,7 @@
-using Microsoft.Extensions.Logging;
+using System.Net;
 using System.Net.Http.Headers;
-using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
 using UnsecuredAPIKeys.Providers.Common;
@@ -10,19 +11,16 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// <summary>
     /// Provider for Upstage API keys — Solar LLM and Document AI platform.
     ///
-    /// Key format: alphanumeric string, stored in UPSTAGE_API_KEY env var.
-    /// Confirmed env var name from official .NET SDK docs and cookbook examples.
-    /// No confirmed prefix (the "up_" prefix is unverified — keys may be plain alphanumeric).
-    ///
+    /// Key format: alphanumeric string, stored in UPSTAGE_API_KEY or SOLAR_API_KEY env var.
     /// Auth: Authorization: Bearer {apiKey}
     /// Base URL: https://api.upstage.ai/v1
     ///
-    /// Verification endpoint: GET https://api.upstage.ai/v1/models
-    ///   OpenAI-compatible response: { "object": "list", "data": [{ "id": "solar-pro", ... }] }
-    ///   Returns 401 for invalid keys.
-    ///
-    /// No balance endpoint available via API — usage tracked in Upstage Console dashboard.
-    /// New accounts get $10 free credits on signup.
+    /// Verification strategy:
+    ///   1. Discovery: GET https://api.upstage.ai/v1/models (lightweight read-only auth check)
+    ///   2. Active inference test: POST https://api.upstage.ai/v1/chat/completions
+    ///      Model: solar-pro3 (or preferred discovered model)
+    ///      {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+    /// Official docs: https://console.upstage.ai/docs
     /// </summary>
     [ApiProvider]
     public class UpstageProvider : BaseApiKeyProvider
@@ -32,16 +30,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            // Primary env var names — confirmed from official SDK docs and cookbook
+            // Context-anchored env var patterns to prevent false positives
             @"UPSTAGE_API_KEY",
             @"SOLAR_API_KEY",
-
-            // Context-aware key value patterns
-            @"UPSTAGE_API_KEY\s*[=:]\s*['""]?([A-Za-z0-9_\-]{20,})['""]?",
-            @"SOLAR_API_KEY\s*[=:]\s*['""]?([A-Za-z0-9_\-]{20,})['""]?",
-
-            // up_ prefix — included but unconfirmed; may match some key formats
-            @"up_[A-Za-z0-9]{20,}"
+            @"(?i)\bUPSTAGE[\s_-]*API[\s_-]*KEY\s*[:=]\s*['""]?([A-Za-z0-9_-]{20,256})['""]?",
+            @"(?i)\bSOLAR[\s_-]*API[\s_-]*KEY\s*[:=]\s*['""]?([A-Za-z0-9_-]{20,256})['""]?"
         ];
 
         public UpstageProvider() : base() { }
@@ -51,63 +44,145 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // POST /v1/embeddings with minimal input — definitely requires auth
-                // More reliable than GET /v1/models which may be public on some providers
-                const string body = """{"model":"solar-embedding-1-large","input":["test"]}""";
+                // Step 1: Discover available models via GET /v1/models.
+                // If this endpoint is unavailable, authentication validity remains inconclusive.
+                using var modelsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.upstage.ai/v1/models");
+                modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-                using var request = new HttpRequestMessage(HttpMethod.Post,
-                    "https://api.upstage.ai/v1/embeddings");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                request.Content = new StringContent(body,
-                    System.Text.Encoding.UTF8, "application/json");
+                var modelsResponse = await httpClient.SendAsync(modelsRequest);
+                string modelsBody = await modelsResponse.Content.ReadAsStringAsync();
 
-                var response = await httpClient.SendAsync(request);
-                string responseBody = await response.Content.ReadAsStringAsync();
+                _logger?.LogDebug("Upstage models response: Status={Status}, Body={Body}",
+                    modelsResponse.StatusCode, TruncateResponse(modelsBody));
 
-                _logger?.LogDebug("Upstage API response: Status={StatusCode}, Body={Body}",
-                    response.StatusCode, TruncateResponse(responseBody));
-
-                if (IsSuccessStatusCode(response.StatusCode))
+                if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Valid Upstage key");
+                    return ValidationResult.IsUnauthorized(modelsResponse.StatusCode,
+                        "Invalid or expired Upstage API key");
+                }
 
-                    try
-                    {
-                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                if (modelsResponse.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return ValidationResult.ValidationUnavailable(modelsResponse.StatusCode,
+                        "Upstage API key access forbidden (403)");
+                }
 
-                        // OpenAI-compatible response: { "object": "list", "data": [...], "usage": {...} }
-                        if (doc.RootElement.TryGetProperty("usage", out var usage) &&
-                            usage.TryGetProperty("total_tokens", out var tokens))
-                        {
-                            result.Detail = $"Valid Upstage key — embeddings working ({tokens.GetInt32()} tokens used)";
-                        }
-                        else if (doc.RootElement.TryGetProperty("data", out var data))
-                        {
-                            result.Detail = $"Valid Upstage key — {data.GetArrayLength()} embedding(s) returned";
-                        }
-                        else
-                        {
-                            result.Detail = "Valid Upstage key";
-                        }
+                if (modelsResponse.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    return ValidationResult.ValidationUnavailable(modelsResponse.StatusCode,
+                        "Upstage models endpoint rate limited (429)");
+                }
 
-                        // No balance endpoint — note it clearly
-                        result.Balance = "N/A (check Upstage Console dashboard)";
-                    }
-                    catch { result.Detail = "Valid Upstage key"; }
+                if ((int)modelsResponse.StatusCode >= 500)
+                {
+                    return ValidationResult.ValidationUnavailable(modelsResponse.StatusCode,
+                        $"Upstage service error ({modelsResponse.StatusCode}) — validation unavailable");
+                }
 
+                if (!IsSuccessStatusCode(modelsResponse.StatusCode))
+                {
+                    return ValidationResult.HasHttpError(modelsResponse.StatusCode,
+                        $"Upstage models request failed: Status {modelsResponse.StatusCode}. Body: {TruncateResponse(modelsBody)}");
+                }
+
+                // Model catalog parsed
+                List<ModelInfo>? discoveredModels = ParseModels(modelsBody);
+
+                var result = ValidationResult.Success(modelsResponse.StatusCode, "Valid Upstage key");
+                result.AvailableModels = discoveredModels;
+                result.RawResponse = modelsBody;
+                result.Balance = "Not available from validation endpoint";
+                result.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["models_parsed"] = discoveredModels != null,
+                    ["model_count"] = discoveredModels?.Count ?? 0
+                };
+
+                if (discoveredModels == null || discoveredModels.Count == 0)
+                {
+                    result.Metadata["inference_tested"] = false;
+                    result.Metadata["inference_working"] = false;
+                    result.Detail = "Valid Upstage key, but no available models were returned for inference testing.";
                     return result;
                 }
 
-                return response.StatusCode switch
+                // Step 2: Active inference test via POST /v1/chat/completions with solar-pro3
+                var preferredOrder = new[]
                 {
-                    System.Net.HttpStatusCode.Unauthorized or
-                    System.Net.HttpStatusCode.Forbidden =>
-                        ValidationResult.IsUnauthorized(response.StatusCode),
-                    (System.Net.HttpStatusCode)429 =>
-                        ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)"),
-                    _ => ValidationResult.HasHttpError(response.StatusCode,
-                        $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}")
+                    "solar-pro3",
+                    "solar-pro",
+                    "solar-mini",
+                    "solar-10.7b-instruct"
                 };
+
+                string modelToUse = discoveredModels
+                    .Select(m => m.ModelId)
+                    .FirstOrDefault(id => preferredOrder.Any(p => id.Equals(p, StringComparison.OrdinalIgnoreCase)))
+                    ?? discoveredModels.First().ModelId;
+
+                try
+                {
+                    using var chatRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.upstage.ai/v1/chat/completions");
+                    chatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+                    var payload = new
+                    {
+                        model = modelToUse,
+                        messages = new[] { new { role = "user", content = "hi" } },
+                        max_tokens = 1
+                    };
+
+                    chatRequest.Content = new StringContent(
+                        JsonSerializer.Serialize(payload),
+                        System.Text.Encoding.UTF8,
+                        "application/json");
+
+                    using var chatResponse = await httpClient.SendAsync(chatRequest);
+                    string chatBody = await chatResponse.Content.ReadAsStringAsync();
+
+                    _logger?.LogDebug("Upstage chat response ({Model}): Status={Status}, Body={Body}",
+                        modelToUse, chatResponse.StatusCode, TruncateResponse(chatBody));
+
+                    result.RawResponse = chatBody;
+                    result.Metadata["inference_tested"] = true;
+                    result.Metadata["tested_model"] = modelToUse;
+
+                    if (IsSuccessStatusCode(chatResponse.StatusCode))
+                    {
+                        result.Metadata["inference_working"] = true;
+                        result.Detail = $"Valid Upstage key — Chat completions verified with model '{modelToUse}'.";
+                    }
+                    else if (chatResponse.StatusCode == HttpStatusCode.PaymentRequired || ContainsAny(chatBody, QuotaIndicators))
+                    {
+                        result.Metadata["inference_working"] = false;
+                        result.IsQuotaExceeded = true;
+                        result.Detail = $"Valid Upstage key — insufficient credits or quota limit reached on model '{modelToUse}'.";
+                    }
+                    else if (chatResponse.StatusCode == HttpStatusCode.Forbidden)
+                    {
+                        result.Metadata["inference_working"] = false;
+                        result.Detail = $"Valid Upstage key — chat completion forbidden (403) for model '{modelToUse}'.";
+                    }
+                    else if (chatResponse.StatusCode == HttpStatusCode.TooManyRequests)
+                    {
+                        result.Metadata["inference_working"] = false;
+                        result.Detail = $"Inference validation rate limited (429) on model '{modelToUse}'.";
+                    }
+                    else
+                    {
+                        result.Metadata["inference_working"] = false;
+                        result.Detail = $"Valid Upstage key — authenticated, but inference request returned status {chatResponse.StatusCode}.";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning("Upstage chat completion test failed: {Message}", ex.Message);
+                    result.Metadata["inference_tested"] = false;
+                    result.Metadata["inference_working"] = false;
+                }
+
+                return result;
             }
             catch (Exception ex)
             {
@@ -115,11 +190,32 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             }
         }
 
+        private List<ModelInfo>? ParseModels(string jsonResponse)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonResponse);
+                if (doc.RootElement.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
+                {
+                    return dataArr.EnumerateArray()
+                        .Select(m => new ModelInfo { ModelId = m.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "" })
+                        .Where(m => !string.IsNullOrEmpty(m.ModelId))
+                        .ToList();
+                }
+
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            // No confirmed prefix — just check reasonable length
-            // up_ prefix is included as a hint but not enforced
-            return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length >= 20;
+            return !string.IsNullOrWhiteSpace(apiKey) &&
+                   apiKey.Length >= 20 &&
+                   apiKey.Length <= 256;
         }
     }
 }

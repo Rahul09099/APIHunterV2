@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
+using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
 using UnsecuredAPIKeys.Providers.Common;
@@ -10,21 +12,13 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Provider for RunPod API keys — cloud GPU marketplace and serverless endpoints.
     ///
     /// Key format: rpa_{alphanumeric} (e.g. rpa_TG1IX3V0HB2KN69ZKJE0W6104CNEV21HW2T9ZMII3gsa20)
-    /// Confirmed from RunPod's own blog example: https://www.runpod.io/blog/runpod-rest-api-gpu-management
-    ///
-    /// Two APIs available:
-    ///   REST API (new): https://rest.runpod.io/v1  — Authorization: Bearer {key}
-    ///   GraphQL (legacy): https://api.runpod.io/graphql?api_key={key}
+    /// Confirmed from RunPod's official documentation.
     ///
     /// Verification strategy:
-    ///   1. Try REST API first: GET https://rest.runpod.io/v1/pods
-    ///      Response: array of pod objects (may be empty [] for new accounts — still valid)
-    ///   2. Fallback to GraphQL: POST https://api.runpod.io/graphql?api_key={key}
-    ///      Query: { myself { id email currentSpendPerHr spendLimit } }
-    ///      Response: { "data": { "myself": { "id": "...", "email": "...", ... } } }
-    ///      Invalid key: { "errors": [{ "message": "..." }] } with no "myself" data
-    ///
-    /// Balance: currentSpendPerHr from GraphQL myself query
+    ///   1. REST API: GET https://rest.runpod.io/v1/pods — Authorization: Bearer {key} (active pod count)
+    ///   2. GraphQL: POST https://api.runpod.io/graphql (account state + read-only real-time GPU stock capacity)
+    ///      Query: { myself { id email clientBalance currentSpendPerHr underBalance minBalance creditAlertThreshold }
+    ///               gpuTypes { id displayName memoryInGb secureCloud communityCloud lowestPrice { minimumBidPrice uninterruptablePrice stockStatus availableGpuCounts } } }
     /// </summary>
     [ApiProvider]
     public class RunPodProvider : BaseApiKeyProvider
@@ -34,10 +28,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            // Confirmed key format from RunPod's own documentation and blog
-            @"rpa_[A-Za-z0-9]{40,}",
-
-            // Environment variable names commonly found in leaked code
+            @"\brpa_[A-Za-z0-9]{40,}\b",
             @"RUNPOD_API_KEY",
             @"RUNPOD_API_SECRET",
             @"RUNPOD_TOKEN"
@@ -48,77 +39,42 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(string apiKey, HttpClient httpClient)
         {
-            // Strategy: Try REST API first (newer, cleaner), fall back to GraphQL
-            var restResult = await TryRestApiAsync(apiKey, httpClient);
-            if (restResult != null)
-                return restResult;
-
-            // Fallback to GraphQL
-            return await TryGraphQLAsync(apiKey, httpClient);
-        }
-
-        private async Task<ValidationResult?> TryRestApiAsync(string apiKey, HttpClient httpClient)
-        {
+            int? activePodCount = null;
             try
             {
-                // GET /v1/pods — lightweight read-only list, returns [] for new accounts (still valid)
-                using var request = new HttpRequestMessage(HttpMethod.Get, "https://rest.runpod.io/v1/pods");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                using var restRequest = new HttpRequestMessage(HttpMethod.Get, "https://rest.runpod.io/v1/pods");
+                restRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-                var response = await httpClient.SendAsync(request);
-                string responseBody = await response.Content.ReadAsStringAsync();
-
-                _logger?.LogDebug("RunPod REST API response: Status={StatusCode}, Body={Body}",
-                    response.StatusCode, TruncateResponse(responseBody));
-
-                if (IsSuccessStatusCode(response.StatusCode))
+                var restResponse = await httpClient.SendAsync(restRequest);
+                if (IsSuccessStatusCode(restResponse.StatusCode))
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Valid RunPod key");
-
-                    try
+                    string restBody = await restResponse.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(restBody);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
                     {
-                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                        // Response is an array of pod objects
-                        if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
-                        {
-                            var podCount = doc.RootElement.GetArrayLength();
-                            result.Detail = podCount > 0
-                                ? $"Valid RunPod key — {podCount} active pod(s)"
-                                : "Valid RunPod key — no active pods";
-                        }
+                        activePodCount = doc.RootElement.GetArrayLength();
                     }
-                    catch { /* Best effort */ }
-
-                    return result;
                 }
-
-                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
-                    response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                else if (restResponse.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    return ValidationResult.IsUnauthorized(response.StatusCode);
+                    return ValidationResult.IsUnauthorized(restResponse.StatusCode,
+                        "Invalid or expired RunPod API key (REST API)");
                 }
+            }
+            catch { /* REST check is best-effort fallback for active pods */ }
 
-                // For other errors, fall through to GraphQL fallback
-                return null;
-            }
-            catch
-            {
-                // Network error on REST — try GraphQL fallback
-                return null;
-            }
+            return await TryGraphQLAsync(apiKey, httpClient, activePodCount);
         }
 
-        private async Task<ValidationResult> TryGraphQLAsync(string apiKey, HttpClient httpClient)
+        private async Task<ValidationResult> TryGraphQLAsync(string apiKey, HttpClient httpClient, int? activePodCount)
         {
             try
             {
-                // GraphQL query to fetch RunPod balance, spend rate, and limits
-                const string query = """{"query": "query { myself { id email clientBalance currentSpendPerHr underBalance minBalance creditAlertThreshold } }"}""";
+                const string query = """{"query": "query { myself { id email clientBalance currentSpendPerHr underBalance minBalance creditAlertThreshold } gpuTypes { id displayName memoryInGb secureCloud communityCloud lowestPrice { minimumBidPrice uninterruptablePrice stockStatus availableGpuCounts } } }"}""";
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.runpod.io/graphql");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                request.Content = new StringContent(query,
-                    System.Text.Encoding.UTF8, "application/json");
+                request.Content = new StringContent(query, System.Text.Encoding.UTF8, "application/json");
 
                 var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
@@ -126,24 +82,38 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 _logger?.LogDebug("RunPod GraphQL response: Status={StatusCode}, Body={Body}",
                     response.StatusCode, TruncateResponse(responseBody));
 
-                if (!IsSuccessStatusCode(response.StatusCode))
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    return response.StatusCode switch
-                    {
-                        System.Net.HttpStatusCode.Unauthorized or
-                        System.Net.HttpStatusCode.Forbidden =>
-                            ValidationResult.IsUnauthorized(response.StatusCode),
-                        (System.Net.HttpStatusCode)429 =>
-                            ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)"),
-                        _ => ValidationResult.HasHttpError(response.StatusCode,
-                            $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}")
-                    };
+                    return ValidationResult.IsUnauthorized(response.StatusCode,
+                        "Invalid or expired RunPod API key (GraphQL)");
                 }
 
-                // GraphQL always returns 200 — must check body for errors
-                // Invalid key: { "errors": [...] } with no "myself" field
-                if (responseBody.Contains("\"errors\"") &&
-                    !responseBody.Contains("\"myself\""))
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        "RunPod GraphQL access forbidden (403)");
+                }
+
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        "RunPod GraphQL rate limited (429)");
+                }
+
+                if ((int)response.StatusCode >= 500)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        $"RunPod GraphQL service error ({response.StatusCode}) — validation unavailable");
+                }
+
+                if (!IsSuccessStatusCode(response.StatusCode))
+                {
+                    return ValidationResult.HasHttpError(response.StatusCode,
+                        $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}");
+                }
+
+                // GraphQL 200 OK — check for body errors
+                if (responseBody.Contains("\"errors\"") && !responseBody.Contains("\"myself\""))
                 {
                     return ValidationResult.IsUnauthorized(response.StatusCode,
                         "Invalid RunPod API key — GraphQL returned auth error");
@@ -151,62 +121,160 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 var result = ValidationResult.Success(response.StatusCode, "Valid RunPod key");
                 result.RawResponse = responseBody;
+                result.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["gpu_availability_checked"] = true
+                };
+
+                if (activePodCount.HasValue)
+                {
+                    result.Metadata["active_pod_count"] = activePodCount.Value;
+                }
 
                 try
                 {
-                    using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                    if (doc.RootElement.TryGetProperty("data", out var data) &&
-                        data.TryGetProperty("myself", out var myself))
+                    using var doc = JsonDocument.Parse(responseBody);
+                    if (doc.RootElement.TryGetProperty("data", out var data))
                     {
-                        // Email as account identifier
-                        if (myself.TryGetProperty("email", out var email) && email.ValueKind != System.Text.Json.JsonValueKind.Null)
-                            result.AccountTier = email.GetString();
-
-                        double clientBalance = 0;
-                        if (myself.TryGetProperty("clientBalance", out var clientBalProp) && clientBalProp.ValueKind != System.Text.Json.JsonValueKind.Null)
-                        {
-                            clientBalance = clientBalProp.GetDouble();
-                            result.Balance = $"${clientBalance:N4}";
-                        }
-
-                        double spendPerHr = 0;
-                        if (myself.TryGetProperty("currentSpendPerHr", out var spendProp) && spendProp.ValueKind != System.Text.Json.JsonValueKind.Null)
-                        {
-                            spendPerHr = spendProp.GetDouble();
-                        }
-
-                        double minBalance = 0;
-                        if (myself.TryGetProperty("minBalance", out var minBalProp) && minBalProp.ValueKind != System.Text.Json.JsonValueKind.Null)
-                        {
-                            minBalance = minBalProp.GetDouble();
-                        }
-
                         bool underBalance = false;
-                        if (myself.TryGetProperty("underBalance", out var underBalProp) && underBalProp.ValueKind != System.Text.Json.JsonValueKind.Null)
+                        double clientBalance = 0;
+                        double spendPerHr = 0;
+                        double minBalance = 0;
+
+                        if (data.TryGetProperty("myself", out var myself))
                         {
-                            underBalance = underBalProp.GetBoolean();
-                            result.IsQuotaExceeded = underBalance;
+                            if (myself.TryGetProperty("email", out var email) && email.ValueKind == JsonValueKind.String)
+                            {
+                                result.AccountTier = email.GetString();
+                                result.Metadata["email"] = email.GetString() ?? "";
+                            }
+
+                            if (myself.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
+                            {
+                                result.Metadata["user_id"] = idProp.GetString() ?? "";
+                            }
+
+                            if (myself.TryGetProperty("clientBalance", out var clientBalProp) && clientBalProp.ValueKind == JsonValueKind.Number)
+                            {
+                                clientBalance = clientBalProp.GetDouble();
+                                result.Balance = $"${clientBalance:N4}";
+                                result.Metadata["clientBalance"] = clientBalance;
+                            }
+
+                            if (myself.TryGetProperty("currentSpendPerHr", out var spendProp) && spendProp.ValueKind == JsonValueKind.Number)
+                            {
+                                spendPerHr = spendProp.GetDouble();
+                                result.Metadata["currentSpendPerHr"] = spendPerHr;
+                            }
+
+                            if (myself.TryGetProperty("minBalance", out var minBalProp) && minBalProp.ValueKind == JsonValueKind.Number)
+                            {
+                                minBalance = minBalProp.GetDouble();
+                                result.Metadata["minBalance"] = minBalance;
+                            }
+
+                            if (myself.TryGetProperty("underBalance", out var underBalProp) &&
+                                (underBalProp.ValueKind == JsonValueKind.True || underBalProp.ValueKind == JsonValueKind.False))
+                            {
+                                underBalance = underBalProp.GetBoolean();
+                                result.IsQuotaExceeded = underBalance;
+                                result.Metadata["underBalance"] = underBalance;
+                            }
+
+                            if (myself.TryGetProperty("creditAlertThreshold", out var alertProp) && alertProp.ValueKind == JsonValueKind.Number)
+                            {
+                                result.Metadata["creditAlertThreshold"] = alertProp.GetDouble();
+                            }
                         }
 
-                        double creditAlertThreshold = 0;
-                        if (myself.TryGetProperty("creditAlertThreshold", out var alertProp) && alertProp.ValueKind != System.Text.Json.JsonValueKind.Null)
+                        // Parse real-time GPU stock capacity & supported types
+                        var supportedGpus = new List<string>();
+                        var inStockGpus = new List<string>();
+                        var outOfStockGpus = new List<string>();
+                        var gpuDetails = new List<Dictionary<string, object>>();
+
+                        if (data.TryGetProperty("gpuTypes", out var gpuTypesArr) && gpuTypesArr.ValueKind == JsonValueKind.Array)
                         {
-                            creditAlertThreshold = alertProp.GetDouble();
+                            foreach (var gpu in gpuTypesArr.EnumerateArray())
+                            {
+                                string name = gpu.TryGetProperty("displayName", out var n) ? n.GetString() ?? "" : "";
+                                string id = gpu.TryGetProperty("id", out var i) ? i.GetString() ?? "" : "";
+                                string gpuName = !string.IsNullOrEmpty(name) ? name : id;
+
+                                if (string.IsNullOrEmpty(gpuName)) continue;
+
+                                bool secure = gpu.TryGetProperty("secureCloud", out var s) && s.GetBoolean();
+                                bool community = gpu.TryGetProperty("communityCloud", out var c) && c.GetBoolean();
+
+                                string stockStatus = "Unknown";
+                                double uninterruptablePrice = 0;
+                                string availableGpuCounts = "0";
+
+                                if (gpu.TryGetProperty("lowestPrice", out var lp) && lp.ValueKind == JsonValueKind.Object)
+                                {
+                                    if (lp.TryGetProperty("stockStatus", out var ssProp) && ssProp.ValueKind == JsonValueKind.String)
+                                    {
+                                        stockStatus = ssProp.GetString() ?? "Unknown";
+                                    }
+
+                                    if (lp.TryGetProperty("uninterruptablePrice", out var priceProp) && priceProp.ValueKind == JsonValueKind.Number)
+                                    {
+                                        uninterruptablePrice = priceProp.GetDouble();
+                                    }
+
+                                    if (lp.TryGetProperty("availableGpuCounts", out var cntProp))
+                                    {
+                                        availableGpuCounts = cntProp.ToString();
+                                    }
+                                }
+
+                                if (!supportedGpus.Contains(gpuName))
+                                    supportedGpus.Add(gpuName);
+
+                                bool isInStock = !string.Equals(stockStatus, "None", StringComparison.OrdinalIgnoreCase) &&
+                                                 !string.Equals(stockStatus, "Unknown", StringComparison.OrdinalIgnoreCase);
+
+                                if (isInStock)
+                                {
+                                    if (!inStockGpus.Contains(gpuName)) inStockGpus.Add(gpuName);
+                                }
+                                else
+                                {
+                                    if (!outOfStockGpus.Contains(gpuName)) outOfStockGpus.Add(gpuName);
+                                }
+
+                                var detailDict = new Dictionary<string, object>
+                                {
+                                    ["gpu_name"] = gpuName,
+                                    ["id"] = id,
+                                    ["secureCloud"] = secure,
+                                    ["communityCloud"] = community,
+                                    ["stockStatus"] = stockStatus,
+                                    ["uninterruptablePrice"] = uninterruptablePrice,
+                                    ["availableGpuCounts"] = availableGpuCounts
+                                };
+                                gpuDetails.Add(detailDict);
+                            }
+
+                            result.Metadata["supported_gpu_types"] = supportedGpus;
+                            result.Metadata["in_stock_gpu_types"] = inStockGpus;
+                            result.Metadata["out_of_stock_gpu_types"] = outOfStockGpus;
+                            result.Metadata["supported_gpu_count"] = supportedGpus.Count;
+                            result.Metadata["in_stock_gpu_count"] = inStockGpus.Count;
+                            result.Metadata["gpu_details"] = gpuDetails;
                         }
 
-                        result.Detail = $"Valid RunPod key — Balance: ${clientBalance:N4}, Spend/hr: ${spendPerHr:N4}, Min Balance: ${minBalance:N4}, Under Balance: {underBalance}";
+                        // Account must have balance AND real-time GPU stock capacity to provision a pod
+                        bool canCreatePod = !underBalance && clientBalance >= minBalance && inStockGpus.Count > 0;
+                        result.Metadata["can_create_pod"] = canCreatePod;
 
-                        result.Metadata = new Dictionary<string, object>
-                        {
-                            { "clientBalance", clientBalance },
-                            { "currentSpendPerHr", spendPerHr },
-                            { "minBalance", minBalance },
-                            { "underBalance", underBalance },
-                            { "creditAlertThreshold", creditAlertThreshold }
-                        };
+                        string podInfo = activePodCount.HasValue ? $"{activePodCount.Value} active pod(s), " : "";
+                        string stockInfo = inStockGpus.Count > 0 ? $"{inStockGpus.Count}/{supportedGpus.Count} GPU type(s) in stock" : "No GPU stock available";
+                        result.Detail = $"Valid RunPod key — {podInfo}Balance: ${clientBalance:N4}, Can Provision: {canCreatePod} ({stockInfo})";
                     }
                 }
-                catch { /* Best effort */ }
+                catch { /* Best effort parsing */ }
 
                 return result;
             }
@@ -218,7 +286,6 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            // RunPod keys start with rpa_ and are ~44+ chars total
             return !string.IsNullOrWhiteSpace(apiKey) &&
                    apiKey.StartsWith("rpa_") &&
                    apiKey.Length >= 44;

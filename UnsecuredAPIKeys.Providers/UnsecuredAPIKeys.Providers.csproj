@@ -14,6 +14,10 @@
     <PackageReference Include="AWSSDK.Core" Version="3.7.400.51" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="UnsecuredAPIKeys.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -21,3 +25,4 @@
   </PropertyGroup>
 
 </Project>
+

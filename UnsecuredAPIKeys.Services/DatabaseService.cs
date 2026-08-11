@@ -556,7 +556,11 @@ public class DatabaseService(DBContext dbContext)
         {
             foreach (var provider in providers)
             {
-                if (provider.RegexPatterns.Any(p => System.Text.RegularExpressions.Regex.IsMatch(key.ApiKey, p)))
+                if (provider.RegexPatterns.Any(p => 
+                {
+                    try { return System.Text.RegularExpressions.Regex.IsMatch(key.ApiKey, p, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(2)); }
+                    catch { return false; }
+                }))
                 {
                     if (key.ApiType != provider.ApiType)
                     {
@@ -884,7 +888,8 @@ public class DatabaseService(DBContext dbContext)
 
             ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack or
             ApiTypeEnum.Facebook or ApiTypeEnum.GoogleOAuth or
-            ApiTypeEnum.Stripe or ApiTypeEnum.TikTok or ApiTypeEnum.GcpHmac
+            ApiTypeEnum.Stripe or ApiTypeEnum.TikTok or ApiTypeEnum.GcpHmac or
+            ApiTypeEnum.GitHubToken
                 => ApiCategoryEnum.Communication,
 
             ApiTypeEnum.ServerCredential
@@ -1174,7 +1179,7 @@ public class DatabaseService(DBContext dbContext)
             sc.Host,
             sc.Port,
             sc.Username,
-            sc.PasswordHash,
+            sc.Password,
             sc.Domain,
             sc.NetworkStatus,
             sc.AuthenticationStatus,
@@ -1203,7 +1208,7 @@ public class DatabaseService(DBContext dbContext)
     {
         var lines = new List<string>
         {
-            "Id,CredentialType,Host,Port,Username,PasswordHash,Domain,NetworkStatus,AuthenticationStatus," +
+            "Id,CredentialType,Host,Port,Username,Password,Domain,NetworkStatus,AuthenticationStatus," +
             "RiskLevel,IsHoneypot,EntropyScore,SourceRepository,SourceFilePath," +
             "ServerMetadata,GeolocationData,OSINTData,DiscoveredAtIST,LastVerifiedAtIST"
         };
@@ -1220,7 +1225,7 @@ public class DatabaseService(DBContext dbContext)
             var flatGeo = FlattenJson(sc.GeolocationData).Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ");
             var flatOsint = FlattenJson(sc.OSINTData).Replace("\"", "\"\"").Replace("\n", " ").Replace("\r", " ");
 
-            lines.Add($"{sc.Id},\"{sc.CredentialType}\",\"{host}\",{sc.Port},\"{username}\",\"{sc.PasswordHash}\",\"{domain}\"," +
+            lines.Add($"{sc.Id},\"{sc.CredentialType}\",\"{host}\",{sc.Port},\"{username}\",\"{sc.Password}\",\"{domain}\"," +
                       $"\"{sc.NetworkStatus}\",\"{sc.AuthenticationStatus}\",\"{sc.RiskLevel}\",{sc.IsHoneypot}," +
                       $"{sc.EntropyScore},\"{sourceRepo}\",\"{sourcePath}\",\"{flatMetadata}\",\"{flatGeo}\",\"{flatOsint}\"," +
                       $"\"{sc.DiscoveredAt.ToIst():yyyy-MM-dd HH:mm:ss}\",\"{sc.LastVerifiedAt?.ToIst():yyyy-MM-dd HH:mm:ss}\"");

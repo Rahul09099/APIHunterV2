@@ -1,10 +1,12 @@
 using System;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -14,16 +16,16 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
 {
     public interface IAuthenticationVerifier
     {
-        Task<AuthVerificationResult> VerifySSHAsync(string host, int port, string username, string password);
-        Task<AuthVerificationResult> VerifyFTPAsync(string host, int port, string username, string password);
-        Task<AuthVerificationResult> VerifyRDPAsync(string host, int port, string username, string password, string domain = "");
-        Task<AuthVerificationResult> VerifySMTPAsync(string host, int port, string username, string password);
-        Task<AuthVerificationResult> VerifyIMAPAsync(string host, int port, string username, string password);
-        Task<AuthVerificationResult> VerifyPOP3Async(string host, int port, string username, string password);
-        Task<AuthVerificationResult> VerifyCPanelAsync(string host, int port, string username, string password);
-        Task<AuthVerificationResult> VerifyWHMAsync(string host, int port, string username, string password);
-        Task<AuthVerificationResult> VerifyPleskAsync(string host, int port, string username, string password);
-        Task<AuthVerificationResult> VerifyDatabaseAsync(CredentialType dbType, string host, int port, string username, string password, string database);
+        Task<AuthVerificationResult> VerifySSHAsync(string targetAddress, int port, string username, string password);
+        Task<AuthVerificationResult> VerifyFTPAsync(string targetAddress, int port, string username, string password);
+        Task<AuthVerificationResult> VerifyRDPAsync(string targetAddress, int port, string username, string password, string domain = "");
+        Task<AuthVerificationResult> VerifySMTPAsync(string targetAddress, int port, string username, string password);
+        Task<AuthVerificationResult> VerifyIMAPAsync(string targetAddress, int port, string username, string password);
+        Task<AuthVerificationResult> VerifyPOP3Async(string targetAddress, int port, string username, string password);
+        Task<AuthVerificationResult> VerifyCPanelAsync(string targetAddress, int port, string username, string password, string originalHostname);
+        Task<AuthVerificationResult> VerifyWHMAsync(string targetAddress, int port, string username, string password, string originalHostname);
+        Task<AuthVerificationResult> VerifyPleskAsync(string targetAddress, int port, string username, string password, string originalHostname);
+        Task<AuthVerificationResult> VerifyDatabaseAsync(CredentialType dbType, string targetAddress, int port, string username, string password, string database);
         bool IsOnCooldown(string credentialHash);
     }
 
@@ -67,15 +69,15 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             return false; // not on cooldown
         }
 
-        public async Task<AuthVerificationResult> VerifySSHAsync(string host, int port, string username, string password)
+        public async Task<AuthVerificationResult> VerifySSHAsync(string targetAddress, int port, string username, string password)
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
                 using var client = new TcpClient();
-                var connectTask = client.ConnectAsync(host, port);
+                var connectTask = client.ConnectAsync(targetAddress, port);
                 if (await Task.WhenAny(connectTask, Task.Delay(5000)) == connectTask)
                 {
                     await connectTask;
@@ -99,15 +101,15 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
         }
 
-        public async Task<AuthVerificationResult> VerifyFTPAsync(string host, int port, string username, string password)
+        public async Task<AuthVerificationResult> VerifyFTPAsync(string targetAddress, int port, string username, string password)
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
                 using var client = new TcpClient();
-                var connectTask = client.ConnectAsync(host, port);
+                var connectTask = client.ConnectAsync(targetAddress, port);
                 if (await Task.WhenAny(connectTask, Task.Delay(5000)) != connectTask)
                     return AuthVerificationResult.Error("Timeout");
                 
@@ -135,15 +137,15 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
         }
 
-        public async Task<AuthVerificationResult> VerifyRDPAsync(string host, int port, string username, string password, string domain = "")
+        public async Task<AuthVerificationResult> VerifyRDPAsync(string targetAddress, int port, string username, string password, string domain = "")
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
                 using var client = new TcpClient();
-                var connectTask = client.ConnectAsync(host, port);
+                var connectTask = client.ConnectAsync(targetAddress, port);
                 if (await Task.WhenAny(connectTask, Task.Delay(5000)) == connectTask)
                 {
                     await connectTask;
@@ -160,15 +162,15 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
         }
 
-        public async Task<AuthVerificationResult> VerifySMTPAsync(string host, int port, string username, string password)
+        public async Task<AuthVerificationResult> VerifySMTPAsync(string targetAddress, int port, string username, string password)
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
                 using var client = new TcpClient();
-                var connectTask = client.ConnectAsync(host, port);
+                var connectTask = client.ConnectAsync(targetAddress, port);
                 if (await Task.WhenAny(connectTask, Task.Delay(5000)) != connectTask)
                     return AuthVerificationResult.Error("Timeout");
                 
@@ -207,15 +209,15 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
         }
 
-        public async Task<AuthVerificationResult> VerifyIMAPAsync(string host, int port, string username, string password)
+        public async Task<AuthVerificationResult> VerifyIMAPAsync(string targetAddress, int port, string username, string password)
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
                 using var client = new TcpClient();
-                var connectTask = client.ConnectAsync(host, port);
+                var connectTask = client.ConnectAsync(targetAddress, port);
                 if (await Task.WhenAny(connectTask, Task.Delay(5000)) != connectTask)
                     return AuthVerificationResult.Error("Timeout");
 
@@ -240,15 +242,15 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
         }
 
-        public async Task<AuthVerificationResult> VerifyPOP3Async(string host, int port, string username, string password)
+        public async Task<AuthVerificationResult> VerifyPOP3Async(string targetAddress, int port, string username, string password)
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
                 using var client = new TcpClient();
-                var connectTask = client.ConnectAsync(host, port);
+                var connectTask = client.ConnectAsync(targetAddress, port);
                 if (await Task.WhenAny(connectTask, Task.Delay(5000)) != connectTask)
                     return AuthVerificationResult.Error("Timeout");
 
@@ -276,20 +278,56 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
         }
 
-        public async Task<AuthVerificationResult> VerifyCPanelAsync(string host, int port, string username, string password)
+        /// <summary>
+        /// Creates an HttpClient that pins the TCP connection to targetAddress
+        /// while using originalHostname for Host header, TLS SNI, and certificate validation.
+        /// </summary>
+        private HttpClient CreatePinnedHttpClient(string targetAddress, int port, string originalHostname)
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            var handler = new SocketsHttpHandler
+            {
+                ConnectCallback = async (context, cancellationToken) =>
+                {
+                    // Force TCP connection to the validated IP, ignoring DNS
+                    var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+                    socket.NoDelay = true;
+                    try
+                    {
+                        await socket.ConnectAsync(
+                            new DnsEndPoint(targetAddress, port),
+                            cancellationToken);
+                        return new NetworkStream(socket, ownsSocket: true);
+                    }
+                    catch
+                    {
+                        socket.Dispose();
+                        throw;
+                    }
+                },
+                SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+                {
+                    // TLS SNI and certificate validation use the original hostname
+                    TargetHost = originalHostname,
+                    RemoteCertificateValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
+                }
+            };
+
+            var client = new HttpClient(handler);
+            client.Timeout = TimeSpan.FromSeconds(10);
+            return client;
+        }
+
+        public async Task<AuthVerificationResult> VerifyCPanelAsync(string targetAddress, int port, string username, string password, string originalHostname)
+        {
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
-                using var handler = new HttpClientHandler
-                {
-                    ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
-                };
-                using var client = new HttpClient(handler);
-                client.Timeout = TimeSpan.FromSeconds(10);
-                var url = $"https://{host}:{port}/execute/Email/list_pops";
+                using var client = CreatePinnedHttpClient(targetAddress, port, originalHostname);
+                
+                // URL uses the original hostname so Host header and SNI are correct
+                var url = $"https://{originalHostname}:{port}/execute/Email/list_pops";
                 client.DefaultRequestHeaders.Authorization =
                     new AuthenticationHeaderValue("Basic",
                         Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}")));
@@ -305,20 +343,16 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
         }
 
-        public async Task<AuthVerificationResult> VerifyWHMAsync(string host, int port, string username, string password)
+        public async Task<AuthVerificationResult> VerifyWHMAsync(string targetAddress, int port, string username, string password, string originalHostname)
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
-                using var handler = new HttpClientHandler
-                {
-                    ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
-                };
-                using var client = new HttpClient(handler);
-                client.Timeout = TimeSpan.FromSeconds(10);
-                var url = $"https://{host}:{port}/json-api/version";
+                using var client = CreatePinnedHttpClient(targetAddress, port, originalHostname);
+
+                var url = $"https://{originalHostname}:{port}/json-api/version";
                 client.DefaultRequestHeaders.Authorization =
                     new AuthenticationHeaderValue("Basic",
                         Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}")));
@@ -334,20 +368,16 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
         }
 
-        public async Task<AuthVerificationResult> VerifyPleskAsync(string host, int port, string username, string password)
+        public async Task<AuthVerificationResult> VerifyPleskAsync(string targetAddress, int port, string username, string password, string originalHostname)
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
-                using var handler = new HttpClientHandler
-                {
-                    ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
-                };
-                using var client = new HttpClient(handler);
-                client.Timeout = TimeSpan.FromSeconds(10);
-                var url = $"https://{host}:{port}/api/v2/server";
+                using var client = CreatePinnedHttpClient(targetAddress, port, originalHostname);
+
+                var url = $"https://{originalHostname}:{port}/api/v2/server";
                 client.DefaultRequestHeaders.Authorization =
                     new AuthenticationHeaderValue("Basic",
                         Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}")));
@@ -363,15 +393,15 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
         }
 
-        public async Task<AuthVerificationResult> VerifyDatabaseAsync(CredentialType dbType, string host, int port, string username, string password, string database)
+        public async Task<AuthVerificationResult> VerifyDatabaseAsync(CredentialType dbType, string targetAddress, int port, string username, string password, string database)
         {
-            if (await CheckCooldownAndSetAsync(host, port, username))
+            if (await CheckCooldownAndSetAsync(targetAddress, port, username))
                 return AuthVerificationResult.RateLimited();
 
             try
             {
                 using var client = new TcpClient();
-                var connectTask = client.ConnectAsync(host, port);
+                var connectTask = client.ConnectAsync(targetAddress, port);
                 if (await Task.WhenAny(connectTask, Task.Delay(5000)) == connectTask)
                 {
                     await connectTask;

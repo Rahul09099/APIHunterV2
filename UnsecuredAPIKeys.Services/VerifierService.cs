@@ -54,6 +54,7 @@ internal static class ProviderRateLimiter
 /// </summary>
 public class VerifierService(
     DBContext dbContext,
+    IDbContextFactory<DBContext> dbContextFactory,
     IHttpClientFactory httpClientFactory,
     HashSet<ApiTypeEnum>? selectedApiTypes = null,
     bool reVerifyOnly = false,
@@ -118,8 +119,19 @@ public class VerifierService(
                     break;
                 }
 
-                // Flush metrics to DB periodically (best-effort, non-blocking)
-                _ = Task.Run(() => MetricsService.Instance.FlushIfDueAsync(dbContext));
+                // Flush metrics to DB periodically (best-effort, non-blocking with isolated DbContext)
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await using var metricsDb = await dbContextFactory.CreateDbContextAsync();
+                        await MetricsService.Instance.FlushIfDueAsync(metricsDb);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger?.LogWarning("Failed to flush metrics: {Error}", ex.Message);
+                    }
+                });
 
                 // Wait before next cycle
                 if (!_isIdle)
@@ -235,11 +247,11 @@ public class VerifierService(
                     await semaphore.WaitAsync(_cancellationTokenSource.Token);
                     try
                     {
-                        using var localDb = new DBContext();
+                        await using var localDb = await dbContextFactory.CreateDbContextAsync(_cancellationTokenSource.Token);
                         var localKey = await localDb.APIKeys.FindAsync(key.Id, _cancellationTokenSource.Token);
                         if (localKey != null)
                         {
-                            await VerifyKeyAsync(localKey);
+                            await VerifyKeyAsync(localDb, localKey);
                             await localDb.SaveChangesAsync(_cancellationTokenSource.Token);
                         }
                     }
@@ -320,12 +332,12 @@ public class VerifierService(
                     await semaphore.WaitAsync(_cancellationTokenSource.Token);
                     try
                     {
-                        // Use a fresh context per key for concurrency safety
-                        using var localDb = new DBContext();
+                        // Use a factory-created context per key for concurrency safety
+                        await using var localDb = await dbContextFactory.CreateDbContextAsync(_cancellationTokenSource.Token);
                         var localKey = await localDb.APIKeys.FindAsync(key.Id, _cancellationTokenSource.Token);
                         if (localKey != null)
                         {
-                            var wasValid = await VerifyKeyAsync(localKey);
+                            var wasValid = await VerifyKeyAsync(localDb, localKey);
                             if (wasValid) Interlocked.Increment(ref validFound);
                             await localDb.SaveChangesAsync(_cancellationTokenSource.Token);
                         }
@@ -341,7 +353,7 @@ public class VerifierService(
             });
     }
 
-    private async Task<bool> VerifyKeyAsync(APIKey key)
+    private async Task<bool> VerifyKeyAsync(DBContext localDb, APIKey key)
     {
         Interlocked.Increment(ref _verifiedCount);
         MetricsService.Instance.RecordVerified();
@@ -512,7 +524,7 @@ public class VerifierService(
                             key.ErrorCount = 0; 
                             
                             // Optimization: Purge references for invalid keys to save space
-                            await PurgeKeyReferencesAsync(key);
+                            await PurgeKeyReferencesAsync(localDb, key);
                             
                             return false; // Stop checking other providers
                         }
@@ -561,30 +573,23 @@ public class VerifierService(
         MetricsService.Instance.RecordInvalid();
         
         // Optimization: Purge references for invalid keys to save space
-        await PurgeKeyReferencesAsync(key);
+        await PurgeKeyReferencesAsync(localDb, key);
         
         return false;
     }
 
-    private async Task PurgeKeyReferencesAsync(APIKey key)
+    private async Task PurgeKeyReferencesAsync(DBContext localDb, APIKey key)
     {
         try
         {
-            // Delete the invalid API key record and its associated repo references directly from the DB
-            using var localDb = new DBContext();
-
+            // Delete associated repo references
             await localDb.RepoReferences
                 .Where(r => r.APIKeyId == key.Id)
                 .ExecuteDeleteAsync();
 
-            int deletedKeys = await localDb.APIKeys
-                .Where(k => k.Id == key.Id)
-                .ExecuteDeleteAsync();
-
-            if (deletedKeys > 0)
-            {
-                Console.WriteLine($"[dim][DB] Permanently deleted invalid APIKey #{key.Id} from database[/]");
-            }
+            // Mark key entity for deletion in DbContext tracking
+            localDb.APIKeys.Remove(key);
+            Console.WriteLine($"[dim][DB] Marked invalid APIKey #{key.Id} for deletion[/]");
         }
         catch (Exception ex)
         {
@@ -626,16 +631,20 @@ public class VerifierService(
             {
                 try
                 {
-                    var regex = new System.Text.RegularExpressions.Regex(pattern);
+                    var regex = new System.Text.RegularExpressions.Regex(pattern, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(2));
                     if (regex.IsMatch(key.ApiKey))
                     {
                         result.Add(provider);
                         break; // One match is enough for this provider
                     }
                 }
-                catch
+                catch (System.Text.RegularExpressions.RegexMatchTimeoutException ex)
                 {
-                    // Invalid regex pattern - skip it
+                    logger?.LogWarning(ex, "Regex matching timed out for provider {Provider}", provider.ProviderName);
+                }
+                catch (ArgumentException ex)
+                {
+                    logger?.LogWarning(ex, "Invalid regex pattern for provider {Provider}", provider.ProviderName);
                 }
             }
         }

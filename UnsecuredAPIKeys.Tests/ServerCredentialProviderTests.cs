@@ -77,10 +77,10 @@ namespace UnsecuredAPIKeys.Tests
             
             if (cred == null) return false;
 
-            // 1. Stored PasswordHash must be exactly the plaintext password
-            if (cred.PasswordHash != rawPassword) return false;
+            // 1. Stored Password must be exactly the plaintext password
+            if (cred.Password != rawPassword) return false;
 
-            // 2. The raw password must appear as the PasswordHash value in the serialized JSON
+            // 2. The raw password must appear as the Password value in the serialized JSON
             var serialized = JsonSerializer.Serialize(cred);
             if (rawPassword.Length >= 4 && !serialized.Contains($":\"{rawPassword}\"")) return false;
 

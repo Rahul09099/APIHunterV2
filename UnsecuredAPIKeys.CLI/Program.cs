@@ -16,6 +16,8 @@ services.AddLogging(builder => builder
     .AddConsole());
 services.AddHttpClient();
 services.AddMemoryCache();
+services.AddDbContextFactory<DBContext>(options =>
+    options.UseSqlite($"Data Source={AppInfo.DatabaseName}"));
 
 // Server Credential Services
 services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.IContextExtractor, UnsecuredAPIKeys.Providers.ServerProviders.Services.ContextExtractor>();
@@ -31,6 +33,7 @@ services.AddSingleton<UnsecuredAPIKeys.Providers.ServerProviders.Services.HostCi
 
 await using var serviceProvider = services.BuildServiceProvider();
 var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
+var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
 
 // Initialize database
 var dbService = new DatabaseService(AppInfo.DatabaseName);
@@ -72,10 +75,10 @@ while (running)
     switch (choice[0])
     {
         case '1':
-            await RunScraperAsync(dbContext, httpClientFactory);
+            await RunScraperAsync(dbContext, dbContextFactory, httpClientFactory);
             break;
         case '2':
-            await RunVerifierAsync(dbContext, httpClientFactory);
+            await RunVerifierAsync(dbContext, dbContextFactory, httpClientFactory);
             break;
         case '3':
             await ShowStatusMenuAsync(dbContext, dbService);
@@ -158,7 +161,7 @@ void DisplayBanner()
     AnsiConsole.WriteLine();
 }
 
-async Task RunScraperAsync(DBContext db, IHttpClientFactory factory)
+async Task RunScraperAsync(DBContext db, IDbContextFactory<DBContext> dbFactory, IHttpClientFactory factory)
 {
     AnsiConsole.Write(new Rule("[cyan]GitHub Scraper[/]").RuleStyle("cyan"));
     AnsiConsole.MarkupLine("[dim]Searches GitHub for exposed API keys. Runs continuously.[/]");
@@ -176,7 +179,7 @@ async Task RunScraperAsync(DBContext db, IHttpClientFactory factory)
     Console.CancelKeyPress += handler;
     try
     {
-        var scraper = new ScraperService(db, factory);
+        var scraper = new ScraperService(db, dbFactory, factory);
         await scraper.RunAsync(cts.Token);
     }
     finally
@@ -185,7 +188,7 @@ async Task RunScraperAsync(DBContext db, IHttpClientFactory factory)
     }
 }
 
-async Task RunVerifierAsync(DBContext db, IHttpClientFactory factory)
+async Task RunVerifierAsync(DBContext db, IDbContextFactory<DBContext> dbFactory, IHttpClientFactory factory)
 {
     AnsiConsole.Write(new Rule("[green]Key Verifier[/]").RuleStyle("green"));
     AnsiConsole.MarkupLine($"[dim]Maintains up to [yellow]{LiteLimits.MAX_VALID_KEYS}[/] valid keys.[/]");
@@ -283,7 +286,7 @@ async Task RunVerifierAsync(DBContext db, IHttpClientFactory factory)
     Console.CancelKeyPress += handler;
     try
     {
-        var verifier = new VerifierService(db, factory, selectedTypes, reVerifyOnly);
+        var verifier = new VerifierService(db, dbFactory, factory, selectedTypes, reVerifyOnly);
         await verifier.RunAsync(cts.Token);
     }
     finally

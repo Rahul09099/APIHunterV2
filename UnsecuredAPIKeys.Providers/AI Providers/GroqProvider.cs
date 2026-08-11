@@ -1,6 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
@@ -11,9 +17,10 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// <summary>
     /// Provider for Groq API keys.
     /// Groq uses OpenAI-compatible endpoints at api.groq.com/openai/v1.
-    /// Keys always start with "gsk_".
-    /// Verification: GET /openai/v1/models (lists available models, confirms key validity)
-    /// then POST /openai/v1/chat/completions with llama-3.1-8b-instant (cheapest/fastest).
+    /// Keys start with "gsk_".
+    /// 2-step verification strategy:
+    ///   1. GET /openai/v1/models (authenticates credential)
+    ///   2. POST /openai/v1/chat/completions (verifies live inference capability)
     /// </summary>
     [ApiProvider]
     public class GroqProvider : BaseApiKeyProvider
@@ -24,8 +31,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         public override IEnumerable<string> RegexPatterns =>
         [
             @"\bgsk_[A-Za-z0-9]{40,60}\b",
-            @"GROQ_API_KEY",
-            @"groq[_-]?api[_-]?key"
+            @"GROQ_API_KEY\s*[:=]\s*['""]?(gsk_[A-Za-z0-9]{40,60})['""]?",
+            @"GROQ_KEY\s*[:=]\s*['""]?(gsk_[A-Za-z0-9]{40,60})['""]?",
+            @"groq[_-]?api[_-]?key\s*[:=]\s*['""]?(gsk_[A-Za-z0-9]{40,60})['""]?"
         ];
 
         public GroqProvider() : base() { }
@@ -34,90 +42,163 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(
             string apiKey, HttpClient httpClient)
         {
-            // Step 1: List models — confirms key is valid and accepted
-            using var modelsRequest = new HttpRequestMessage(
-                HttpMethod.Get, "https://api.groq.com/openai/v1/models");
-            modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-            var modelsResponse = await httpClient.SendAsync(modelsRequest);
-            var modelsBody = await modelsResponse.Content.ReadAsStringAsync();
-
-            _logger?.LogDebug("Groq models response: Status={Status}, Body={Body}",
-                modelsResponse.StatusCode, TruncateResponse(modelsBody));
-
-            if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized ||
-                modelsResponse.StatusCode == HttpStatusCode.Forbidden)
+            try
             {
-                return ValidationResult.IsUnauthorized(modelsResponse.StatusCode);
-            }
+                // Step 1: List models — authenticates credential
+                using var modelsRequest = new HttpRequestMessage(
+                    HttpMethod.Get, "https://api.groq.com/openai/v1/models");
+                modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            if (!modelsResponse.IsSuccessStatusCode)
-            {
-                return ValidationResult.HasHttpError(modelsResponse.StatusCode,
-                    $"Models listing failed: {TruncateResponse(modelsBody)}");
-            }
+                var modelsResponse = await httpClient.SendAsync(modelsRequest);
+                var modelsBody = await modelsResponse.Content.ReadAsStringAsync();
 
-            // Parse available models
-            var models = ParseModels(modelsBody);
+                _logger?.LogDebug("Groq models response: Status={Status}, Body={Body}",
+                    modelsResponse.StatusCode, TruncateResponse(modelsBody));
 
-            // Step 2: Quick chat completion to confirm the key has active quota
-            // llama-3.1-8b-instant is Groq's fastest and cheapest model
-            var preferredModels = new[] { "llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it" };
-            var modelToUse = models?
-                .Select(m => m.ModelId)
-                .FirstOrDefault(id => preferredModels.Any(p => id.Contains(p)))
-                ?? "llama-3.1-8b-instant";
-
-            using var chatRequest = new HttpRequestMessage(
-                HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
-            chatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            chatRequest.Content = new StringContent(
-                JsonSerializer.Serialize(new
+                if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized ||
+                    modelsResponse.StatusCode == HttpStatusCode.Forbidden)
                 {
-                    model = modelToUse,
-                    messages = new[] { new { role = "user", content = "Hi" } },
-                    max_tokens = 1
-                }),
-                System.Text.Encoding.UTF8, "application/json");
+                    var unauth = ValidationResult.IsUnauthorized(modelsResponse.StatusCode, "Invalid Groq API key");
+                    unauth.RawResponse = modelsBody;
+                    return unauth;
+                }
 
-            var chatResponse = await httpClient.SendAsync(chatRequest);
-            var chatBody = await chatResponse.Content.ReadAsStringAsync();
+                if (!modelsResponse.IsSuccessStatusCode)
+                {
+                    var err = ValidationResult.HasHttpError(modelsResponse.StatusCode,
+                        $"Models listing failed: {TruncateResponse(modelsBody)}");
+                    err.RawResponse = modelsBody;
+                    return err;
+                }
 
-            _logger?.LogDebug("Groq chat response ({Model}): Status={Status}, Body={Body}",
-                modelToUse, chatResponse.StatusCode, TruncateResponse(chatBody));
+                var models = ParseModels(modelsBody);
 
-            if (IsSuccessStatusCode(chatResponse.StatusCode))
-            {
-                var result = ValidationResult.Success(chatResponse.StatusCode, models);
+                // Step 2: Minimal chat completion to verify live inference.
+                var preferredModels = new[] { "llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it" };
+                var modelToUse = models?
+                    .Select(m => m.ModelId)
+                    .FirstOrDefault(id => preferredModels.Any(p => id.Equals(p, StringComparison.OrdinalIgnoreCase)))
+                    ?? models?.Select(m => m.ModelId).FirstOrDefault();
+
+                if (string.IsNullOrEmpty(modelToUse))
+                {
+                    var resultAuthOnly = ValidationResult.Success(modelsResponse.StatusCode, "Valid Groq key (models listed)");
+                    resultAuthOnly.AvailableModels = models;
+                    resultAuthOnly.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["models_parsed"] = models != null,
+                        ["inference_tested"] = false
+                    };
+                    resultAuthOnly.RawResponse = modelsBody;
+                    return resultAuthOnly;
+                }
+
+                using var chatRequest = new HttpRequestMessage(
+                    HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
+                chatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                chatRequest.Content = new StringContent(
+                    JsonSerializer.Serialize(new
+                    {
+                        model = modelToUse,
+                        messages = new[] { new { role = "user", content = "Hi" } },
+                        max_completion_tokens = 1
+                    }),
+                    Encoding.UTF8, "application/json");
+
+                var chatResponse = await httpClient.SendAsync(chatRequest);
+                var chatBody = await chatResponse.Content.ReadAsStringAsync();
+
+                _logger?.LogDebug("Groq chat response ({Model}): Status={Status}, Body={Body}",
+                    modelToUse, chatResponse.StatusCode, TruncateResponse(chatBody));
+
+                ValidationResult result;
+
+                if (IsSuccessStatusCode(chatResponse.StatusCode))
+                {
+                    result = ValidationResult.Success(chatResponse.StatusCode, models);
+                    result.AvailableModels = models;
+                    result.Detail = "Valid Groq key — live inference successful";
+                    result.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["inference_tested"] = true,
+                        ["inference_working"] = true,
+                        ["tested_model"] = modelToUse
+                    };
+                    result.RawResponse = chatBody;
+                    return result;
+                }
+
+                if (chatResponse.StatusCode == HttpStatusCode.Unauthorized ||
+                    chatResponse.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    result = ValidationResult.IsUnauthorized(chatResponse.StatusCode, "Groq authentication failed during chat inference");
+                    result.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = false,
+                        ["inference_tested"] = true,
+                        ["inference_working"] = false,
+                        ["tested_model"] = modelToUse
+                    };
+                    result.RawResponse = chatBody;
+                    return result;
+                }
+
+                if ((int)chatResponse.StatusCode == 429)
+                {
+                    result = ValidationResult.Success(
+                        chatResponse.StatusCode,
+                        "Valid key; request rate or quota limited");
+                    result.IsQuotaExceeded = true;
+                    result.AvailableModels = models;
+                    result.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["inference_tested"] = true,
+                        ["inference_working"] = false,
+                        ["inference_limited"] = true,
+                        ["tested_model"] = modelToUse
+                    };
+                    result.RawResponse = chatBody;
+                    return result;
+                }
+
+                if (ContainsAny(chatBody.ToLowerInvariant(), QuotaIndicators))
+                {
+                    result = ValidationResult.Success(
+                        chatResponse.StatusCode,
+                        $"Valid key but quota issue: {TruncateResponse(chatBody)}");
+                    result.IsQuotaExceeded = true;
+                    result.AvailableModels = models;
+                    result.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["inference_tested"] = true,
+                        ["inference_working"] = false,
+                        ["tested_model"] = modelToUse
+                    };
+                    result.RawResponse = chatBody;
+                    return result;
+                }
+
+                result = ValidationResult.HasHttpError(chatResponse.StatusCode,
+                    $"Chat completion failed: {TruncateResponse(chatBody)}");
                 result.AvailableModels = models;
+                result.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = true,
+                    ["inference_working"] = false,
+                    ["tested_model"] = modelToUse
+                };
+                result.RawResponse = chatBody;
                 return result;
             }
-
-            if (chatResponse.StatusCode == HttpStatusCode.Unauthorized ||
-                chatResponse.StatusCode == HttpStatusCode.Forbidden)
+            catch (Exception ex)
             {
-                return ValidationResult.IsUnauthorized(chatResponse.StatusCode);
+                return ValidationResult.HasNetworkError(ex.Message);
             }
-
-            if ((int)chatResponse.StatusCode == 429)
-            {
-                // Rate limited = key is valid but quota exhausted
-                var limited = ValidationResult.Success(chatResponse.StatusCode,
-                    "quota exhausted");
-                limited.AvailableModels = models;
-                return limited;
-            }
-
-            if (ContainsAny(chatBody, QuotaIndicators))
-            {
-                var limited = ValidationResult.Success(chatResponse.StatusCode,
-                    $"Valid key but quota issue: {TruncateResponse(chatBody)}");
-                limited.AvailableModels = models;
-                return limited;
-            }
-
-            return ValidationResult.HasHttpError(chatResponse.StatusCode,
-                $"Chat completion failed: {TruncateResponse(chatBody)}");
         }
 
         private List<ModelInfo>? ParseModels(string json)
@@ -125,13 +206,16 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             try
             {
                 using var doc = JsonDocument.Parse(json);
-                if (!doc.RootElement.TryGetProperty("data", out var data)) return null;
+                if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return null;
 
                 var list = new List<ModelInfo>();
                 foreach (var el in data.EnumerateArray())
                 {
                     var id = el.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "";
-                    list.Add(new ModelInfo { ModelId = id, DisplayName = id });
+                    if (!string.IsNullOrEmpty(id))
+                    {
+                        list.Add(new ModelInfo { ModelId = id, DisplayName = id });
+                    }
                 }
                 return list;
             }
@@ -141,6 +225,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         protected override bool IsValidKeyFormat(string apiKey) =>
             !string.IsNullOrWhiteSpace(apiKey) &&
             apiKey.StartsWith("gsk_", StringComparison.Ordinal) &&
-            apiKey.Length >= 44;
+            apiKey.Length >= 44 &&
+            apiKey.Length <= 64;
     }
 }

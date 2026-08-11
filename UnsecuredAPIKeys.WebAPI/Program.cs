@@ -37,12 +37,16 @@ if (!string.IsNullOrEmpty(connectionString))
 
     builder.Services.AddDbContext<DBContext>(options =>
         options.UseNpgsql(parsedConnectionString));
+    builder.Services.AddDbContextFactory<DBContext>(options =>
+        options.UseNpgsql(parsedConnectionString), ServiceLifetime.Scoped);
 }
 else
 {
     Console.WriteLine($"🗄️ Database: Using SQLite ({dbPath})");
     builder.Services.AddDbContext<DBContext>(options =>
         options.UseSqlite($"Data Source={dbPath}"));
+    builder.Services.AddDbContextFactory<DBContext>(options =>
+        options.UseSqlite($"Data Source={dbPath}"), ServiceLifetime.Scoped);
 }
 
 // Detecting Mode

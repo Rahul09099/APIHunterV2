@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
@@ -6,7 +9,14 @@ using UnsecuredAPIKeys.Providers.Common;
 namespace UnsecuredAPIKeys.Providers.Communication_Providers
 {
     /// <summary>
-    /// Provider for Slack API tokens - scraper only (no verification implemented yet)
+    /// Provider for Slack API tokens (xoxb- bot, xoxp- user, xapp- app, xwfp- workflow).
+    /// Auth: Authorization: Bearer {token}
+    /// Base URL: https://slack.com/api
+    ///
+    /// Verification strategy:
+    ///   1. Primary auth: POST https://slack.com/api/auth.test (requires no specific OAuth scopes)
+    ///   2. Optional billing plan: POST https://slack.com/api/team.billing.info (requires team.billing:read scope)
+    /// Official docs: https://docs.slack.dev/reference/methods/auth.test
     /// </summary>
     [ApiProvider]
     public class SlackProvider : BaseApiKeyProvider
@@ -16,10 +26,12 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"xox[baprs]-[A-Za-z0-9-]{10,}",  // Slack token formats (bot, app, user, refresh, signing)
-            @"slack[_-]?[A-Za-z0-9]{32,}",
+            @"\b(xoxb|xoxp|xapp|xwfp|xoxr)-[A-Za-z0-9-]{10,256}\b",
             @"SLACK_TOKEN",
-            @"SLACK_API_TOKEN"
+            @"SLACK_API_TOKEN",
+            @"SLACK_BOT_TOKEN",
+            @"SLACK_USER_TOKEN",
+            @"(?i)\bSLACK[\s_-]*API[\s_-]*TOKEN\s*[:=]\s*['""]?([A-Za-z0-9_-]{20,256})['""]?"
         ];
 
         public SlackProvider() : base() { }
@@ -29,79 +41,120 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
         {
             try
             {
+                // Step 1: Query auth.test via POST https://slack.com/api/auth.test
                 using var request = new HttpRequestMessage(HttpMethod.Post, "https://slack.com/api/auth.test");
-                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
                 var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
 
-                _logger?.LogDebug("Slack API response: Status={StatusCode}, Body={Body}",
+                _logger?.LogDebug("Slack API auth.test response: Status={StatusCode}, Body={Body}",
                     response.StatusCode, TruncateResponse(responseBody));
+
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        "Slack API rate limited (429) — validation unavailable");
+                }
+
+                if ((int)response.StatusCode >= 500)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        $"Slack service error ({response.StatusCode}) — validation unavailable");
+                }
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    // Slack returns 200 OK even for invalid tokens, but with "ok": false in body
-                    using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                    using var doc = JsonDocument.Parse(responseBody);
                     var root = doc.RootElement;
-                    
+
                     if (root.TryGetProperty("ok", out var ok) && ok.GetBoolean())
                     {
                         var result = ValidationResult.Success(response.StatusCode, "Valid Slack token");
-                        
-                        string teamName = root.TryGetProperty("team", out var team) ? team.GetString() ?? "Unknown Team" : "Unknown Team";
-                        string user = root.TryGetProperty("user", out var usr) ? usr.GetString() ?? "Unknown User" : "Unknown User";
-                        
-                        result.AccountTier = teamName;
-                        result.Detail = $"User: {user}";
+                        result.RawResponse = responseBody;
 
-                        // Try to get billing plan type
-                        try 
+                        string teamName = root.TryGetProperty("team", out var teamProp) ? teamProp.GetString() ?? "" : "";
+                        string teamId = root.TryGetProperty("team_id", out var teamIdProp) ? teamIdProp.GetString() ?? "" : "";
+                        string userName = root.TryGetProperty("user", out var userProp) ? userProp.GetString() ?? "" : "";
+                        string userId = root.TryGetProperty("user_id", out var userIdProp) ? userIdProp.GetString() ?? "" : "";
+                        string botId = root.TryGetProperty("bot_id", out var botIdProp) ? botIdProp.GetString() ?? "" : "";
+
+                        string tokenType = apiKey.StartsWith("xoxb-", StringComparison.Ordinal) ? "bot"
+                            : apiKey.StartsWith("xoxp-", StringComparison.Ordinal) ? "user"
+                            : apiKey.StartsWith("xapp-", StringComparison.Ordinal) ? "app"
+                            : apiKey.StartsWith("xwfp-", StringComparison.Ordinal) ? "workflow"
+                            : "other";
+
+                        result.AccountTier = !string.IsNullOrEmpty(teamName) ? teamName : "Slack Workspace";
+                        result.Detail = $"Valid Slack {tokenType} token — User: {userName} ({userId}), Workspace: {teamName} ({teamId})";
+
+                        result.Metadata = new Dictionary<string, object>
                         {
-                            using var billingRequest = new HttpRequestMessage(HttpMethod.Get, "https://slack.com/api/team.billing.info");
-                            billingRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                            ["authentication_valid"] = true,
+                            ["token_type"] = tokenType,
+                            ["team_name"] = teamName,
+                            ["team_id"] = teamId,
+                            ["user_name"] = userName,
+                            ["user_id"] = userId,
+                            ["bot_id"] = botId
+                        };
+
+                        // Step 2: Optional billing plan query via POST https://slack.com/api/team.billing.info
+                        try
+                        {
+                            using var billingRequest = new HttpRequestMessage(HttpMethod.Post, "https://slack.com/api/team.billing.info");
+                            billingRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
                             var billingResponse = await httpClient.SendAsync(billingRequest);
-                            var billingBody = await billingResponse.Content.ReadAsStringAsync();
-                            
-                            using var billingDoc = System.Text.Json.JsonDocument.Parse(billingBody);
-                            if (billingDoc.RootElement.TryGetProperty("plan", out var plan))
+                            string billingBody = await billingResponse.Content.ReadAsStringAsync();
+
+                            if (IsSuccessStatusCode(billingResponse.StatusCode))
                             {
-                                result.Balance = $"Plan: {plan.GetString()}";
+                                using var billingDoc = JsonDocument.Parse(billingBody);
+                                var billingRoot = billingDoc.RootElement;
+
+                                if (billingRoot.TryGetProperty("ok", out var billingOk) && billingOk.GetBoolean())
+                                {
+                                    if (billingRoot.TryGetProperty("plan", out var planProp) && planProp.ValueKind == JsonValueKind.String)
+                                    {
+                                        string planName = planProp.GetString() ?? "";
+                                        result.Metadata["billing_plan"] = planName;
+                                        result.Metadata["billing_access"] = true;
+                                    }
+                                }
+                                else
+                                {
+                                    result.Metadata["billing_access"] = false;
+                                }
                             }
                         }
-                        catch { /* Best effort */ }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogDebug("Slack team.billing.info lookup failed: {Message}", ex.Message);
+                        }
 
                         return result;
                     }
                     else
                     {
                         string error = root.TryGetProperty("error", out var err) ? err.GetString() ?? "unknown_error" : "unknown_error";
-                        
+
                         if (error == "invalid_auth" || error == "token_revoked" || error == "token_expired" || error == "account_inactive")
                         {
-                             return ValidationResult.IsUnauthorized(response.StatusCode, $"Slack rejected key: {error}");
+                            return ValidationResult.IsUnauthorized(response.StatusCode, $"Slack rejected key: {error}");
                         }
-                        
-                        // Some other error inside 200 OK (e.g. missing scopes for auth.test - rare)
+
                         return ValidationResult.HasHttpError(response.StatusCode, $"Slack API error: {error}");
                     }
                 }
-                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || 
-                         response.StatusCode == System.Net.HttpStatusCode.Forbidden)
-                {
-                    return ValidationResult.IsUnauthorized(response.StatusCode);
-                }
-                else
-                {
-                    // Check for rate limits
-                    if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests || 
-                        responseBody.Contains("ratelimited"))
-                    {
-                        return ValidationResult.Success(response.StatusCode, $"Valid key but rate limited: {TruncateResponse(responseBody)}");
-                    }
 
-                    return ValidationResult.HasHttpError(response.StatusCode, 
-                        $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return ValidationResult.IsUnauthorized(response.StatusCode, "Invalid or expired Slack token");
                 }
+
+                return ValidationResult.HasHttpError(response.StatusCode,
+                    $"Slack request failed: Status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
             }
             catch (Exception ex)
             {
@@ -111,7 +164,14 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            return !string.IsNullOrWhiteSpace(apiKey) && (apiKey.StartsWith("xox") || apiKey.Length >= 32);
+            // Slack tokens strictly start with xoxb-, xoxp-, xapp-, xwfp-, xoxr-, or xox
+            return !string.IsNullOrWhiteSpace(apiKey) &&
+                   (apiKey.StartsWith("xoxb-", StringComparison.Ordinal) ||
+                    apiKey.StartsWith("xoxp-", StringComparison.Ordinal) ||
+                    apiKey.StartsWith("xapp-", StringComparison.Ordinal) ||
+                    apiKey.StartsWith("xwfp-", StringComparison.Ordinal) ||
+                    apiKey.StartsWith("xoxr-", StringComparison.Ordinal) ||
+                    apiKey.StartsWith("xox", StringComparison.Ordinal));
         }
     }
 }

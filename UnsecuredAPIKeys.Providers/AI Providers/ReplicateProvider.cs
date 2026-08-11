@@ -1,11 +1,19 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
 using UnsecuredAPIKeys.Providers.Common;
-using System.Net.Http.Headers;
 
 namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
+    /// <summary>
+    /// Provider for Replicate API tokens.
+    /// Replicate API tokens always start with "r8_".
+    /// Verification: GET https://api.replicate.com/v1/account — returns user/organization account details.
+    /// Official docs: https://replicate.com/docs/reference/http#account.get
+    /// </summary>
     [ApiProvider]
     public class ReplicateProvider : BaseApiKeyProvider
     {
@@ -14,7 +22,10 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"r8_[A-Za-z0-9]{32,}"
+            @"\br8_[A-Za-z0-9]{32,}\b",
+            @"REPLICATE_API_TOKEN",
+            @"REPLICATE_API_KEY",
+            @"replicate[_-]?token"
         ];
 
         public ReplicateProvider() : base() { }
@@ -22,69 +33,118 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(string apiKey, HttpClient httpClient)
         {
-            try 
+            try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.replicate.com/v1/account");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                // Replicate requires User-Agent
                 request.Headers.UserAgent.ParseAdd("UnsecuredAPIKeys-Lite/1.0");
 
                 var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
 
-                if (response.IsSuccessStatusCode)
+                _logger?.LogDebug("Replicate account response: Status={Status}, Body={Body}",
+                    response.StatusCode, TruncateResponse(responseBody));
+
+                if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    var result = new ValidationResult
+                    var result = ValidationResult.Success(response.StatusCode, "Valid Replicate token");
+                    result.RawResponse = responseBody;
+                    result.Metadata = new Dictionary<string, object>
                     {
-                        Status = ValidationAttemptStatus.Valid,
-                        HttpStatusCode = response.StatusCode,
-                        Detail = "Valid Replicate token"
+                        ["authentication_valid"] = true
                     };
 
-                    // Parse username/type from account response
                     try
                     {
-                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        using var doc = JsonDocument.Parse(responseBody);
                         var root = doc.RootElement;
-                        
-                        string? username = root.TryGetProperty("username", out var u) ? u.GetString() : null;
-                        string? type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
 
-                        if (!string.IsNullOrEmpty(username))
-                            result.AccountTier = username;
-                        
-                        if (!string.IsNullOrEmpty(type))
-                            result.Detail = $"Valid {type} account";
+                        if (root.TryGetProperty("type", out var tProp) && tProp.ValueKind == JsonValueKind.String)
+                        {
+                            string type = tProp.GetString() ?? "";
+                            result.Metadata["account_type"] = type;
+                            if (!string.IsNullOrEmpty(type))
+                                result.Detail = $"Valid Replicate token ({type} account)";
+                        }
+
+                        if (root.TryGetProperty("username", out var uProp) && uProp.ValueKind == JsonValueKind.String)
+                        {
+                            string username = uProp.GetString() ?? "";
+                            result.Metadata["username"] = username;
+                            if (!string.IsNullOrEmpty(username))
+                                result.AccountTier = username;
+                        }
+
+                        if (root.TryGetProperty("name", out var nProp) && nProp.ValueKind == JsonValueKind.String)
+                        {
+                            result.Metadata["name"] = nProp.GetString() ?? "";
+                        }
+
+                        if (root.TryGetProperty("github_url", out var ghProp) && ghProp.ValueKind == JsonValueKind.String)
+                        {
+                            result.Metadata["github_url"] = ghProp.GetString() ?? "";
+                        }
                     }
-                    catch { /* Best effort */ }
+                    catch
+                    {
+                        // Best-effort account metadata extraction
+                    }
 
                     return result;
                 }
-                
-                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    return ValidationResult.IsUnauthorized(response.StatusCode);
+                    return ValidationResult.IsUnauthorized(response.StatusCode,
+                        "Invalid or expired Replicate API token");
                 }
 
-                if (response.StatusCode == System.Net.HttpStatusCode.PaymentRequired)
+                if (response.StatusCode == HttpStatusCode.Forbidden)
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Valid key but account has no funds (402 Payment Required)");
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        "Replicate API token forbidden (403) — permission restriction");
+                }
+
+                if (response.StatusCode == HttpStatusCode.PaymentRequired)
+                {
+                    var result = ValidationResult.Success(response.StatusCode,
+                        "Valid Replicate token — 402 Payment Required (no active payment method or balance)");
                     result.IsQuotaExceeded = true;
+                    result.RawResponse = responseBody;
+                    result.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["quota_exceeded"] = true
+                    };
                     return result;
                 }
 
-                return ValidationResult.HasHttpError(response.StatusCode, $"Status: {response.StatusCode} Body: {TruncateResponse(responseBody)}");
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        "Replicate API rate limited (429)");
+                }
+
+                if ((int)response.StatusCode >= 500)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        $"Replicate service error ({response.StatusCode}) — validation unavailable");
+                }
+
+                return ValidationResult.HasHttpError(response.StatusCode,
+                    $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}");
             }
             catch (Exception ex)
             {
-                // Network-level failure — use HasNetworkError, not HasHttpError
                 return ValidationResult.HasNetworkError(ex.Message);
             }
         }
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            return !string.IsNullOrWhiteSpace(apiKey) && apiKey.StartsWith("r8_") && apiKey.Length >= 35;
+            return !string.IsNullOrWhiteSpace(apiKey) &&
+                   apiKey.StartsWith("r8_", StringComparison.Ordinal) &&
+                   apiKey.Length >= 35;
         }
     }
 }

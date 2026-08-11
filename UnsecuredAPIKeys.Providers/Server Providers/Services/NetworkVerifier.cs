@@ -25,6 +25,13 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
         
         Task<string> PerformOSFingerprintingAsync(string host);
         Task<SslCertificateInfo> ExtractSslCertificateAsync(string host, int port);
+
+        /// <summary>
+        /// Extracts SSL certificate by connecting to targetAddress (validated IP)
+        /// while using sniHostname for TLS SNI and certificate validation.
+        /// This prevents DNS rebinding attacks.
+        /// </summary>
+        Task<SslCertificateInfo> ExtractSslCertificateAsync(string targetAddress, int port, string sniHostname);
     }
 
     public class NetworkVerifier : INetworkVerifier
@@ -140,10 +147,18 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             string host,
             int port)
         {
+            return await ExtractSslCertificateAsync(host, port, host);
+        }
+
+        public async Task<SslCertificateInfo> ExtractSslCertificateAsync(
+            string targetAddress,
+            int port,
+            string sniHostname)
+        {
             try
             {
                 using var client = new TcpClient();
-                var connectTask = client.ConnectAsync(host, port);
+                var connectTask = client.ConnectAsync(targetAddress, port);
                 var timeoutTask = Task.Delay(TimeSpan.FromSeconds(10));
                 
                 var completedTask = await Task.WhenAny(connectTask, timeoutTask);
@@ -158,12 +173,14 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
                     return SslCertificateInfo.Error("Unreachable");
                 }
                 
+                // TCP connection is to targetAddress (validated IP),
+                // but TLS SNI and certificate validation use the original hostname
                 using var sslStream = new SslStream(
                     client.GetStream(),
                     false,
                     (sender, certificate, chain, errors) => true);
                 
-                var authTask = sslStream.AuthenticateAsClientAsync(host);
+                var authTask = sslStream.AuthenticateAsClientAsync(sniHostname);
                 var authTimeoutTask = Task.Delay(TimeSpan.FromSeconds(10));
                 
                 var completedAuth = await Task.WhenAny(authTask, authTimeoutTask);
@@ -189,8 +206,8 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders.Services
             }
             catch (Exception ex)
             {
-                _logger?.LogDebug("SSL certificate extraction failed for {Host}:{Port} - {Error}", 
-                    host, port, ex.Message);
+                _logger?.LogDebug("SSL certificate extraction failed for {Target}:{Port} (SNI: {Hostname}) - {Error}", 
+                    targetAddress, port, sniHostname, ex.Message);
                 return SslCertificateInfo.Error(ex.Message);
             }
         }

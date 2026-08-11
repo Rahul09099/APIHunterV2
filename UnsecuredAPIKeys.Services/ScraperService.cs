@@ -19,6 +19,7 @@ namespace UnsecuredAPIKeys.Services;
 public class ScraperService
 {
     private readonly DBContext _dbContext;
+    private readonly IDbContextFactory<DBContext> _dbContextFactory;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ScraperService>? _logger;
     private readonly IReadOnlyList<IApiKeyProvider> _providers;
@@ -136,9 +137,10 @@ public class ScraperService
         }
     }
 
-    public ScraperService(DBContext dbContext, IHttpClientFactory httpClientFactory, ILogger<ScraperService>? logger = null)
+    public ScraperService(DBContext dbContext, IDbContextFactory<DBContext> dbContextFactory, IHttpClientFactory httpClientFactory, ILogger<ScraperService>? logger = null)
     {
         _dbContext = dbContext;
+        _dbContextFactory = dbContextFactory;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _providers = ApiProviderRegistry.ScraperProviders;
@@ -1057,8 +1059,8 @@ public class ScraperService
                 {
                     if (_cancellationTokenSource!.Token.IsCancellationRequested) return;
                     
-                    // Use a fresh context per result to avoid thread-safety issues
-                    using var localDb = new DBContext();
+                    // Use a factory-created context per result to avoid thread-safety issues
+                    await using var localDb = await _dbContextFactory.CreateDbContextAsync(_cancellationTokenSource!.Token);
                     var found = await ProcessResultAndCollectAsync(localDb, repoRef, token, query, discoveredBy);
                     if (found != null && found.Any())
                     {
@@ -1127,16 +1129,35 @@ public class ScraperService
                 {
                     var apiKey = match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
 
-                        // Special handling for Kling AI
+                        // Special handling for Kling AI (Access Key + Secret Key pairing)
                         if (provider.ApiType == ApiTypeEnum.KlingAI && !apiKey.Contains(':'))
                         {
-                            var secretMatch = System.Text.RegularExpressions.Regex.Match(content, 
-                                @"(?:KLING|kling).*?(?:SECRET|secret|sk).*?['""]([a-zA-Z0-9]{16,})['""]", 
-                                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                                
-                            if (secretMatch.Success)
+                            var secretKey = await ExtractKlingSecretFromContextAsync(content, match.Index);
+                            if (!string.IsNullOrEmpty(secretKey))
                             {
-                                apiKey = $"{apiKey}:{secretMatch.Groups[1].Value}";
+                                apiKey = $"{apiKey}:{secretKey}";
+                            }
+                        }
+
+                        // Special handling for AWS IAM (AKIA/ASIA + Secret + optional Session Token context pairing)
+                        if (provider.ApiType == ApiTypeEnum.AWSIAM && !apiKey.Contains(":::") && !apiKey.Contains("|"))
+                        {
+                            var (secretKey, sessionToken) = await ExtractAwsSecretAndTokenFromContextAsync(content, apiKey, match.Index);
+                            if (!string.IsNullOrEmpty(secretKey))
+                            {
+                                apiKey = string.IsNullOrEmpty(sessionToken) 
+                                    ? $"{apiKey}:::{secretKey}"
+                                    : $"{apiKey}:::{secretKey}:::{sessionToken}";
+                            }
+                        }
+
+                        // Special handling for Azure OpenAI (Key + Endpoint pairing)
+                        if (provider.ApiType == ApiTypeEnum.AzureOpenAI && !apiKey.Contains('|'))
+                        {
+                            var azureEndpoint = await ExtractAzureOpenAiEndpointFromContextAsync(content, match.Index);
+                            if (!string.IsNullOrEmpty(azureEndpoint))
+                            {
+                                apiKey = $"{apiKey}|{azureEndpoint}";
                             }
                         }
 
@@ -1327,5 +1348,90 @@ public class ScraperService
         {
             return null;
         }
+    }
+
+    private static async Task<(string? secretKey, string? sessionToken)> ExtractAwsSecretAndTokenFromContextAsync(string content, string accessKeyId, int matchIndex)
+    {
+        var contextExtractor = new UnsecuredAPIKeys.Providers.ServerProviders.Services.ContextExtractor();
+        var credentialContext = await contextExtractor.ExtractContextAsync(content, matchIndex, 15);
+        var context = credentialContext.FullContext;
+        if (string.IsNullOrEmpty(context)) return (null, null);
+
+        string? secretKey = null;
+        string? sessionToken = null;
+
+        // Named secret key assignment pattern (prevents false positive matches against arbitrary 40-char strings)
+        var secretMatch = System.Text.RegularExpressions.Regex.Match(context,
+            @"\b(?:AWS_SECRET_ACCESS_KEY|aws_secret_access_key|SecretAccessKey|secret_key|secret)\s*[:=]\s*['""]?([A-Za-z0-9/+=]{20,})['""]?",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+            TimeSpan.FromSeconds(2));
+
+        if (secretMatch.Success)
+        {
+            secretKey = secretMatch.Groups[1].Value.Trim('\'', '"', ';', ',');
+        }
+
+        // Session Token pattern
+        var tokenMatch = System.Text.RegularExpressions.Regex.Match(context,
+            @"\b(?:AWS_SESSION_TOKEN|aws_session_token|SessionToken|security_token)\s*[:=]\s*['""]?([A-Za-z0-9/+=]{50,})['""]?",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+            TimeSpan.FromSeconds(2));
+
+        if (tokenMatch.Success)
+        {
+            sessionToken = tokenMatch.Groups[1].Value.Trim('\'', '"', ';', ',');
+        }
+
+        return (secretKey, sessionToken);
+    }
+
+    private static async Task<string?> ExtractAzureOpenAiEndpointFromContextAsync(string content, int matchIndex)
+    {
+        var contextExtractor = new UnsecuredAPIKeys.Providers.ServerProviders.Services.ContextExtractor();
+        var credentialContext = await contextExtractor.ExtractContextAsync(content, matchIndex, 15);
+        var context = credentialContext.FullContext;
+        if (string.IsNullOrEmpty(context)) return null;
+
+        var endpointMatch = System.Text.RegularExpressions.Regex.Match(context,
+            @"\b(?:AZURE_OPENAI_ENDPOINT|AZURE_ENDPOINT|AZURE_OPENAI_BASE_PATH)\s*[:=]\s*['""]?(https://[a-zA-Z0-9_\-]+\.(?:openai\.azure\.com|cognitiveservices\.azure\.com|ai\.azure\.com))['""]?",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+            TimeSpan.FromSeconds(2));
+
+        if (endpointMatch.Success)
+        {
+            return endpointMatch.Groups[1].Value.Trim('\'', '"', ';', ',');
+        }
+
+        var rawUrlMatch = System.Text.RegularExpressions.Regex.Match(context,
+            @"\b(https://[a-zA-Z0-9_\-]+\.(?:openai\.azure\.com|cognitiveservices\.azure\.com|ai\.azure\.com))\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+            TimeSpan.FromSeconds(2));
+
+        if (rawUrlMatch.Success)
+        {
+            return rawUrlMatch.Groups[1].Value.Trim('\'', '"', ';', ',');
+        }
+
+        return null;
+    }
+
+    private static async Task<string?> ExtractKlingSecretFromContextAsync(string content, int matchIndex)
+    {
+        var contextExtractor = new UnsecuredAPIKeys.Providers.ServerProviders.Services.ContextExtractor();
+        var credentialContext = await contextExtractor.ExtractContextAsync(content, matchIndex, 15);
+        var context = credentialContext.FullContext;
+        if (string.IsNullOrEmpty(context)) return null;
+
+        var secretMatch = System.Text.RegularExpressions.Regex.Match(context,
+            @"\b(?:KLING_SECRET_KEY|kling_secret_key|KLING_SK|kling_sk|secret_key|secret)\s*[:=]\s*['""]?([A-Za-z0-9]{16,})['""]?",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+            TimeSpan.FromSeconds(2));
+
+        if (secretMatch.Success)
+        {
+            return secretMatch.Groups[1].Value.Trim('\'', '"', ';', ',');
+        }
+
+        return null;
     }
 }

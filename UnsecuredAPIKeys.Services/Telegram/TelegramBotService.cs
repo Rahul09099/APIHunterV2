@@ -407,8 +407,9 @@ public class TelegramBotService : BackgroundService
                     {
                         using var scope = _serviceProvider.CreateScope();
                         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+                        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
                         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-                        var scraper = new ScraperService(dbContext, httpClientFactory);
+                        var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
                         await scraper.RunScrapeByGroupAsync(groupName, isDeep, chatId, ct);
                     }, chatId);
  
@@ -500,8 +501,9 @@ public class TelegramBotService : BackgroundService
                     {
                         using var scope = _serviceProvider.CreateScope();
                         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+                        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
                         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-                        var scraper = new ScraperService(dbContext, httpClientFactory);
+                        var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
                         await scraper.RunScrapeByGroupAsync(group, isDeep, chatId, ct);
                     }, userId);
 
@@ -588,8 +590,9 @@ public class TelegramBotService : BackgroundService
                 {
                     using var scope = _serviceProvider.CreateScope();
                     var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+                    var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
                     var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-                    var scraper = new ScraperService(dbContext, httpClientFactory);
+                    var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
                     await scraper.RunScrapeAllGroupsAsync(chatId, ct);
                 }, chatId);
 
@@ -871,8 +874,9 @@ public class TelegramBotService : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-        var scraper = new ScraperService(dbContext, httpClientFactory);
+        var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
 
         var allGroups = await scraper.GetAvailableGroupsAsync(ct);
         var stats = await dbService.GetCategorizedStatisticsAsync(dbContext);
@@ -1036,8 +1040,9 @@ public class TelegramBotService : BackgroundService
         {
             using var scope = _serviceProvider.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+            var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
             var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-            var verifier = new VerifierService(dbContext, httpClientFactory, selectedTypes, reVerifyOnly);
+            var verifier = new VerifierService(dbContext, dbContextFactory, httpClientFactory, selectedTypes, reVerifyOnly);
             await verifier.RunAsync(cancellationToken);
         }, chatId);
 
@@ -1946,8 +1951,9 @@ public class TelegramBotService : BackgroundService
     {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+        var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-        var scraper = new ScraperService(dbContext, httpClientFactory);
+        var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
 
         var groups = await scraper.GetAvailableGroupsAsync(ct);
 

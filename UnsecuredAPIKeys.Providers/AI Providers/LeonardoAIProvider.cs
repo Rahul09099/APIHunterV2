@@ -8,7 +8,7 @@ using UnsecuredAPIKeys.Providers.Common;
 namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
-    /// Provider for Leonardo.ai API keys — AI image and video generation platform.
+    /// Provider for Leonardo.ai API keys — AI image generation platform.
     ///
     /// Key format: UUID (XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)
     /// Confirmed from official docs: https://docs.leonardo.ai/docs/api-error-messages
@@ -16,16 +16,12 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     ///
     /// Auth: Authorization: Bearer {uuid-key}
     ///
-    /// Verification endpoint: GET https://cloud.leonardo.ai/api/rest/v1/me
-    /// Response: {
-    ///   "user_details": [{
-    ///     "user": { "id": "...", "username": "..." },
-    ///     "tokenRenewalDate": "2025-01-01",
-    ///     "apiConcurrencySlots": 1,
-    ///     "apiCreditBalance": 150.0,
-    ///     "subscriptionTokens": 8500
-    ///   }]
-    /// }
+    /// Verification endpoint: GET https://cloud.leonardo.ai/api/rest/v2/models
+    /// Documented at: https://docs.leonardo.ai/reference/getmodels
+    /// Returns a list of available platform models on a valid key (200).
+    ///
+    /// Note: /v1/me is NOT used here — it is not listed in the current official Leonardo API reference.
+    ///       The current billing model is PAYG (USD balance); no credit-balance field is parsed.
     ///
     /// Invalid key response:
     /// { "error": "Authentication hook unauthorized this request", "code": "access-denied" }
@@ -62,11 +58,14 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // GET /me — returns user details including credit balance and concurrency slots
-                using var request = new HttpRequestMessage(HttpMethod.Get,
-                    "https://cloud.leonardo.ai/api/rest/v1/me");
+                // GET /api/rest/v2/models — officially documented, authenticated, read-only endpoint.
+                // Returns a list of available platform models. Does NOT consume any account balance.
+                // Ref: https://docs.leonardo.ai/reference/getmodels
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    "https://cloud.leonardo.ai/api/rest/v2/models");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                request.Headers.Add("accept", "application/json");
+                request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
                 var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
@@ -78,65 +77,41 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 {
                     var result = ValidationResult.Success(response.StatusCode, "Valid Leonardo.ai key");
 
+                    // Best-effort: parse model count from the array response
                     try
                     {
                         using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
-                        // Response: { "user_details": [{ "user": {...}, "apiCreditBalance": 150, ... }] }
-                        if (doc.RootElement.TryGetProperty("user_details", out var details) &&
-                            details.GetArrayLength() > 0)
+                        // Response is an array of model objects
+                        if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
                         {
-                            var first = details[0];
-
-                            // Username as account identifier
-                            if (first.TryGetProperty("user", out var user))
+                            int modelCount = doc.RootElement.GetArrayLength();
+                            result.Metadata = new System.Collections.Generic.Dictionary<string, object>
                             {
-                                if (user.TryGetProperty("username", out var username))
-                                    result.AccountTier = username.GetString();
-                            }
-
-                            // apiCreditBalance — purchased API credits remaining (can be decimal)
-                            if (first.TryGetProperty("apiCreditBalance", out var credits))
+                                ["models_available"] = modelCount,
+                                ["authentication_valid"] = true
+                            };
+                            result.Detail = $"Valid Leonardo.ai key — {modelCount} model(s) available";
+                        }
+                        else if (doc.RootElement.TryGetProperty("models", out var modelsEl) &&
+                                 modelsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        {
+                            int modelCount = modelsEl.GetArrayLength();
+                            result.Metadata = new System.Collections.Generic.Dictionary<string, object>
                             {
-                                var creditVal = credits.ValueKind == System.Text.Json.JsonValueKind.Number
-                                    ? credits.GetDouble() : 0;
-                                result.Balance = $"{creditVal:N0} API credits";
-
-                                if (creditVal <= 0)
-                                {
-                                    result.IsQuotaExceeded = true;
-                                    result.Detail = "Valid Leonardo.ai key — 0 API credits remaining";
-                                }
-                            }
-
-                            // Concurrency slots — indicates plan tier
-                            if (first.TryGetProperty("apiConcurrencySlots", out var slots))
-                            {
-                                var slotCount = slots.GetInt32();
-                                result.Detail = string.IsNullOrEmpty(result.Detail)
-                                    ? $"Valid Leonardo.ai key — {slotCount} concurrency slot(s)"
-                                    : result.Detail + $" | {slotCount} slot(s)";
-                            }
-
-                            // Token renewal date — subscription info
-                            if (first.TryGetProperty("tokenRenewalDate", out var renewal) &&
-                                renewal.ValueKind != System.Text.Json.JsonValueKind.Null)
-                            {
-                                result.Detail = (result.Detail ?? "Valid Leonardo.ai key")
-                                    + $" | Renews: {renewal.GetString()}";
-                            }
-
-                            if (string.IsNullOrEmpty(result.Detail))
-                                result.Detail = "Valid Leonardo.ai key";
+                                ["models_available"] = modelCount,
+                                ["authentication_valid"] = true
+                            };
+                            result.Detail = $"Valid Leonardo.ai key — {modelCount} model(s) available";
                         }
                     }
                     catch { result.Detail = "Valid Leonardo.ai key"; }
 
+                    result.RawResponse = responseBody;
                     return result;
                 }
 
-                // Check for Leonardo-specific error body
+                // 401 — invalid or expired key
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
-                    response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
                     responseBody.Contains("access-denied") ||
                     responseBody.Contains("unauthorized"))
                 {
@@ -144,13 +119,29 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         "Invalid Leonardo.ai API key — check UUID format and key validity");
                 }
 
-                return response.StatusCode switch
+                // 403 — key may be valid but access is restricted (plan or permission issue)
+                if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
                 {
-                    (System.Net.HttpStatusCode)429 =>
-                        ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)"),
-                    _ => ValidationResult.HasHttpError(response.StatusCode,
-                        $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}")
-                };
+                    return ValidationResult.HasHttpError(response.StatusCode,
+                        "Leonardo.ai API key forbidden (403) — permission or plan restriction; key may be valid");
+                }
+
+                // 429 — rate limited; validation inconclusive
+                if ((int)response.StatusCode == 429)
+                {
+                    return ValidationResult.HasHttpError(response.StatusCode,
+                        "Leonardo.ai validation unavailable — request rate limited (429)");
+                }
+
+                // 5xx — provider unavailable
+                if ((int)response.StatusCode >= 500)
+                {
+                    return ValidationResult.HasHttpError(response.StatusCode,
+                        $"Leonardo.ai service error ({response.StatusCode}) — validation unavailable");
+                }
+
+                return ValidationResult.HasHttpError(response.StatusCode,
+                    $"Unexpected status {response.StatusCode}. Body: {TruncateResponse(responseBody)}");
             }
             catch (Exception ex)
             {

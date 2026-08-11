@@ -10,10 +10,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
     /// Provider for Voyage AI embedding API keys.
-    /// Keys start with "pa-" (Personal API key).
-    /// Voyage AI is the leading embedding provider, widely used in RAG pipelines.
-    /// Verification: POST /v1/embeddings with voyage-3-lite (cheapest model).
-    /// Official docs: https://docs.voyageai.com/reference/embeddings-api
+    /// Voyage AI is a leading text and multimodal embedding provider.
+    /// Verification: POST /v1/embeddings with voyage-4-lite (recommended low-cost model).
+    /// Official docs: https://docs.voyageai.com/reference/embeddings-api-1
     /// </summary>
     [ApiProvider]
     public class VoyageAIProvider : BaseApiKeyProvider
@@ -23,10 +22,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"\bpa-[A-Za-z0-9]{40,60}\b",
+            @"\bpa-[A-Za-z0-9_-]{20,256}\b",
             @"VOYAGE_API_KEY",
             @"voyage[_-]?api[_-]?key",
-            @"VOYAGEAI_API_KEY"
+            @"VOYAGEAI_API_KEY",
+            @"(?i)\bVOYAGE[\s_-]*API[\s_-]*KEY\s*[:=]\s*['""]?([A-Za-z0-9_-]{20,256})['""]?"
         ];
 
         public VoyageAIProvider() : base() { }
@@ -35,68 +35,102 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(
             string apiKey, HttpClient httpClient)
         {
-            // POST /v1/embeddings — official validation endpoint
-            // voyage-3-lite is the cheapest model ($0.02/1M tokens)
-            using var request = new HttpRequestMessage(
-                HttpMethod.Post, "https://api.voyageai.com/v1/embeddings");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(new
-                {
-                    input = new[] { "test" },
-                    model = "voyage-3-lite"
-                }),
-                System.Text.Encoding.UTF8, "application/json");
-
-            var response = await httpClient.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-
-            _logger?.LogDebug("Voyage AI API response: Status={Status}, Body={Body}",
-                response.StatusCode, TruncateResponse(body));
-
-            if (IsSuccessStatusCode(response.StatusCode))
+            try
             {
-                var result = ValidationResult.Success(response.StatusCode, "Valid Voyage AI key");
-
-                // Parse token usage from response for display
-                try
-                {
-                    using var doc = JsonDocument.Parse(body);
-                    if (doc.RootElement.TryGetProperty("usage", out var usage) &&
-                        usage.TryGetProperty("total_tokens", out var tokens))
+                // POST /v1/embeddings — official validation endpoint using voyage-4-lite
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Post, "https://api.voyageai.com/v1/embeddings");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                request.Content = new StringContent(
+                    JsonSerializer.Serialize(new
                     {
-                        result.Detail = $"Valid Voyage AI key (embedding confirmed, {tokens.GetInt32()} tokens used)";
+                        input = new[] { "hi" },
+                        model = "voyage-4-lite"
+                    }),
+                    System.Text.Encoding.UTF8, "application/json");
+
+                var response = await httpClient.SendAsync(request);
+                var body = await response.Content.ReadAsStringAsync();
+
+                _logger?.LogDebug("Voyage AI API response: Status={Status}, Body={Body}",
+                    response.StatusCode, TruncateResponse(body));
+
+                if (IsSuccessStatusCode(response.StatusCode))
+                {
+                    var result = ValidationResult.Success(response.StatusCode,
+                        "Valid Voyage AI key — embedding test successful");
+                    result.RawResponse = body;
+                    result.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["tested_model"] = "voyage-4-lite"
+                    };
+
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(body);
+                        if (doc.RootElement.TryGetProperty("usage", out var usage) &&
+                            usage.TryGetProperty("total_tokens", out var tokens) &&
+                            tokens.ValueKind == JsonValueKind.Number)
+                        {
+                            result.Detail = $"Valid Voyage AI key — embedding test successful ({tokens.GetInt32()} tokens)";
+                            result.Metadata["total_tokens"] = tokens.GetInt32();
+                        }
                     }
+                    catch { /* Best effort */ }
+
+                    return result;
                 }
-                catch { /* Best effort */ }
 
-                return result;
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    return ValidationResult.IsUnauthorized(response.StatusCode,
+                        "Invalid or expired Voyage AI API key");
+                }
+
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        "Voyage AI API key forbidden (403) — permission restriction");
+                }
+
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        "Voyage AI API rate limited (429) — validation unavailable");
+                }
+
+                if (response.StatusCode == HttpStatusCode.PaymentRequired || ContainsAny(body, QuotaIndicators))
+                {
+                    var quotaResult = ValidationResult.Success(response.StatusCode,
+                        "Valid Voyage AI key but quota/usage limit was reached");
+                    quotaResult.IsQuotaExceeded = true;
+                    quotaResult.RawResponse = body;
+                    quotaResult.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["quota_exceeded"] = true
+                    };
+                    return quotaResult;
+                }
+
+                if ((int)response.StatusCode >= 500)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        $"Voyage AI service error ({response.StatusCode}) — validation unavailable");
+                }
+
+                return ValidationResult.HasHttpError(response.StatusCode,
+                    $"Voyage AI embeddings request failed: {TruncateResponse(body)}");
             }
-
-            if (response.StatusCode == HttpStatusCode.Unauthorized ||
-                response.StatusCode == HttpStatusCode.Forbidden)
+            catch (Exception ex)
             {
-                return ValidationResult.IsUnauthorized(response.StatusCode);
+                return ValidationResult.HasNetworkError(ex.Message);
             }
-
-            if ((int)response.StatusCode == 429)
-            {
-                return ValidationResult.Success(response.StatusCode, "quota exhausted");
-            }
-
-            if (ContainsAny(body, QuotaIndicators))
-            {
-                return ValidationResult.Success(response.StatusCode,
-                    $"Valid key but quota issue: {TruncateResponse(body)}");
-            }
-
-            return ValidationResult.HasHttpError(response.StatusCode,
-                $"Embeddings request failed: {TruncateResponse(body)}");
         }
 
         protected override bool IsValidKeyFormat(string apiKey) =>
             !string.IsNullOrWhiteSpace(apiKey) &&
-            apiKey.StartsWith("pa-", StringComparison.Ordinal) &&
-            apiKey.Length >= 43;
+            apiKey.Length >= 20;
     }
 }

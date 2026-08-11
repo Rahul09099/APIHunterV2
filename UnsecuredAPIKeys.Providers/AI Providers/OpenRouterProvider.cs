@@ -13,6 +13,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// OpenRouter is a unified gateway to 400+ models (OpenAI, Anthropic, Google, Meta, etc.)
     /// Keys always start with "sk-or-v1-".
     /// Verification: GET /api/v1/auth/key — returns credits, usage, and key metadata.
+    /// Followed by model discovery (GET /api/v1/models) and a minimal inference test (POST /api/v1/chat/completions).
     /// Official docs: https://openrouter.ai/docs/api/authentication
     /// </summary>
     [ApiProvider]
@@ -35,127 +36,109 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(
             string apiKey, HttpClient httpClient)
         {
-            // GET /api/v1/auth/key — returns key info including credits and usage
-            // This is the official lightweight validation endpoint (no generation cost)
-            using var request = new HttpRequestMessage(
+            // Step 1: GET /api/v1/auth/key — returns key info including credits and usage.
+            // Official lightweight authentication endpoint (no generation cost).
+            using var authRequest = new HttpRequestMessage(
                 HttpMethod.Get, "https://openrouter.ai/api/v1/auth/key");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            authRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            var response = await httpClient.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
+            var authResponse = await httpClient.SendAsync(authRequest);
+            var authBody = await authResponse.Content.ReadAsStringAsync();
 
             _logger?.LogDebug("OpenRouter auth/key response: Status={Status}, Body={Body}",
-                response.StatusCode, TruncateResponse(body));
+                authResponse.StatusCode, TruncateResponse(authBody));
 
-            if (response.StatusCode == HttpStatusCode.Unauthorized ||
-                response.StatusCode == HttpStatusCode.Forbidden)
+            // 401 -> invalid or expired key
+            if (authResponse.StatusCode == HttpStatusCode.Unauthorized)
             {
-                return ValidationResult.IsUnauthorized(response.StatusCode);
+                return ValidationResult.IsUnauthorized(authResponse.StatusCode,
+                    "Invalid or expired OpenRouter API key");
             }
 
-            if ((int)response.StatusCode == 429)
+            // 403 / 429 / 5xx -> validation unavailable at auth check level
+            if (authResponse.StatusCode == HttpStatusCode.Forbidden)
             {
-                return ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
+                return ValidationResult.ValidationUnavailable(authResponse.StatusCode,
+                    "OpenRouter API key access forbidden (403)");
             }
 
-            if (!response.IsSuccessStatusCode)
+            if (authResponse.StatusCode == HttpStatusCode.TooManyRequests)
             {
-                return ValidationResult.HasHttpError(response.StatusCode,
-                    $"Auth check failed: {TruncateResponse(body)}");
+                return ValidationResult.ValidationUnavailable(authResponse.StatusCode,
+                    "OpenRouter auth endpoint rate limited (429)");
             }
 
-            // Parse credits and usage from response
-            // Response shape: { "data": { "label": "...", "usage": 0.0, "limit": null, "limit_remaining": null, "is_free_tier": false } }
-            var result = ValidationResult.Success(response.StatusCode, "Valid OpenRouter key");
+            if ((int)authResponse.StatusCode >= 500)
+            {
+                return ValidationResult.ValidationUnavailable(authResponse.StatusCode,
+                    $"OpenRouter service error ({authResponse.StatusCode}) — validation unavailable");
+            }
+
+            if (!authResponse.IsSuccessStatusCode)
+            {
+                return ValidationResult.HasHttpError(authResponse.StatusCode,
+                    $"OpenRouter auth check failed: {TruncateResponse(authBody)}");
+            }
+
+            // Key authentication confirmed
+            var result = ValidationResult.Success(authResponse.StatusCode, "Valid OpenRouter key");
+            result.RawResponse = authBody;
+
+            double usage = 0;
+            bool isFreeTier = false;
+            double? limit = null;
+            double? remaining = null;
+
             try
             {
-                using var doc = JsonDocument.Parse(body);
+                using var doc = JsonDocument.Parse(authBody);
                 if (doc.RootElement.TryGetProperty("data", out var data))
                 {
-                    double usage = 0;
                     if (data.TryGetProperty("usage", out var usageProp) && usageProp.ValueKind == JsonValueKind.Number)
                     {
                         usage = usageProp.GetDouble();
                     }
 
-                    bool isFreeTier = false;
                     if (data.TryGetProperty("is_free_tier", out var freeProp) && freeProp.ValueKind == JsonValueKind.True)
                     {
                         isFreeTier = true;
                     }
 
-                    double? limit = null;
                     if (data.TryGetProperty("limit", out var limitProp) && limitProp.ValueKind == JsonValueKind.Number)
                     {
                         limit = limitProp.GetDouble();
+                    }
+
+                    if (data.TryGetProperty("limit_remaining", out var limitRemainingProp) &&
+                        limitRemainingProp.ValueKind == JsonValueKind.Number)
+                    {
+                        remaining = limitRemainingProp.GetDouble();
                     }
 
                     if (isFreeTier)
                     {
                         result.Balance = $"Free Tier Access (Usage: ${usage:F4})";
                     }
-                    else if (data.TryGetProperty("limit_remaining", out var limitRemaining) &&
-                        limitRemaining.ValueKind == JsonValueKind.Number)
+                    else if (remaining.HasValue)
                     {
-                        var remaining = limitRemaining.GetDouble();
                         string limitInfo = limit.HasValue ? $" / ${limit.Value:F4}" : "";
-                        result.Balance = $"${remaining:F4}{limitInfo} remaining";
-                        
-                        if (remaining <= 0)
+                        result.Balance = $"${remaining.Value:F4}{limitInfo} remaining";
+
+                        if (remaining.Value <= 0)
                         {
                             result.IsQuotaExceeded = true;
-                            result.Detail = "Valid key but no credits remaining.";
+                            result.Detail = "Valid OpenRouter key — no credits remaining.";
                         }
                     }
                     else
                     {
-                        // limit: null means the key inherits account limits
                         result.Balance = $"No key limit (Used: ${usage:F4})";
                     }
 
-                    // Send a simple chat completions "hi" request using the API key to verify it actually works and is valid
-                    try
-                    {
-                        using var checkRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
-                        checkRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                        
-                        var jsonPayload = "{\"model\":\"google/gemini-2.5-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}";
-                        checkRequest.Content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
-                        
-                        using var checkResponse = await httpClient.SendAsync(checkRequest);
-                        var checkBody = await checkResponse.Content.ReadAsStringAsync();
-                        
-                        _logger?.LogDebug("OpenRouter chat/completions check response: Status={Status}, Body={Body}",
-                            checkResponse.StatusCode, TruncateResponse(checkBody));
-
-                        if (checkResponse.StatusCode == HttpStatusCode.Unauthorized || checkResponse.StatusCode == HttpStatusCode.Forbidden)
-                        {
-                            return ValidationResult.IsUnauthorized(checkResponse.StatusCode, "Invalid OpenRouter API key — chat completions rejected");
-                        }
-                        else if ((int)checkResponse.StatusCode == 402 || checkBody.Contains("Insufficient credits", StringComparison.OrdinalIgnoreCase))
-                        {
-                            result.IsQuotaExceeded = true;
-                            result.Detail = "Valid key but insufficient account credits.";
-                            result.Balance = $"Insufficient account credits (Used: ${usage:F4})";
-                        }
-                        else if (checkResponse.IsSuccessStatusCode)
-                        {
-                            result.Detail = "Valid OpenRouter key — Chat completions verified.";
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger?.LogWarning("OpenRouter chat/completions check failed with exception: {Message}", ex.Message);
-                    }
-
-                    // Account Tier
                     string tier = isFreeTier ? "Free Tier" : "Paid Tier";
-                    string? labelStr = null;
-
-                    if (data.TryGetProperty("label", out var label) && label.ValueKind == JsonValueKind.String)
+                    if (data.TryGetProperty("label", out var labelProp) && labelProp.ValueKind == JsonValueKind.String)
                     {
-                        labelStr = label.GetString();
-                        // If label is NOT the api key itself, include it
+                        string? labelStr = labelProp.GetString();
                         if (!string.IsNullOrEmpty(labelStr) && !apiKey.Contains(labelStr))
                         {
                             result.AccountTier = $"{tier} (Label: {labelStr})";
@@ -170,7 +153,6 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         result.AccountTier = tier;
                     }
 
-                    // Populate Metadata
                     result.Metadata = new Dictionary<string, object>();
                     foreach (var prop in data.EnumerateObject())
                     {
@@ -185,9 +167,155 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     }
                 }
             }
-            catch { /* Best effort parsing */ }
+            catch
+            {
+                /* Best effort auth metadata parsing */
+            }
+
+            result.Metadata ??= new Dictionary<string, object>();
+            result.Metadata["authentication_valid"] = true;
+
+            // Step 2: GET /api/v1/models — discover available models catalog
+            List<ModelInfo>? discoveredModels = null;
+            try
+            {
+                using var modelsRequest = new HttpRequestMessage(HttpMethod.Get, "https://openrouter.ai/api/v1/models");
+                modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+                var modelsResponse = await httpClient.SendAsync(modelsRequest);
+                if (modelsResponse.IsSuccessStatusCode)
+                {
+                    var modelsBody = await modelsResponse.Content.ReadAsStringAsync();
+                    discoveredModels = ParseOpenRouterModels(modelsBody);
+                    if (discoveredModels != null && discoveredModels.Count > 0)
+                    {
+                        result.AvailableModels = discoveredModels;
+                        result.Metadata["models_parsed"] = true;
+                        result.Metadata["model_count"] = discoveredModels.Count;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug("OpenRouter model listing failed: {Message}", ex.Message);
+            }
+
+            if (discoveredModels == null || discoveredModels.Count == 0)
+            {
+                result.Metadata["inference_tested"] = false;
+                result.Detail ??= "Valid OpenRouter key — authenticated (no models returned for inference test).";
+                return result;
+            }
+
+            var preferredOrder = new[]
+            {
+                "google/gemini-2.5-flash",
+                "google/gemini-2.0-flash-exp:free",
+                "meta-llama/llama-3.1-8b-instruct:free",
+                "openai/gpt-4o-mini",
+                "anthropic/claude-3-haiku"
+            };
+
+            string modelToUse = discoveredModels
+                .Select(m => m.ModelId)
+                .FirstOrDefault(id => preferredOrder.Any(p => id.Equals(p, StringComparison.OrdinalIgnoreCase)))
+                ?? discoveredModels.First().ModelId;
+
+            try
+            {
+                using var chatRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
+                chatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+                var payload = new
+                {
+                    model = modelToUse,
+                    messages = new[] { new { role = "user", content = "hi" } },
+                    max_tokens = 1
+                };
+
+                chatRequest.Content = new StringContent(
+                    JsonSerializer.Serialize(payload),
+                    System.Text.Encoding.UTF8,
+                    "application/json");
+
+                using var chatResponse = await httpClient.SendAsync(chatRequest);
+                var chatBody = await chatResponse.Content.ReadAsStringAsync();
+
+                _logger?.LogDebug("OpenRouter chat response ({Model}): Status={Status}, Body={Body}",
+                    modelToUse, chatResponse.StatusCode, TruncateResponse(chatBody));
+
+                result.RawResponse = chatBody;
+                result.Metadata["inference_tested"] = true;
+                result.Metadata["tested_model"] = modelToUse;
+
+                if (IsSuccessStatusCode(chatResponse.StatusCode))
+                {
+                    result.Metadata["inference_working"] = true;
+                    result.Detail = $"Valid OpenRouter key — Chat completions verified with model {modelToUse}.";
+                }
+                else if (chatResponse.StatusCode == HttpStatusCode.PaymentRequired ||
+                         chatBody.Contains("Insufficient credits", StringComparison.OrdinalIgnoreCase) ||
+                         chatBody.Contains("out of credits", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Metadata["inference_working"] = false;
+                    result.IsQuotaExceeded = true;
+                    result.Detail = "Valid OpenRouter key — insufficient account credits for inference.";
+                    if (string.IsNullOrEmpty(result.Balance))
+                    {
+                        result.Balance = $"Insufficient account credits (Used: ${usage:F4})";
+                    }
+                }
+                else if (chatResponse.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    result.Metadata["inference_working"] = false;
+                    result.Detail = $"Valid OpenRouter key — inference rate limited (429) on model {modelToUse}.";
+                }
+                else
+                {
+                    // Note: Auth already succeeded at Step 1, so 401/403 here is an operation/model rejection, NOT an invalid key!
+                    result.Metadata["inference_working"] = false;
+                    result.Detail = $"Valid OpenRouter key — authenticated, but inference request returned {chatResponse.StatusCode}.";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("OpenRouter chat completion test failed with exception: {Message}", ex.Message);
+                result.Metadata["inference_tested"] = false;
+                result.Metadata["inference_working"] = false;
+            }
 
             return result;
+        }
+
+        private List<ModelInfo>? ParseOpenRouterModels(string jsonResponse)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonResponse);
+                if (!doc.RootElement.TryGetProperty("data", out var dataArray) ||
+                    dataArray.ValueKind != JsonValueKind.Array)
+                {
+                    return null;
+                }
+
+                var list = new List<ModelInfo>();
+                foreach (var el in dataArray.EnumerateArray())
+                {
+                    if (el.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
+                    {
+                        string id = idProp.GetString() ?? "";
+                        if (!string.IsNullOrEmpty(id))
+                        {
+                            list.Add(new ModelInfo { ModelId = id, DisplayName = id });
+                        }
+                    }
+                }
+                return list;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         protected override bool IsValidKeyFormat(string apiKey) =>

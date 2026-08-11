@@ -1,10 +1,15 @@
+using System;
+using System.Collections.Generic;
 using System.Net;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
 using Amazon;
+using Amazon.IdentityManagement;
+using Amazon.IdentityManagement.Model;
 using Amazon.Runtime;
 using Amazon.SecurityToken;
 using Amazon.SecurityToken.Model;
-using Amazon.IdentityManagement;
-using Amazon.IdentityManagement.Model;
 using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
@@ -18,40 +23,40 @@ namespace UnsecuredAPIKeys.Providers.Cloud_Providers
         public override string ProviderName => "AWS IAM";
         public override ApiTypeEnum ApiType => ApiTypeEnum.AWSIAM;
 
-        // AWS SDK clients
-        private IAmazonIdentityManagementService? _iamClient;
-
         public override IEnumerable<string> RegexPatterns =>
         [
             // AWS Access Key ID (long-term credentials)
             @"\bAKIA[0-9A-Z]{16}\b",
             
-            // AWS Session Token (temporary credentials)
+            // AWS Session Token Access Key (temporary credentials)
             @"\bASIA[0-9A-Z]{16}\b",
             
             // Environment variable patterns
-            @"AWS_ACCESS_KEY_ID\s*=\s*['""]?(AKIA[0-9A-Z]{16})['""]?",
-            @"aws_access_key_id\s*=\s*['""]?(AKIA[0-9A-Z]{16})['""]?",
+            @"AWS_ACCESS_KEY_ID\s*=\s*['""]?((?:AKIA|ASIA)[0-9A-Z]{16})['""]?",
+            @"aws_access_key_id\s*=\s*['""]?((?:AKIA|ASIA)[0-9A-Z]{16})['""]?",
             
-            // Secret key patterns (40 characters, base64-like)
-            @"AWS_SECRET_ACCESS_KEY\s*=\s*['""]?([A-Za-z0-9/+=]{40})['""]?",
-            @"aws_secret_access_key\s*=\s*['""]?([A-Za-z0-9/+=]{40})['""]?",
-            
+            // Secret key patterns (base64-like)
+            @"AWS_SECRET_ACCESS_KEY\s*=\s*['""]?([A-Za-z0-9/+=]{20,})['""]?",
+            @"aws_secret_access_key\s*=\s*['""]?([A-Za-z0-9/+=]{20,})['""]?",
+
+            // Session token patterns
+            @"AWS_SESSION_TOKEN\s*=\s*['""]?([A-Za-z0-9/+=]{50,})['""]?",
+            @"aws_session_token\s*=\s*['""]?([A-Za-z0-9/+=]{50,})['""]?",
+
             // Combined patterns in code
-            @"AccessKeyId['""]?\s*[:=]\s*['""]?(AKIA[0-9A-Z]{16})['""]?",
-            @"SecretAccessKey['""]?\s*[:=]\s*['""]?([A-Za-z0-9/+=]{40})['""]?"
+            @"AccessKeyId['""]?\s*[:=]\s*['""]?((?:AKIA|ASIA)[0-9A-Z]{16})['""]?",
+            @"SecretAccessKey['""]?\s*[:=]\s*['""]?([A-Za-z0-9/+=]{20,})['""]?"
         ];
 
         public AWSIAMProvider() : base() { }
-
         public AWSIAMProvider(ILogger<AWSIAMProvider>? logger) : base(logger) { }
 
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(string apiKey, HttpClient httpClient)
         {
             try
             {
-                // Extract credential pair
-                var (accessKeyId, secretAccessKey) = ExtractCredentialPair(apiKey);
+                // Extract credential tuple (AccessKeyId, SecretAccessKey, SessionToken)
+                var (accessKeyId, secretAccessKey, sessionToken) = ExtractCredentialTuple(apiKey);
                 
                 if (string.IsNullOrEmpty(secretAccessKey))
                 {
@@ -60,35 +65,43 @@ namespace UnsecuredAPIKeys.Providers.Cloud_Providers
                 }
                 
                 // Verify credentials with STS
-                var stsResponse = await VerifyCredentialsAsync(accessKeyId, secretAccessKey);
+                var stsResponse = await VerifyCredentialsAsync(accessKeyId, secretAccessKey, sessionToken);
                 
                 // Extract metadata
-                var metadata = await ExtractMetadataAsync(stsResponse);
+                var metadata = ExtractMetadataFromStsResponse(stsResponse, accessKeyId);
                 
-                // Enumerate permissions (best effort)
+                // Enumerate permissions via local IAM client (only for IAM user principals)
                 List<string> policies = new();
-                try
+                if (metadata.IsIamUser)
                 {
-                    // Initialize IAM client for permission enumeration
-                    _iamClient = CreateIamClient(accessKeyId, secretAccessKey);
-                    policies = await EnumeratePermissionsAsync(metadata.UserName);
+                    try
+                    {
+                        using var iamClient = CreateIamClient(accessKeyId, secretAccessKey, sessionToken);
+                        policies = await EnumeratePermissionsAsync(iamClient, metadata);
+                    }
+                    catch (AmazonIdentityManagementServiceException ex) when (ex.ErrorCode == "AccessDenied")
+                    {
+                        _logger?.LogDebug("Permission enumeration denied for {User}", metadata.UserName);
+                        policies = new List<string> { "Permission enumeration denied (AccessDenied)" };
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogDebug(ex, "IAM policy enumeration unavailable for {User}", metadata.UserName);
+                    }
                 }
-                catch (AmazonIdentityManagementServiceException ex) 
-                    when (ex.ErrorCode == "AccessDenied")
+                else if (metadata.IsAssumedRole)
                 {
-                    _logger?.LogDebug("Permission enumeration denied for {User}", metadata.UserName);
-                    metadata.AttachedPolicies = new List<string> { "Permission enumeration denied" };
+                    policies = new List<string> { "Assumed Role Principal (User policy enumeration not applicable)" };
                 }
                 
-                // Calculate risk level
-                var riskLevel = CalculateRiskLevel(policies, metadata.IsRootAccount);
+                // Calculate risk level heuristic
+                var riskLevel = CalculateRiskLevelHeuristic(policies, metadata.IsRootAccount);
                 
                 // Build validation result with AWS metadata
                 var result = ValidationResult.Success(
                     HttpStatusCode.OK,
                     $"Valid AWS IAM credential - {metadata.CredentialType}");
                 
-                // Store metadata in ValidationResult for database persistence
                 result.AwsAccountId = metadata.AccountId;
                 result.AwsUserArn = metadata.UserArn;
                 result.AwsUserId = metadata.UserId;
@@ -97,17 +110,58 @@ namespace UnsecuredAPIKeys.Providers.Cloud_Providers
                 result.AwsRiskLevel = riskLevel;
                 result.AwsIsRootAccount = metadata.IsRootAccount;
                 
+                // Serialize raw STS response body
+                try
+                {
+                    result.RawResponse = JsonSerializer.Serialize(new
+                    {
+                        stsResponse.Account,
+                        stsResponse.Arn,
+                        stsResponse.UserId,
+                        stsResponse.ResponseMetadata
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to serialize AWS STS response");
+                }
+
                 return result;
             }
-            catch (AmazonSecurityTokenServiceException ex) when (ex.StatusCode == HttpStatusCode.Forbidden)
+            catch (AmazonSecurityTokenServiceException ex)
             {
-                return ValidationResult.IsUnauthorized(HttpStatusCode.Forbidden);
+                if (ex.ErrorCode is "InvalidClientTokenId" or "UnrecognizedClientException" or "SignatureDoesNotMatch" or "InvalidAccessKeyId")
+                {
+                    return ValidationResult.IsUnauthorized(HttpStatusCode.Unauthorized, $"Invalid AWS credentials ({ex.ErrorCode})");
+                }
+
+                if (ex.StatusCode == HttpStatusCode.Forbidden || ex.ErrorCode == "AccessDenied")
+                {
+                    return ValidationResult.HasHttpError(HttpStatusCode.Forbidden, $"AWS API access denied: {ex.Message}");
+                }
+
+                if ((int)ex.StatusCode == 429)
+                {
+                    return new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        IsQuotaExceeded = true,
+                        HttpStatusCode = ex.StatusCode,
+                        Detail = "AWS API rate limit exhausted (HTTP 429)"
+                    };
+                }
+
+                return ValidationResult.HasHttpError(ex.StatusCode, $"STS Error [{ex.ErrorCode}]: {ex.Message}");
             }
             catch (AmazonServiceException ex) when ((int)ex.StatusCode == 429)
             {
-                return ValidationResult.Success(
-                    (HttpStatusCode)429,
-                    "Rate limited (key is valid)");
+                return new ValidationResult
+                {
+                    Status = ValidationAttemptStatus.ValidationUnavailable,
+                    IsQuotaExceeded = true,
+                    HttpStatusCode = ex.StatusCode,
+                    Detail = "AWS API rate limit exhausted (HTTP 429)"
+                };
             }
             catch (Exception ex)
             {
@@ -121,21 +175,19 @@ namespace UnsecuredAPIKeys.Providers.Cloud_Providers
             if (string.IsNullOrWhiteSpace(apiKey))
                 return false;
 
-            // Case 1: Delimited format (AKIA:::secret or AKIA|secret)
+            // Case 1: Delimited format (AKIA:::secret or AKIA:::secret:::sessionToken or AKIA|secret|sessionToken)
             if (apiKey.Contains(":::") || apiKey.Contains("|"))
             {
-                var parts = apiKey.Split(new[] { ":::", "|" }, StringSplitOptions.None);
-                if (parts.Length == 2)
+                var parts = apiKey.Split(new[] { ":::", "|" }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 && parts.Length <= 3)
                 {
                     var accessKeyId = parts[0].Trim();
                     var secretKey = parts[1].Trim();
                     
-                    // Validate Access Key ID format
                     if (!IsValidAccessKeyIdFormat(accessKeyId))
                         return false;
                     
-                    // Validate Secret Access Key format (40 characters, base64-like)
-                    if (secretKey.Length != 40)
+                    if (string.IsNullOrWhiteSpace(secretKey))
                         return false;
                     
                     return true;
@@ -147,67 +199,52 @@ namespace UnsecuredAPIKeys.Providers.Cloud_Providers
             return IsValidAccessKeyIdFormat(apiKey);
         }
 
-        /// <summary>
-        /// Validates if a string matches the AWS Access Key ID format.
-        /// Valid format: starts with AKIA or ASIA and is exactly 20 characters.
-        /// </summary>
         private bool IsValidAccessKeyIdFormat(string accessKeyId)
         {
             if (string.IsNullOrWhiteSpace(accessKeyId))
                 return false;
 
-            // Valid AWS Access Key ID starts with AKIA or ASIA and is 20 characters total
             return (accessKeyId.StartsWith("AKIA") || accessKeyId.StartsWith("ASIA")) && 
                    accessKeyId.Length == 20;
         }
 
-        /// <summary>
-        /// Extracts the Access Key ID and Secret Access Key from the API key string.
-        /// Supports two formats:
-        /// 1. Delimited format: "AKIA...:::secret..." or "AKIA...|secret..."
-        /// 2. Standalone Access Key ID: "AKIA..." (secret must be found in context by ScraperService)
-        /// </summary>
-        /// <param name="apiKey">The API key string to parse</param>
-        /// <returns>Tuple containing (accessKeyId, secretAccessKey). Secret may be empty if not found in apiKey.</returns>
-        /// <exception cref="ArgumentException">Thrown when the API key format is invalid</exception>
-        private (string accessKeyId, string secretAccessKey) ExtractCredentialPair(string apiKey)
+        private (string accessKeyId, string secretAccessKey, string? sessionToken) ExtractCredentialTuple(string apiKey)
         {
             if (string.IsNullOrWhiteSpace(apiKey))
             {
                 throw new ArgumentException("API key cannot be null or empty", nameof(apiKey));
             }
 
-            // Case 1: apiKey contains both parts separated by a delimiter
-            // Format: "AKIA...:::secret..." or "AKIA...|secret..."
             if (apiKey.Contains(":::") || apiKey.Contains("|"))
             {
-                var parts = apiKey.Split(new[] { ":::", "|" }, StringSplitOptions.None);
-                if (parts.Length == 2)
+                var parts = apiKey.Split(new[] { ":::", "|" }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
                 {
                     var accessKeyId = parts[0].Trim();
                     var secretKey = parts[1].Trim();
+                    string? sessionToken = parts.Length >= 3 ? parts[2].Trim() : null;
                     
-                    // Validate Access Key ID format
                     if (!IsValidAccessKeyIdFormat(accessKeyId))
                     {
                         throw new ArgumentException($"Invalid Access Key ID format: {accessKeyId}", nameof(apiKey));
                     }
                     
-                    // Validate Secret Access Key format (40 characters, base64-like)
-                    if (secretKey.Length != 40)
+                    if (string.IsNullOrWhiteSpace(secretKey))
                     {
-                        throw new ArgumentException($"Invalid Secret Access Key length: expected 40, got {secretKey.Length}", nameof(apiKey));
+                        throw new ArgumentException("Secret Access Key cannot be empty in delimited format", nameof(apiKey));
                     }
                     
-                    return (accessKeyId, secretKey);
+                    if (sessionToken != null && (sessionToken.Length < 16 || sessionToken.Length > 2048))
+                    {
+                        throw new ArgumentException($"Invalid AWS Session Token length ({sessionToken.Length})", nameof(apiKey));
+                    }
+                    
+                    return (accessKeyId, secretKey, sessionToken);
                 }
                 
-                throw new ArgumentException("Delimited format must contain exactly two parts", nameof(apiKey));
+                throw new ArgumentException("Delimited format must contain at least Access Key ID and Secret Access Key", nameof(apiKey));
             }
             
-            // Case 2: apiKey is just the Access Key ID
-            // The ScraperService will need to search the surrounding code context
-            // for the Secret Access Key within 50 lines
             if (apiKey.StartsWith("AKIA") || apiKey.StartsWith("ASIA"))
             {
                 if (!IsValidAccessKeyIdFormat(apiKey))
@@ -215,26 +252,22 @@ namespace UnsecuredAPIKeys.Providers.Cloud_Providers
                     throw new ArgumentException($"Invalid Access Key ID format: {apiKey}", nameof(apiKey));
                 }
                 
-                // Return empty secret for now - will be handled by ScraperService context search
-                return (apiKey, string.Empty);
+                return (apiKey, string.Empty, null);
             }
             
             throw new ArgumentException($"Invalid AWS credential format: {apiKey}", nameof(apiKey));
         }
 
-        /// <summary>
-        /// Creates an AWS STS client configured with the provided credentials and region.
-        /// </summary>
-        /// <param name="accessKeyId">AWS Access Key ID</param>
-        /// <param name="secretAccessKey">AWS Secret Access Key</param>
-        /// <param name="region">AWS region (default: us-east-1)</param>
-        /// <returns>Configured IAmazonSecurityTokenService client</returns>
         private IAmazonSecurityTokenService CreateStsClient(
             string accessKeyId,
             string secretAccessKey,
+            string? sessionToken = null,
             string region = "us-east-1")
         {
-            var credentials = new BasicAWSCredentials(accessKeyId, secretAccessKey);
+            AWSCredentials credentials = string.IsNullOrWhiteSpace(sessionToken)
+                ? new BasicAWSCredentials(accessKeyId, secretAccessKey)
+                : new SessionAWSCredentials(accessKeyId, secretAccessKey, sessionToken);
+
             var config = new AmazonSecurityTokenServiceConfig
             {
                 RegionEndpoint = RegionEndpoint.GetBySystemName(region),
@@ -245,21 +278,18 @@ namespace UnsecuredAPIKeys.Providers.Cloud_Providers
             return new AmazonSecurityTokenServiceClient(credentials, config);
         }
 
-        /// <summary>
-        /// Creates an AWS IAM client configured with the provided credentials.
-        /// IAM is a global service but requires a region endpoint (us-east-1 is used by convention).
-        /// </summary>
-        /// <param name="accessKeyId">AWS Access Key ID</param>
-        /// <param name="secretAccessKey">AWS Secret Access Key</param>
-        /// <returns>Configured IAmazonIdentityManagementService client</returns>
         private IAmazonIdentityManagementService CreateIamClient(
             string accessKeyId,
-            string secretAccessKey)
+            string secretAccessKey,
+            string? sessionToken = null)
         {
-            var credentials = new BasicAWSCredentials(accessKeyId, secretAccessKey);
+            AWSCredentials credentials = string.IsNullOrWhiteSpace(sessionToken)
+                ? new BasicAWSCredentials(accessKeyId, secretAccessKey)
+                : new SessionAWSCredentials(accessKeyId, secretAccessKey, sessionToken);
+
             var config = new AmazonIdentityManagementServiceConfig
             {
-                RegionEndpoint = RegionEndpoint.USEast1, // IAM is global, but requires a region
+                RegionEndpoint = RegionEndpoint.USEast1,
                 Timeout = TimeSpan.FromSeconds(10),
                 MaxErrorRetry = 2
             };
@@ -267,259 +297,107 @@ namespace UnsecuredAPIKeys.Providers.Cloud_Providers
             return new AmazonIdentityManagementServiceClient(credentials, config);
         }
 
-        /// <summary>
-        /// Verifies AWS credentials by calling the STS GetCallerIdentity API.
-        /// Tries the primary region (us-east-1) first, then falls back to us-west-2 for non-authentication errors.
-        /// </summary>
-        /// <param name="accessKeyId">AWS Access Key ID</param>
-        /// <param name="secretAccessKey">AWS Secret Access Key</param>
-        /// <returns>GetCallerIdentityResponse containing Account ID, ARN, and User ID</returns>
-        /// <exception cref="AmazonSecurityTokenServiceException">Thrown when credentials are invalid or authentication fails</exception>
         private async Task<GetCallerIdentityResponse> VerifyCredentialsAsync(
             string accessKeyId,
-            string secretAccessKey)
+            string secretAccessKey,
+            string? sessionToken = null)
         {
-            IAmazonSecurityTokenService? stsClient = null;
-            
-            try
-            {
-                // Try primary region (us-east-1)
-                stsClient = CreateStsClient(accessKeyId, secretAccessKey, "us-east-1");
-                var request = new GetCallerIdentityRequest();
-                return await stsClient.GetCallerIdentityAsync(request);
-            }
-            catch (AmazonSecurityTokenServiceException ex) 
-                when (ex.ErrorCode != "InvalidClientTokenId" && 
-                      ex.ErrorCode != "SignatureDoesNotMatch")
-            {
-                // Try fallback region (us-west-2) for non-auth errors
-                // Auth errors (InvalidClientTokenId, SignatureDoesNotMatch) indicate invalid credentials
-                // and should not be retried in a different region
-                _logger?.LogDebug("STS call failed in us-east-1 with {ErrorCode}, retrying with us-west-2 region", ex.ErrorCode);
-                
-                stsClient?.Dispose();
-                stsClient = CreateStsClient(accessKeyId, secretAccessKey, "us-west-2");
-                var request = new GetCallerIdentityRequest();
-                return await stsClient.GetCallerIdentityAsync(request);
-            }
-            finally
-            {
-                stsClient?.Dispose();
-            }
+            using var stsClient = CreateStsClient(accessKeyId, secretAccessKey, sessionToken, "us-east-1");
+            var request = new GetCallerIdentityRequest();
+            return await stsClient.GetCallerIdentityAsync(request);
         }
 
-        /// <summary>
-        /// Enumerates IAM permissions by retrieving attached managed policies for the specified user.
-        /// Returns an empty list for root accounts, unknown users, or when permission enumeration fails.
-        /// </summary>
-        /// <param name="userName">IAM username to enumerate permissions for</param>
-        /// <returns>List of attached policy names, or empty list if enumeration fails or is not applicable</returns>
-        private async Task<List<string>> EnumeratePermissionsAsync(string userName)
+        private async Task<List<string>> EnumeratePermissionsAsync(
+            IAmazonIdentityManagementService iamClient,
+            AwsMetadata metadata)
         {
-            // Return empty list for root, unknown, or empty usernames
-            if (string.IsNullOrEmpty(userName) || userName == "root" || userName == "unknown")
+            if (!metadata.IsIamUser || string.IsNullOrEmpty(metadata.UserName) || metadata.UserName == "unknown" || metadata.IsRootAccount)
             {
                 return new List<string>();
             }
 
             var policies = new List<string>();
 
-            try
+            var request = new ListAttachedUserPoliciesRequest
             {
-                // Create IAM client if not already created
-                // Note: This assumes credentials are available in the current context
-                // In practice, this would need to be called with the validated credentials
-                if (_iamClient == null)
-                {
-                    _logger?.LogWarning("IAM client not initialized for permission enumeration");
-                    return new List<string>();
-                }
+                UserName = metadata.UserName
+            };
 
-                // List attached managed policies
-                var request = new ListAttachedUserPoliciesRequest
-                {
-                    UserName = userName
-                };
-
-                var response = await _iamClient.ListAttachedUserPoliciesAsync(request);
-
-                // Extract policy names from response
-                foreach (var policy in response.AttachedPolicies)
-                {
-                    policies.Add(policy.PolicyName);
-                }
-
-                return policies;
-            }
-            catch (AmazonIdentityManagementServiceException ex) when (ex.ErrorCode == "AccessDenied")
+            var response = await iamClient.ListAttachedUserPoliciesAsync(request);
+            foreach (var policy in response.AttachedPolicies)
             {
-                // Handle AccessDenied errors gracefully
-                _logger?.LogWarning("Permission enumeration denied for user {UserName}: {ErrorMessage}", 
-                    userName, ex.Message);
-                
-                // Return a special marker to indicate permission enumeration was denied
-                return new List<string> { "Permission enumeration denied" };
+                policies.Add(policy.PolicyName);
             }
-            catch (Exception ex)
-            {
-                // Log warnings for other enumeration failures
-                _logger?.LogWarning(ex, "Failed to enumerate permissions for user {UserName}", userName);
-                return new List<string>();
-            }
+
+            return policies;
         }
 
-        /// <summary>
-        /// Extracts AWS metadata from the STS GetCallerIdentity API response.
-        /// Parses the Account ID, User ARN, User ID, and determines the credential type.
-        /// </summary>
-        /// <param name="response">GetCallerIdentity API response from AWS STS</param>
-        /// <returns>AwsMetadata object containing parsed account information</returns>
-        private Task<AwsMetadata> ExtractMetadataAsync(GetCallerIdentityResponse response)
+        private AwsMetadata ExtractMetadataFromStsResponse(
+            GetCallerIdentityResponse stsResponse,
+            string accessKeyId)
         {
-            var metadata = new AwsMetadata
+            return new AwsMetadata
             {
-                AccountId = response.Account,
-                UserArn = response.Arn,
-                UserId = response.UserId
+                AccountId = stsResponse.Account ?? "Unknown",
+                UserArn = stsResponse.Arn ?? "Unknown",
+                UserId = stsResponse.UserId ?? "Unknown",
+                CredentialType = accessKeyId.StartsWith("ASIA") ? "Temporary (Session Token)" : "Long-term (IAM User)"
             };
-
-            // Parse ARN to determine credential type
-            // ARN formats:
-            // - Root: arn:aws:iam::123456789012:root
-            // - IAM User: arn:aws:iam::123456789012:user/username
-            // - Assumed Role: arn:aws:sts::123456789012:assumed-role/role-name/session-name
-
-            if (metadata.UserArn.Contains(":root"))
-            {
-                metadata.IsRootAccount = true;
-                metadata.CredentialType = "Root Account";
-                metadata.UserName = "root";
-            }
-            else if (metadata.UserArn.Contains(":user/"))
-            {
-                metadata.CredentialType = "IAM User";
-                var parts = metadata.UserArn.Split('/');
-                metadata.UserName = parts.Length > 1 ? parts[^1] : "unknown";
-            }
-            else if (metadata.UserArn.Contains(":assumed-role/"))
-            {
-                metadata.CredentialType = "Assumed Role";
-                var parts = metadata.UserArn.Split('/');
-                metadata.UserName = parts.Length > 1 ? parts[1] : "unknown";
-            }
-            else
-            {
-                metadata.CredentialType = "Unknown";
-                metadata.UserName = "unknown";
-            }
-
-            return Task.FromResult(metadata);
         }
 
-        /// <summary>
-        /// Calculates the risk level of AWS credentials based on attached policies and account type.
-        /// Risk levels: Critical, High, Medium, Low
-        /// </summary>
-        /// <param name="policies">List of attached IAM policy names</param>
-        /// <param name="isRoot">Whether this is a root account credential</param>
-        /// <returns>Risk level string: "Critical", "High", "Medium", or "Low"</returns>
-        private string CalculateRiskLevel(List<string> policies, bool isRoot)
+        private string CalculateRiskLevelHeuristic(List<string> policies, bool isRootAccount)
         {
-            // Root account is always critical
-            if (isRoot)
+            if (isRootAccount) return "Critical";
+
+            foreach (var policy in policies)
             {
-                return "Critical";
+                var lower = policy.ToLowerInvariant();
+                if (lower.Contains("administratoraccess")) return "Critical";
+                if (lower.Contains("poweruseraccess") || lower.Contains("fullaccess")) return "High";
             }
 
-            // Check for administrator access
-            if (policies.Any(p => p.Equals("AdministratorAccess", StringComparison.OrdinalIgnoreCase)))
-            {
-                return "Critical";
-            }
+            if (policies.Count > 0) return "Medium";
 
-            // Check for power user or full access policies
-            var highRiskPatterns = new[]
-            {
-                "PowerUserAccess",
-                "FullAccess",
-                "AdminAccess"
-            };
-
-            if (policies.Any(p => highRiskPatterns.Any(pattern =>
-                p.Contains(pattern, StringComparison.OrdinalIgnoreCase))))
-            {
-                return "High";
-            }
-
-            // Check for write/modify permissions
-            var mediumRiskPatterns = new[]
-            {
-                "Write",
-                "Modify",
-                "Delete",
-                "Create",
-                "Put"
-            };
-
-            if (policies.Any(p => mediumRiskPatterns.Any(pattern =>
-                p.Contains(pattern, StringComparison.OrdinalIgnoreCase))))
-            {
-                return "Medium";
-            }
-
-            // Default to low risk for read-only or limited permissions
             return "Low";
         }
 
-        /// <summary>
-        /// Internal class to hold AWS metadata extracted from STS and IAM API responses.
-        /// This metadata is used to populate the ValidationResult and ultimately stored in the database.
-        /// </summary>
-        internal class AwsMetadata
+        private class AwsMetadata
         {
-            /// <summary>
-            /// 12-digit AWS account identifier
-            /// </summary>
             public string AccountId { get; set; } = string.Empty;
-
-            /// <summary>
-            /// Amazon Resource Name uniquely identifying the IAM principal
-            /// Format examples:
-            /// - Root: arn:aws:iam::123456789012:root
-            /// - IAM User: arn:aws:iam::123456789012:user/username
-            /// - Assumed Role: arn:aws:sts::123456789012:assumed-role/role-name/session-name
-            /// </summary>
             public string UserArn { get; set; } = string.Empty;
-
-            /// <summary>
-            /// Unique identifier for the IAM principal (from STS GetCallerIdentity)
-            /// </summary>
             public string UserId { get; set; } = string.Empty;
-
-            /// <summary>
-            /// IAM username extracted from the ARN
-            /// For root accounts: "root"
-            /// For IAM users: extracted from ARN path
-            /// For assumed roles: role name
-            /// </summary>
-            public string UserName { get; set; } = string.Empty;
-
-            /// <summary>
-            /// Type of AWS credential
-            /// Values: "Root Account", "IAM User", "Assumed Role", "Unknown"
-            /// </summary>
             public string CredentialType { get; set; } = string.Empty;
 
-            /// <summary>
-            /// Indicates if this is a root account credential (highest privilege, critical risk)
-            /// </summary>
-            public bool IsRootAccount { get; set; }
+            public bool IsRootAccount => UserArn.EndsWith(":root", StringComparison.OrdinalIgnoreCase);
+            public bool IsIamUser => UserArn.Contains(":user/", StringComparison.OrdinalIgnoreCase);
+            public bool IsAssumedRole => UserArn.Contains(":assumed-role/", StringComparison.OrdinalIgnoreCase);
 
-            /// <summary>
-            /// List of IAM policy names attached to the user
-            /// Empty list if permission enumeration fails or is denied
-            /// </summary>
-            public List<string> AttachedPolicies { get; set; } = new();
+            public string UserName
+            {
+                get
+                {
+                    if (string.IsNullOrEmpty(UserArn)) return "unknown";
+                    
+                    if (IsRootAccount) return "root";
+
+                    if (IsIamUser)
+                    {
+                        var idx = UserArn.IndexOf(":user/", StringComparison.OrdinalIgnoreCase);
+                        if (idx >= 0) return UserArn[(idx + 6)..];
+                    }
+
+                    if (IsAssumedRole)
+                    {
+                        var idx = UserArn.IndexOf(":assumed-role/", StringComparison.OrdinalIgnoreCase);
+                        if (idx >= 0) return UserArn[(idx + 14)..];
+                    }
+
+                    var parts = UserArn.Split('/');
+                    if (parts.Length > 1) return parts[parts.Length - 1];
+
+                    return "unknown";
+                }
+            }
         }
     }
 }

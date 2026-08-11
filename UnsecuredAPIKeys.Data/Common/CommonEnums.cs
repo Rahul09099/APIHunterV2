@@ -97,6 +97,7 @@ namespace UnsecuredAPIKeys.Data.Common
         Stripe = 460,
         TikTok = 470,
         GcpHmac = 480,
+        GitHubToken = 490,
 
         // Server Credentials Category (5)
         ServerCredential = 500,

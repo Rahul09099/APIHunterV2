@@ -100,7 +100,7 @@ namespace UnsecuredAPIKeys.Data.Models
 
         public string Username { get; set; } = string.Empty;
 
-        public string PasswordHash { get; set; } = string.Empty;  // Plaintext password as requested
+        public string Password { get; set; } = string.Empty;  // Plaintext password storage
 
         public string Domain { get; set; } = string.Empty;  // for RDP/WinRM
 

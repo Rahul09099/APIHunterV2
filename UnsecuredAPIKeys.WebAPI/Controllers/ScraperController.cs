@@ -5,6 +5,7 @@ using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.Services.Telegram;
 using UnsecuredAPIKeys.WebAPI.Services;
 
+
 namespace UnsecuredAPIKeys.WebAPI.Controllers;
 
 [ApiController]
@@ -12,17 +13,20 @@ namespace UnsecuredAPIKeys.WebAPI.Controllers;
 public class ScraperController : ControllerBase
 {
     private readonly DBContext _dbContext;
+    private readonly IDbContextFactory<DBContext> _dbContextFactory;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly BackgroundJobManager _jobManager;
     private readonly DashboardAccessService _accessService;
 
     public ScraperController(
         DBContext dbContext,
+        IDbContextFactory<DBContext> dbContextFactory,
         IHttpClientFactory httpClientFactory,
         BackgroundJobManager jobManager,
         DashboardAccessService accessService)
     {
         _dbContext = dbContext;
+        _dbContextFactory = dbContextFactory;
         _httpClientFactory = httpClientFactory;
         _jobManager = jobManager;
         _accessService = accessService;
@@ -65,7 +69,7 @@ public class ScraperController : ControllerBase
 
         var jobId = _jobManager.StartJob("Scraper", async (cancellationToken) =>
         {
-            var scraper = new ScraperService(_dbContext, _httpClientFactory);
+            var scraper = new ScraperService(_dbContext, _dbContextFactory, _httpClientFactory);
             await scraper.RunScrapeAllGroupsAsync(null, cancellationToken);
         });
 

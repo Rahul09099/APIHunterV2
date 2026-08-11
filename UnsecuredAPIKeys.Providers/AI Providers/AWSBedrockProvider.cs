@@ -1,6 +1,11 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
@@ -9,26 +14,25 @@ using UnsecuredAPIKeys.Providers.Common;
 namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
-    /// Provider for AWS Bedrock long-term API keys (launched July 2025).
-    /// Keys start with "bedrock:" prefix.
-    /// These are Bearer tokens used via AWS_BEARER_TOKEN_BEDROCK env var.
-    /// Bedrock is OpenAI-compatible — uses bedrock.us-east-1.amazonaws.com/v1/models.
-    /// Verification: GET /v1/models (lists available foundation models).
+    /// Provider for AWS Bedrock API keys.
+    /// Keys start with "bedrock:" prefix and are used via Bearer authorization.
+    /// Verification endpoint: GET https://bedrock-runtime.us-east-1.amazonaws.com/v1/models
     /// Official docs: https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html
     /// </summary>
     [ApiProvider]
     public class AWSBedrockProvider : BaseApiKeyProvider
     {
+        private const string PRIMARY_REGION = "us-east-1";
+        private const string PRIMARY_ENDPOINT = "https://bedrock-runtime.us-east-1.amazonaws.com/v1/models";
+
         public override string ProviderName => "AWS Bedrock";
         public override ApiTypeEnum ApiType => ApiTypeEnum.AWSBedrock;
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            // AWS Bedrock long-term API keys start with "bedrock:"
-            @"\bbedrock:[A-Za-z0-9+/=]{40,200}\b",
-            @"AWS_BEARER_TOKEN_BEDROCK",
-            @"BEDROCK_API_KEY",
-            @"bedrock[_-]?api[_-]?key"
+            @"\bbedrock:[A-Za-z0-9_\-\+/=]{20,256}\b",
+            @"AWS_BEARER_TOKEN_BEDROCK\s*=\s*['""]?(bedrock:[A-Za-z0-9_\-\+/=]{20,256})['""]?",
+            @"BEDROCK_API_KEY\s*=\s*['""]?(bedrock:[A-Za-z0-9_\-\+/=]{20,256})['""]?"
         ];
 
         public AWSBedrockProvider() : base() { }
@@ -37,88 +41,97 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(
             string apiKey, HttpClient httpClient)
         {
-            // AWS Bedrock OpenAI-compatible Chat Completions endpoint
-            // Correct base URL: https://bedrock-runtime.{region}.amazonaws.com/openai/v1
-            // Using us-east-1 (primary region) with fallback to us-west-2
-            // Official docs: https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions.html
-            const string primaryEndpoint   = "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/models";
-            const string fallbackEndpoint  = "https://bedrock-runtime.us-west-2.amazonaws.com/openai/v1/models";
+            using var req = new HttpRequestMessage(HttpMethod.Get, PRIMARY_ENDPOINT);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            async Task<(HttpResponseMessage response, string body)> TryEndpoint(string url)
-            {
-                using var req = new HttpRequestMessage(HttpMethod.Get, url);
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                var resp = await httpClient.SendAsync(req);
-                var b = await resp.Content.ReadAsStringAsync();
-                return (resp, b);
-            }
+            var response = await httpClient.SendAsync(req);
+            var body = await response.Content.ReadAsStringAsync();
 
-            var (response, body) = await TryEndpoint(primaryEndpoint);
+            _logger?.LogDebug("AWS Bedrock response ({Region}): Status={Status}, Body={Body}",
+                PRIMARY_REGION, response.StatusCode, TruncateResponse(body));
 
-            _logger?.LogDebug("AWS Bedrock models response (us-east-1): Status={Status}, Body={Body}",
-                response.StatusCode, TruncateResponse(body));
-
-            // If primary region fails with a non-auth error, try fallback region
-            if (!response.IsSuccessStatusCode &&
-                response.StatusCode != HttpStatusCode.Unauthorized &&
-                response.StatusCode != HttpStatusCode.Forbidden)
-            {
-                var (fallbackResp, fallbackBody) = await TryEndpoint(fallbackEndpoint);
-                if (IsSuccessStatusCode(fallbackResp.StatusCode) ||
-                    fallbackResp.StatusCode == HttpStatusCode.Unauthorized ||
-                    fallbackResp.StatusCode == HttpStatusCode.Forbidden)
-                {
-                    response = fallbackResp;
-                    body = fallbackBody;
-                    _logger?.LogDebug("AWS Bedrock fallback (us-west-2): Status={Status}", response.StatusCode);
-                }
-            }
+            ValidationResult result;
+            var bodyLower = body.ToLowerInvariant();
 
             if (IsSuccessStatusCode(response.StatusCode))
             {
-                var result = ValidationResult.Success(response.StatusCode, "Valid AWS Bedrock key");
+                result = ValidationResult.Success(response.StatusCode, "Valid AWS Bedrock key");
                 try
                 {
                     using var doc = JsonDocument.Parse(body);
-                    if (doc.RootElement.TryGetProperty("data", out var data))
+                    if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
                     {
                         var models = new List<ModelInfo>();
                         foreach (var el in data.EnumerateArray())
                         {
                             var id = el.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "";
-                            models.Add(new ModelInfo { ModelId = id, DisplayName = id });
+                            if (!string.IsNullOrEmpty(id))
+                            {
+                                models.Add(new ModelInfo { ModelId = id, DisplayName = id });
+                            }
                         }
                         result.AvailableModels = models;
                         result.Detail = $"Valid AWS Bedrock key ({models.Count} models available)";
                     }
                 }
-                catch { /* Best effort */ }
-                return result;
+                catch (JsonException ex)
+                {
+                    _logger?.LogDebug(ex, "AWS Bedrock returned a successful response that could not be parsed as JSON.");
+                }
             }
-
-            if (response.StatusCode == HttpStatusCode.Unauthorized ||
-                response.StatusCode == HttpStatusCode.Forbidden)
+            else if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                return ValidationResult.IsUnauthorized(response.StatusCode);
+                result = ValidationResult.IsUnauthorized(response.StatusCode, "Invalid AWS Bedrock API key");
             }
-
-            if ((int)response.StatusCode == 429)
+            else if (response.StatusCode == HttpStatusCode.Forbidden)
             {
-                return ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
+                result = new ValidationResult
+                {
+                    Status = ValidationAttemptStatus.ValidationUnavailable,
+                    HttpStatusCode = response.StatusCode,
+                    Detail = "AWS Bedrock access forbidden; key validity could not be determined."
+                };
             }
-
-            if (ContainsAny(body, QuotaIndicators))
+            else if ((int)response.StatusCode == 429)
             {
-                return ValidationResult.Success(response.StatusCode, $"Valid key but quota issue: {TruncateResponse(body)}");
+                result = new ValidationResult
+                {
+                    Status = ValidationAttemptStatus.ValidationUnavailable,
+                    HttpStatusCode = response.StatusCode,
+                    Detail = "AWS Bedrock rate limit exceeded (HTTP 429)"
+                };
+            }
+            else if (response.StatusCode == HttpStatusCode.PaymentRequired && ContainsAny(bodyLower, QuotaIndicators))
+            {
+                result = new ValidationResult
+                {
+                    Status = ValidationAttemptStatus.Valid,
+                    HttpStatusCode = response.StatusCode,
+                    IsQuotaExceeded = true,
+                    Detail = $"Valid key but billing/quota issue: {TruncateResponse(body)}"
+                };
+            }
+            else
+            {
+                result = ValidationResult.HasHttpError(response.StatusCode,
+                    $"Bedrock request failed ({PRIMARY_REGION}): {TruncateResponse(body)}");
             }
 
-            return ValidationResult.HasHttpError(response.StatusCode,
-                $"Models listing failed: {TruncateResponse(body)}");
+            result.RawResponse = body;
+            return result;
         }
 
-        protected override bool IsValidKeyFormat(string apiKey) =>
-            !string.IsNullOrWhiteSpace(apiKey) &&
-            apiKey.StartsWith("bedrock:", StringComparison.Ordinal) &&
-            apiKey.Length >= 48;
+        protected override bool IsValidKeyFormat(string apiKey)
+        {
+            if (string.IsNullOrWhiteSpace(apiKey) || !apiKey.StartsWith("bedrock:", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var value = apiKey["bedrock:".Length..];
+            return value.Length >= 20 && value.Length <= 256 &&
+                   value.All(c => char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == '+' || c == '/' || c == '=');
+        }
     }
 }

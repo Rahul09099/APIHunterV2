@@ -1,12 +1,26 @@
-using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
 using UnsecuredAPIKeys.Providers._Base;
 using UnsecuredAPIKeys.Providers.Common;
 
 namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
+    /// <summary>
+    /// Provider for Kling AI API keys.
+    /// Authentication requires an Access Key (AK) and Secret Key (SK) pair formatted as "AK:SK".
+    /// Auth strategy: HS256 signed JWT in the Authorization Bearer header.
+    /// Docs: https://api.klingai.com
+    /// </summary>
     [ApiProvider]
     public class KlingAIProvider : BaseApiKeyProvider
     {
@@ -15,137 +29,199 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"(?:KLING_ACCESS_KEY|kling_access_key|KLING_AK).*?['""]([a-zA-Z0-9]{16,})['""]",
-            @"\b[a-zA-Z0-9]{24,}\b" // Fallback for raw keys
+            @"(?i)\bKLING_ACCESS_KEY\s*[:=]\s*['""]?([A-Za-z0-9]{16,})['""]?",
+            @"(?i)\bKLING_SECRET_KEY\s*[:=]\s*['""]?([A-Za-z0-9]{16,})['""]?",
+            @"(?i)\bKLING_AK\s*[:=]\s*['""]?([A-Za-z0-9]{16,})['""]?",
+            @"(?i)\bKLING_SK\s*[:=]\s*['""]?([A-Za-z0-9]{16,})['""]?"
         ];
 
         public KlingAIProvider() : base() { }
-
         public KlingAIProvider(ILogger<KlingAIProvider>? logger) : base(logger) { }
 
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(string apiKey, HttpClient httpClient)
         {
-            string ak = apiKey;
-            string? sk = null;
-
-            // Check if we have a paired key (AK:SK)
-            if (apiKey.Contains(':'))
+            var parts = apiKey.Split(':', 2);
+            if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
             {
-                var parts = apiKey.Split(':');
-                ak = parts[0];
-                sk = parts[1];
+                return ValidationResult.HasHttpError(HttpStatusCode.BadRequest,
+                    "KlingAI authentication requires a paired Access Key and Secret Key formatted as 'AK:SK'.");
             }
 
-            // If we only have AK, we try a direct Bearer test (some proxy providers support this)
-            // But for native Kling, we need the Secret Key to sign a JWT.
-            string authHeaderValue = apiKey; 
+            string ak = parts[0].Trim();
+            string sk = parts[1].Trim();
 
-            if (!string.IsNullOrEmpty(sk))
+            string authHeaderValue;
+            try
             {
-                try 
-                {
-                    authHeaderValue = GenerateKlingJwt(ak, sk);
-                }
-                catch (Exception ex)
-                {
-                    return ValidationResult.HasHttpError(HttpStatusCode.BadRequest, $"JWT Generation failed: {ex.Message}");
-                }
+                authHeaderValue = GenerateKlingJwt(ak, sk);
             }
-            
+            catch (Exception ex)
+            {
+                return ValidationResult.HasHttpError(HttpStatusCode.BadRequest, $"JWT Generation failed: {ex.Message}");
+            }
+
             var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var startMs = nowMs - (7 * 24 * 60 * 60 * 1000); // Look back 7 days for balance/costs
-            
-            string url = $"https://api-singapore.klingai.com/account/costs?start_time={startMs}&end_time={nowMs}";
+            var startMs = nowMs - (7L * 24 * 60 * 60 * 1000);
+
+            // Primary endpoint: api.klingai.com, fallback to regional api-singapore.klingai.com
+            string url = $"https://api.klingai.com/v1/account/costs?start_time={startMs}&end_time={nowMs}";
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authHeaderValue);
 
-            try 
+            try
             {
                 var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
 
-                 _logger?.LogDebug("KlingAI API response: Status={StatusCode}, Body={Body}",
+                // If primary 404s, try regional endpoint
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    string regionalUrl = $"https://api-singapore.klingai.com/account/costs?start_time={startMs}&end_time={nowMs}";
+                    using var regRequest = new HttpRequestMessage(HttpMethod.Get, regionalUrl);
+                    regRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authHeaderValue);
+                    response = await httpClient.SendAsync(regRequest);
+                    responseBody = await response.Content.ReadAsStringAsync();
+                }
+
+                _logger?.LogDebug("KlingAI API response: Status={StatusCode}, Body={Body}",
                     response.StatusCode, TruncateResponse(responseBody));
+
+                ValidationResult result;
 
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Valid KlingAI key");
-
-                    try 
+                    result = ValidationResult.Success(response.StatusCode, "Valid KlingAI credentials");
+                    result.Metadata = new Dictionary<string, object>
                     {
-                        using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+                        ["authentication_valid"] = true,
+                        ["access_key"] = ak
+                    };
+
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(responseBody);
                         if (doc.RootElement.TryGetProperty("data", out var data))
                         {
-                            // The new API returns a list of resource packages under 'resource_pack_subscribe_infos'
-                            if (data.TryGetProperty("resource_pack_subscribe_infos", out var packs) && 
-                                packs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                            if (data.TryGetProperty("resource_pack_subscribe_infos", out var packs) &&
+                                packs.ValueKind == JsonValueKind.Array)
                             {
-                                double totalRemaining = 0;
+                                int packCount = packs.GetArrayLength();
+                                result.Metadata["resource_package_count"] = packCount;
+
+                                var packList = new List<Dictionary<string, object>>();
                                 foreach (var pack in packs.EnumerateArray())
                                 {
-                                    if (pack.TryGetProperty("remaining_quantity", out var rem))
-                                    {
-                                        if (rem.ValueKind == System.Text.Json.JsonValueKind.Number)
-                                            totalRemaining += rem.GetDouble();
-                                        else if (rem.ValueKind == System.Text.Json.JsonValueKind.String && double.TryParse(rem.GetString(), out double val))
-                                            totalRemaining += val;
-                                    }
+                                    var item = new Dictionary<string, object>();
+                                    if (pack.TryGetProperty("resource_pack_name", out var pName))
+                                        item["name"] = pName.GetString() ?? "";
+
+                                    if (pack.TryGetProperty("remaining_quantity", out var rem) && rem.ValueKind == JsonValueKind.Number)
+                                        item["remaining_quantity"] = rem.GetDouble();
+
+                                    if (pack.TryGetProperty("total_quantity", out var tot) && tot.ValueKind == JsonValueKind.Number)
+                                        item["total_quantity"] = tot.GetDouble();
+
+                                    if (pack.TryGetProperty("status", out var pStatus))
+                                        item["status"] = pStatus.GetString() ?? "";
+
+                                    if (item.Count > 0)
+                                        packList.Add(item);
                                 }
-                                result.Balance = $"{totalRemaining} Credits";
+                                if (packList.Count > 0)
+                                    result.Metadata["resource_packages"] = packList;
                             }
                         }
                     }
-                    catch { /* Best effort */ }
+                    catch
+                    {
+                        // Json parse failure is best-effort metadata
+                    }
 
+                    result.Balance = "N/A (check KlingAI account dashboard)";
+                    result.RawResponse = responseBody;
                     return result;
                 }
-                else if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    return ValidationResult.IsUnauthorized(response.StatusCode);
+                    result = ValidationResult.IsUnauthorized(response.StatusCode, "Invalid KlingAI Access Key or Secret Key");
+                    result.RawResponse = responseBody;
+                    return result;
                 }
-                 else if ((int)response.StatusCode == 429)
+
+                if (response.StatusCode == HttpStatusCode.Forbidden)
                 {
-                    return ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
+                    result = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = "KlingAI request forbidden; credential validity could not be determined."
+                    };
+                    result.RawResponse = responseBody;
+                    return result;
                 }
-                else
+
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
                 {
-                     return ValidationResult.HasHttpError(response.StatusCode, 
-                        $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                    result = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = "KlingAI rate limit exceeded; credential validity could not be determined."
+                    };
+                    result.RawResponse = responseBody;
+                    return result;
                 }
+
+                if ((int)response.StatusCode >= 500)
+                {
+                    result = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = $"KlingAI service unavailable (HTTP {(int)response.StatusCode})"
+                    };
+                    result.RawResponse = responseBody;
+                    return result;
+                }
+
+                result = ValidationResult.HasHttpError(response.StatusCode,
+                    $"API request failed with status {response.StatusCode}. Response: {TruncateResponse(responseBody)}");
+                result.RawResponse = responseBody;
+                return result;
             }
             catch (Exception ex)
             {
-                return ValidationResult.HasHttpError(HttpStatusCode.ServiceUnavailable, $"Connection failed: {ex.Message}");
+                return ValidationResult.HasNetworkError(ex.Message);
             }
         }
 
         private string GenerateKlingJwt(string ak, string sk)
         {
-            // Standard HS256 JWT Generation for Kling AI
             var header = new { alg = "HS256", typ = "JWT" };
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            var payload = new 
-            { 
-                iss = ak, 
-                exp = now + 1800, // 30 mins
-                nbf = now - 5 
+            var payload = new
+            {
+                iss = ak,
+                exp = now + 1800,
+                nbf = now - 5
             };
 
-            string encodedHeader = Base64UrlEncode(System.Text.Json.JsonSerializer.Serialize(header));
-            string encodedPayload = Base64UrlEncode(System.Text.Json.JsonSerializer.Serialize(payload));
-            
+            string encodedHeader = Base64UrlEncode(JsonSerializer.Serialize(header));
+            string encodedPayload = Base64UrlEncode(JsonSerializer.Serialize(payload));
+
             string dataToSign = $"{encodedHeader}.{encodedPayload}";
-            byte[] keyBytes = System.Text.Encoding.UTF8.GetBytes(sk);
-            byte[] dataBytes = System.Text.Encoding.UTF8.GetBytes(dataToSign);
-            
-            using var hmac = new System.Security.Cryptography.HMACSHA256(keyBytes);
+            byte[] keyBytes = Encoding.UTF8.GetBytes(sk);
+            byte[] dataBytes = Encoding.UTF8.GetBytes(dataToSign);
+
+            using var hmac = new HMACSHA256(keyBytes);
             byte[] hashBytes = hmac.ComputeHash(dataBytes);
             string encodedSignature = Base64UrlEncode(hashBytes);
-            
+
             return $"{dataToSign}.{encodedSignature}";
         }
 
-        private static string Base64UrlEncode(string input) => Base64UrlEncode(System.Text.Encoding.UTF8.GetBytes(input));
+        private static string Base64UrlEncode(string input) => Base64UrlEncode(Encoding.UTF8.GetBytes(input));
 
         private static string Base64UrlEncode(byte[] input)
         {
@@ -157,8 +233,15 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            // Accept AK:SK pairs or single keys of length > 16
-            return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length > 16;
+            if (string.IsNullOrWhiteSpace(apiKey)) return false;
+
+            var parts = apiKey.Split(':', 2);
+            if (parts.Length != 2) return false;
+
+            var ak = parts[0].Trim();
+            var sk = parts[1].Trim();
+
+            return ak.Length >= 16 && sk.Length >= 16;
         }
     }
 }

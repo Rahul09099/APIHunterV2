@@ -480,7 +480,7 @@ CREATE TABLE IF NOT EXISTS "ServerCredentials" (
     "Host"                 VARCHAR(255) NOT NULL,
     "Port"                 INTEGER      NOT NULL DEFAULT 0,
     "Username"             VARCHAR(255),
-    "PasswordHash"         TEXT,
+    "Password"             TEXT,
     "Domain"               VARCHAR(255),
     "NetworkStatus"        VARCHAR(50)  NOT NULL DEFAULT 'Unknown',
     "AuthenticationStatus" VARCHAR(50)  NOT NULL DEFAULT 'Untested',
@@ -503,7 +503,7 @@ ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "CredentialType"       
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Host"                 VARCHAR(255) NOT NULL DEFAULT 'Unknown';
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Port"                 INTEGER      NOT NULL DEFAULT 0;
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Username"             VARCHAR(255);
-ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "PasswordHash"         TEXT;
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Password"             TEXT;
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Domain"               VARCHAR(255);
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "NetworkStatus"        VARCHAR(50)  NOT NULL DEFAULT 'Unknown';
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "AuthenticationStatus" VARCHAR(50)  NOT NULL DEFAULT 'Untested';

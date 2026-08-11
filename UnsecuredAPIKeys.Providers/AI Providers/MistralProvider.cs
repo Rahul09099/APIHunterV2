@@ -10,9 +10,21 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
     /// Provider for Mistral AI API keys.
-    /// Mistral keys have no fixed prefix — they are 32-char alphanumeric strings.
-    /// Verification: GET /v1/models (official endpoint, confirms key validity + lists models)
-    /// then POST /v1/chat/completions with mistral-small-latest (cheapest model).
+    ///
+    /// Key format: alphanumeric string, no fixed prefix. Length is not guaranteed to be exactly 32
+    /// characters — Mistral may change key formats; we accept ≥ 20 alphanumeric characters.
+    ///
+    /// Auth: Authorization: Bearer {key}
+    ///
+    /// Verification: GET https://api.mistral.ai/v1/models
+    ///   — officially documented, read-only, authenticated endpoint.
+    ///   — does NOT consume any inference quota.
+    ///   — 200 → valid key; response body contains { "data": [...models...] }
+    ///   — 401 → invalid or expired key
+    ///   — 403 → key may be valid but access restricted (plan/permission)
+    ///   — 429 → rate-limited; key validity cannot be determined
+    ///   — 5xx → Mistral service unavailable
+    ///
     /// Official docs: https://docs.mistral.ai/api/endpoint/models
     /// </summary>
     [ApiProvider]
@@ -23,10 +35,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            // Mistral keys are 32-char alphanumeric — must be anchored to env var names to avoid false positives
-            @"(?i)MISTRAL[_-]?API[_-]?KEY[""'\s]*[:=][""'\s]*([A-Za-z0-9]{32})",
-            @"(?i)mistral[_-]?key[""'\s]*[:=][""'\s]*([A-Za-z0-9]{32})",
-            @"(?i)MISTRAL_SECRET[""'\s]*[:=][""'\s]*([A-Za-z0-9]{32})",
+            // Context-anchored patterns — require a Mistral-related variable name to avoid
+            // false positives from generic alphanumeric strings in unrelated codebases
+            @"(?i)\bMISTRAL[\s_-]*API[\s_-]*KEY\s*[:=]\s*['""]?([A-Za-z0-9]{20,})['""]?",
+            @"(?i)\bMISTRAL[\s_-]*KEY\s*[:=]\s*['""]?([A-Za-z0-9]{20,})['""]?",
+            @"(?i)\bMISTRAL[\s_-]*SECRET\s*[:=]\s*['""]?([A-Za-z0-9]{20,})['""]?",
         ];
 
         public MistralProvider() : base() { }
@@ -35,93 +48,75 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(
             string apiKey, HttpClient httpClient)
         {
-            // Step 1: List models — official validation endpoint
-            using var modelsRequest = new HttpRequestMessage(
-                HttpMethod.Get, "https://api.mistral.ai/v1/models");
-            modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            modelsRequest.Headers.Accept.Add(
-                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-
-            var modelsResponse = await httpClient.SendAsync(modelsRequest);
-            var modelsBody = await modelsResponse.Content.ReadAsStringAsync();
-
-            _logger?.LogDebug("Mistral models response: Status={Status}, Body={Body}",
-                modelsResponse.StatusCode, TruncateResponse(modelsBody));
-
-            if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized ||
-                modelsResponse.StatusCode == HttpStatusCode.Forbidden)
+            try
             {
-                return ValidationResult.IsUnauthorized(modelsResponse.StatusCode);
-            }
+                // GET /v1/models — officially documented, authenticated, read-only endpoint.
+                // Returns the list of available Mistral models without consuming any inference quota.
+                // Ref: https://docs.mistral.ai/api/endpoint/models
+                using var modelsRequest = new HttpRequestMessage(
+                    HttpMethod.Get, "https://api.mistral.ai/v1/models");
+                modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                modelsRequest.Headers.Accept.Add(
+                    new MediaTypeWithQualityHeaderValue("application/json"));
 
-            if ((int)modelsResponse.StatusCode == 429)
-            {
-                return ValidationResult.Success(modelsResponse.StatusCode, "quota exhausted");
-            }
+                var modelsResponse = await httpClient.SendAsync(modelsRequest);
+                var modelsBody = await modelsResponse.Content.ReadAsStringAsync();
 
-            if (!modelsResponse.IsSuccessStatusCode)
-            {
-                return ValidationResult.HasHttpError(modelsResponse.StatusCode,
-                    $"Models listing failed: {TruncateResponse(modelsBody)}");
-            }
+                _logger?.LogDebug("Mistral models response: Status={Status}, Body={Body}",
+                    modelsResponse.StatusCode, TruncateResponse(modelsBody));
 
-            var models = ParseModels(modelsBody);
-
-            // Step 2: Quick chat completion to confirm active quota
-            var preferredModels = new[] { "mistral-small-latest", "mistral-small", "open-mistral-7b" };
-            var modelToUse = models?
-                .Select(m => m.ModelId)
-                .FirstOrDefault(id => preferredModels.Any(p => id.Contains(p)))
-                ?? "mistral-small-latest";
-
-            using var chatRequest = new HttpRequestMessage(
-                HttpMethod.Post, "https://api.mistral.ai/v1/chat/completions");
-            chatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            chatRequest.Content = new StringContent(
-                JsonSerializer.Serialize(new
+                // 401 — invalid or expired key
+                if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    model = modelToUse,
-                    messages = new[] { new { role = "user", content = "Hi" } },
-                    max_tokens = 1
-                }),
-                System.Text.Encoding.UTF8, "application/json");
+                    return ValidationResult.IsUnauthorized(modelsResponse.StatusCode,
+                        "Invalid or expired Mistral API key");
+                }
 
-            var chatResponse = await httpClient.SendAsync(chatRequest);
-            var chatBody = await chatResponse.Content.ReadAsStringAsync();
+                // 403 — key may be valid but access restricted; conclusive determination unavailable
+                if (modelsResponse.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return ValidationResult.ValidationUnavailable(modelsResponse.StatusCode,
+                        "Mistral API returned 403 Forbidden — permission or plan restriction; key validity could not be conclusively determined");
+                }
 
-            _logger?.LogDebug("Mistral chat response ({Model}): Status={Status}, Body={Body}",
-                modelToUse, chatResponse.StatusCode, TruncateResponse(chatBody));
+                // 429 — rate limited; key validity cannot be determined
+                if (modelsResponse.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    return ValidationResult.ValidationUnavailable(modelsResponse.StatusCode,
+                        "Mistral API rate limit exceeded (429) — key validity could not be determined");
+                }
 
-            if (IsSuccessStatusCode(chatResponse.StatusCode))
-            {
-                var result = ValidationResult.Success(chatResponse.StatusCode, models);
+                // 5xx — Mistral service unavailable
+                if ((int)modelsResponse.StatusCode >= 500)
+                {
+                    return ValidationResult.ValidationUnavailable(modelsResponse.StatusCode,
+                        $"Mistral service error ({modelsResponse.StatusCode}) — validation unavailable");
+                }
+
+                if (!IsSuccessStatusCode(modelsResponse.StatusCode))
+                {
+                    return ValidationResult.HasHttpError(modelsResponse.StatusCode,
+                        $"Unexpected status from Mistral models endpoint: {TruncateResponse(modelsBody)}");
+                }
+
+                // 200 — valid key; parse available models
+                var models = ParseModels(modelsBody);
+
+                var result = ValidationResult.Success(modelsResponse.StatusCode, "Valid Mistral AI key");
                 result.AvailableModels = models;
+                result.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["models_parsed"] = models != null,
+                    ["model_count"] = models?.Count ?? 0
+                };
+                result.RawResponse = modelsBody;
                 return result;
             }
-
-            if (chatResponse.StatusCode == HttpStatusCode.Unauthorized ||
-                chatResponse.StatusCode == HttpStatusCode.Forbidden)
+            catch (Exception ex)
             {
-                return ValidationResult.IsUnauthorized(chatResponse.StatusCode);
+                return ValidationResult.HasNetworkError(ex.Message);
             }
-
-            if ((int)chatResponse.StatusCode == 429)
-            {
-                var limited = ValidationResult.Success(chatResponse.StatusCode, "quota exhausted");
-                limited.AvailableModels = models;
-                return limited;
-            }
-
-            if (ContainsAny(chatBody, QuotaIndicators))
-            {
-                var limited = ValidationResult.Success(chatResponse.StatusCode,
-                    $"Valid key but quota issue: {TruncateResponse(chatBody)}");
-                limited.AvailableModels = models;
-                return limited;
-            }
-
-            return ValidationResult.HasHttpError(chatResponse.StatusCode,
-                $"Chat completion failed: {TruncateResponse(chatBody)}");
         }
 
         private List<ModelInfo>? ParseModels(string json)
@@ -135,15 +130,24 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 foreach (var el in data.EnumerateArray())
                 {
                     var id = el.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "";
-                    list.Add(new ModelInfo { ModelId = id, DisplayName = id });
+                    if (!string.IsNullOrEmpty(id))
+                        list.Add(new ModelInfo { ModelId = id, DisplayName = id });
                 }
+                // Return list even if empty — empty model list is a valid authenticated response;
+                // null means parsing itself failed, which is distinct from "zero models returned".
                 return list;
             }
             catch { return null; }
         }
 
-        protected override bool IsValidKeyFormat(string apiKey) =>
-            !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length == 32 &&
-            apiKey.All(c => char.IsLetterOrDigit(c));
+        protected override bool IsValidKeyFormat(string apiKey)
+        {
+            // Mistral keys are alphanumeric with no fixed length guarantee.
+            // We accept any alphanumeric string of at least 20 characters and let the API
+            // determine actual validity — avoids rejecting keys if Mistral changes its format.
+            return !string.IsNullOrWhiteSpace(apiKey) &&
+                   apiKey.Length >= 20 &&
+                   apiKey.All(char.IsLetterOrDigit);
+        }
     }
 }

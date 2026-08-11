@@ -57,10 +57,10 @@ namespace UnsecuredAPIKeys.Tests
                 Assert.Equal("ftp_admin", cred.Username);
                 Assert.Equal("192.168.10.10", cred.Host);
                 Assert.Equal(21, cred.Port);
-                Assert.NotEmpty(cred.PasswordHash);
+                Assert.NotEmpty(cred.Password);
                 
                 // Verify that the plaintext password is saved
-                Assert.Equal("SecureFtpPass123", cred.PasswordHash);
+                Assert.Equal("SecureFtpPass123", cred.Password);
 
                 // Populate other fields for roundtrip validation
                 cred.NetworkStatus = "Accessible";
