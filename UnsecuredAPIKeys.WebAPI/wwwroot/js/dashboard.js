@@ -812,10 +812,16 @@ function renderKeysTable() {
         const tr = document.createElement('tr');
         
         let typeBadgeClass = 'badge-muted';
-        if (key.apiType === 'OpenAI') typeBadgeClass = 'badge-emerald';
-        else if (key.apiType === 'Anthropic') typeBadgeClass = 'badge-cyan';
-        else if (key.apiType === 'Google') typeBadgeClass = 'badge-blue';
-        else if (key.apiType === 'DeepSeek') typeBadgeClass = 'badge-amber';
+        if (key.apiTypeName === 'OpenAI' || key.apiType === 10) typeBadgeClass = 'badge-emerald';
+        else if (key.apiTypeName === 'Anthropic' || key.apiType === 20) typeBadgeClass = 'badge-cyan';
+        else if (key.apiTypeName === 'Google' || key.apiType === 30) typeBadgeClass = 'badge-blue';
+        else if (key.apiTypeName === 'DeepSeek' || key.apiType === 40) typeBadgeClass = 'badge-amber';
+        else if (key.apiTypeName === 'Stripe' || key.apiType === 460) typeBadgeClass = 'badge-purple';
+        else if (key.apiTypeName === 'TikTok' || key.apiType === 470) typeBadgeClass = 'badge-pink';
+        else if (key.apiTypeName === 'GcpHmac' || key.apiType === 480) typeBadgeClass = 'badge-cyan';
+        else if (key.apiTypeName === 'Facebook' || key.apiType === 440) typeBadgeClass = 'badge-blue';
+        else if (key.apiTypeName === 'GoogleOAuth' || key.apiType === 450) typeBadgeClass = 'badge-red';
+        else if (key.apiTypeName === 'ServerCredential' || key.apiType === 500) typeBadgeClass = 'badge-cyan';
         
         let statusBadgeClass = 'badge-muted';
         if (key.status === 'Valid') statusBadgeClass = 'badge-emerald';

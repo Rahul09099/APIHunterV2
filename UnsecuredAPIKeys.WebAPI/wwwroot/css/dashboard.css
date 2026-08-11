@@ -453,6 +453,7 @@ body {
 .badge-blue { background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); color: var(--accent-blue); }
 .badge-muted { background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); color: #94a3b8; }
 .badge-pink { background: rgba(217, 70, 239, 0.1); border: 1px solid rgba(217, 70, 239, 0.2); color: var(--accent-pink); }
+.badge-purple { background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.2); color: #c084fc; }
 
 /* Keyboard code preview */
 .key-preview-container {
