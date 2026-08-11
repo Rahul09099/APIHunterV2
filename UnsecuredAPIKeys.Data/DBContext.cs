@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using UnsecuredAPIKeys.Data.Models;
 
 namespace UnsecuredAPIKeys.Data
@@ -11,6 +12,7 @@ namespace UnsecuredAPIKeys.Data
     {
         private readonly string _dbPath;
 
+        [ActivatorUtilitiesConstructor]
         public DBContext(DbContextOptions<DBContext> options) : base(options)
         {
             _dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") ?? "unsecuredapikeys.db";
