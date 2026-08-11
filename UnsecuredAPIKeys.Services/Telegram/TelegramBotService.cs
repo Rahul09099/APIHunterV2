@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Telegram.Bot;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -615,7 +616,7 @@ public class TelegramBotService : BackgroundService
 
     private async Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
     {
-        if (exception is Telegram.Bot.Exceptions.ApiRequestException apiEx && apiEx.ErrorCode == 409)
+        if (exception is global::Telegram.Bot.Exceptions.ApiRequestException apiEx && apiEx.ErrorCode == 409)
         {
             _logger.LogWarning("Telegram Bot 409 Conflict: Another instance is polling getUpdates with the same bot token. Retrying in 10 seconds...");
             await Task.Delay(10000, cancellationToken);
