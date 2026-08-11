@@ -17,8 +17,10 @@ WORKDIR /app
 COPY --from=publish /app/publish .
 
 # Create directory for database
+RUN mkdir -p /app/data
+
 # Set environment variables
-ENV ASPNETCORE_URLS=http://+:$PORT
+ENV ASPNETCORE_URLS=http://+:8080
 ENV DATABASE_PATH=/app/data/unsecuredapikeys.db
 
 # Expose port (Render assigns this dynamically)
