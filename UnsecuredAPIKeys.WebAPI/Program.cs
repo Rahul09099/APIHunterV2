@@ -6,6 +6,15 @@ using UnsecuredAPIKeys.WebAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Disable reloadOnChange FileSystemWatcher to prevent inotify limit (128) container crash (Status 139) on Render/Docker
+builder.Host.ConfigureAppConfiguration((hostingContext, config) =>
+{
+    config.Sources.Clear();
+    config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+          .AddJsonFile($"appsettings.{hostingContext.HostingEnvironment.EnvironmentName}.json", optional: true, reloadOnChange: false)
+          .AddEnvironmentVariables();
+});
+
 // Add services to the container
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -48,119 +57,56 @@ var nodeToken = Environment.GetEnvironmentVariable("NODE_TOKEN");
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<DatabaseService>();
 builder.Services.AddScoped<VerifierService>();
-builder.Services.AddSingleton<BackgroundJobManager>();
+builder.Services.AddSingleton<JobManagerService>();
 builder.Services.AddSingleton<DashboardAccessService>();
 
-// Configure ScraperService with Worker Mode if applicable
-builder.Services.AddScoped<ScraperService>(sp => {
-    var db = sp.GetRequiredService<DBContext>();
-    var http = sp.GetRequiredService<IHttpClientFactory>();
-    var logger = sp.GetService<ILogger<ScraperService>>();
-    var scraper = new ScraperService(db, http, logger)
-    {
-        IsWorkerMode = isWorkerMode,
-        MasterApiUrl = masterApiUrl,
-        NodeToken = nodeToken
-    };
-    return scraper;
-});
-
-// Only start the Telegram Bot if NOT in worker mode
-if (!isWorkerMode)
-
-
-
+if (isWorkerMode)
 {
-    Console.WriteLine("🤖 Mode: Master (Telegram Bot Enabled)");
-    builder.Services.AddHostedService<TelegramBotService>();
+    Console.WriteLine("👻 Mode: GHOST WORKER NODE");
+    Console.WriteLine($"📡 Master API Target: {masterApiUrl}");
+    Console.WriteLine($"🔑 Node Token Configured: {(!string.IsNullOrEmpty(nodeToken) ? "Yes" : "No")}");
     builder.Services.AddHostedService<NodeKeepAliveService>();
 }
 else
 {
-    Console.WriteLine("👻 Mode: Ghost Worker (Telegram Bot Disabled)");
-    Console.WriteLine($"🛰️ Reporting to: {masterApiUrl}");
+    Console.WriteLine("👑 Mode: MASTER CENTRAL NODE");
+    builder.Services.AddHostedService<TelegramBotService>();
 }
-
-// Configure CORS (allow all for now, tighten in production)
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowAll", policy =>
-    {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
-    });
-});
 
 var app = builder.Build();
 
-// Initialize database (Only for Master Node) - Run in background to prevent Health Check Timeouts
-if (!isWorkerMode)
+// Auto-create SQLite database directory and schema if Npgsql connection string is not present
+using (var scope = app.Services.CreateScope())
 {
-    _ = Task.Run(async () =>
+    var db = scope.ServiceProvider.GetRequiredService<DBContext>();
+    try
     {
-        try
+        if (string.IsNullOrEmpty(connectionString))
         {
-            using (var scope = app.Services.CreateScope())
+            var dbDir = Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(dbDir) && !Directory.Exists(dbDir))
             {
-                var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
-                await dbService.InitializeDatabaseAsync();
+                Directory.CreateDirectory(dbDir);
+                Console.WriteLine($"📁 Created database directory: {dbDir}");
             }
+            db.Database.EnsureCreated();
+            Console.WriteLine("✅ SQLite Database initialized successfully.");
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[CRITICAL] Background DB Initialization Failed: {ex.Message}");
-        }
-    });
-}
-
-// Configure the HTTP request pipeline
-// Only enable Swagger if explicitly requested or in Dev (Recommended for security)
-if (app.Environment.IsDevelopment() || Environment.GetEnvironmentVariable("SWAGGER_ENABLED") == "true")
-{
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
+    }
+    catch (Exception ex)
     {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "UnsecuredAPIKeys API V1");
-        c.RoutePrefix = string.Empty; // Swagger UI at root
-    });
-}
-else
-{
-    // Simple landing page for public URL
-    app.MapGet("/", () => "📡 APIHunterV2 Master Node is Online.");
+        Console.WriteLine($"⚠️ Database initialization warning: {ex.Message}");
+    }
 }
 
-app.UseCors("AllowAll");
+// Configure HTTP request pipeline
+app.UseSwagger();
+app.UseSwaggerUI();
+
+app.UseDefaultFiles();
 app.UseStaticFiles();
+
 app.UseAuthorization();
 app.MapControllers();
 
-// Health check endpoint
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
-
-// 💎 Visual Network Dashboard
-app.MapGet("/dashboard", (IWebHostEnvironment env) => {
-    var path = Path.Combine(env.WebRootPath ?? Path.Combine(AppContext.BaseDirectory, "wwwroot"), "index.html");
-    if (!File.Exists(path))
-    {
-        return Results.Text("<h1>Visual Dashboard: Under Construction</h1><p>Static files are currently being written. Please refresh in a moment.</p>", "text/html");
-    }
-    return Results.File(path, "text/html");
-});
-
-// 🛰️ AUTO-START WORKER (If in Worker Mode)
-if (isWorkerMode)
-{
-    _ = Task.Run(async () =>
-    {
-        using var scope = app.Services.CreateScope();
-        var scraper = scope.ServiceProvider.GetRequiredService<ScraperService>();
-        await scraper.RunAsync(CancellationToken.None);
-    });
-}
-
-// Ensure the app listens on the port provided by Render (Fixes Port Scan Timeout)
-var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
-Console.WriteLine($"🚀 Server: Starting on port {port}");
-app.Run($"http://0.0.0.0:{port}");
+app.Run();
