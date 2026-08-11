@@ -13,6 +13,7 @@ namespace UnsecuredAPIKeys.WebAPI.Controllers;
 public class VerifierController : ControllerBase
 {
     private readonly DBContext _dbContext;
+    private readonly IDbContextFactory<DBContext> _dbContextFactory;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly BackgroundJobManager _jobManager;
     private readonly DatabaseService _dbService;
@@ -20,12 +21,14 @@ public class VerifierController : ControllerBase
 
     public VerifierController(
         DBContext dbContext,
+        IDbContextFactory<DBContext> dbContextFactory,
         IHttpClientFactory httpClientFactory,
         BackgroundJobManager jobManager,
         DatabaseService dbService,
         DashboardAccessService accessService)
     {
         _dbContext = dbContext;
+        _dbContextFactory = dbContextFactory;
         _httpClientFactory = httpClientFactory;
         _jobManager = jobManager;
         _dbService = dbService;
@@ -79,7 +82,7 @@ public class VerifierController : ControllerBase
 
         var jobId = _jobManager.StartJob("Verifier", async (cancellationToken) =>
         {
-            var verifier = new VerifierService(_dbContext, _httpClientFactory, selectedTypes, reverify);
+            var verifier = new VerifierService(_dbContext, _dbContextFactory, _httpClientFactory, selectedTypes, reverify);
             await verifier.RunAsync(cancellationToken);
         });
 
