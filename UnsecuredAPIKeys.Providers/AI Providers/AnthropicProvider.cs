@@ -130,6 +130,19 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     {
                         return ValidationResult.IsUnauthorized(statusCode, "Invalid API key (400 auth error)");
                     }
+
+                    if (ContainsAny(bodyLower, QuotaIndicators) || bodyLower.Contains("credit balance") || bodyLower.Contains("credit_balance"))
+                    {
+                        _logger?.LogInformation("API key is valid but credit balance/quota is depleted (400)");
+                        return new ValidationResult
+                        {
+                            Status = ValidationAttemptStatus.Valid,
+                            HttpStatusCode = statusCode,
+                            IsQuotaExceeded = true,
+                            Detail = "Valid key but credit balance is low / quota exhausted"
+                        };
+                    }
+
                     // 400 due to model/param issue = key accepted by gateway = valid
                     _logger?.LogInformation("API key is valid (400 non-auth error confirms gateway acceptance)");
                     return ValidationResult.Success(statusCode, "Valid key (400 non-auth error)");
@@ -137,7 +150,13 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 case HttpStatusCode.PaymentRequired: // 402
                 case HttpStatusCode.TooManyRequests: // 429
                     _logger?.LogInformation("API key is valid but has quota/billing/status issues ({StatusCode})", statusCode);
-                    return ValidationResult.Success(statusCode, "Valid key but quota/billing issue");
+                    return new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.Valid,
+                        HttpStatusCode = statusCode,
+                        IsQuotaExceeded = true,
+                        Detail = "Valid key but quota/billing issue"
+                    };
 
                 case HttpStatusCode.ServiceUnavailable: // 503
                 case HttpStatusCode.GatewayTimeout: // 504

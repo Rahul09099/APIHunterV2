@@ -204,7 +204,12 @@ public class ScraperService
 
         if (tokens.Count == 0)
         {
-            _logger?.LogWarning("No enabling GitHub tokens found for user {UserId}", discoveredBy);
+            _logger?.LogWarning("No enabled GitHub tokens found for user {UserId}", discoveredBy);
+            if (discoveredBy.HasValue && discoveredBy.Value != 0)
+            {
+                await SendTelegramNotificationAsync(discoveredBy.Value, 
+                    "⚠️ <b>Scraper Startup Failed</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled GitHub search tokens were found for your account.\n\n👉 Please configure at least one token using:\n<code>/add_token &lt;your_github_token&gt;</code>");
+            }
             return;
         }
 
@@ -221,49 +226,113 @@ public class ScraperService
         if (queriesToRun.Count == 0)
         {
             _logger?.LogWarning("No queries found for group: {GroupName}", selectedGroupName);
+            if (discoveredBy.HasValue && discoveredBy.Value != 0)
+            {
+                await SendTelegramNotificationAsync(discoveredBy.Value, 
+                    $"⚠️ <b>Scraper Startup Warning</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled search queries were found for target group <b>{System.Net.WebUtility.HtmlEncode(selectedGroupName)}</b>.\n\n👉 Please enable or add queries using <code>/queries</code> or <code>/add_query</code>.");
+            }
             return;
         }
 
         _logger?.LogInformation("Starting {Mode} scrape for {Count} queries in group {Group}...", 
             isDeepSearch ? "DEEP" : "LITE", queriesToRun.Count, selectedGroupName);
 
-        foreach (var query in queriesToRun)
+        try
         {
-            if (_cancellationTokenSource.Token.IsCancellationRequested) break;
-
-            // Acquire distributed lock — skip if another node is already scraping this query
-            if (!await TryAcquireScrapeQueryLockAsync(query.Id, _cancellationTokenSource.Token))
+            foreach (var query in queriesToRun)
             {
-                _logger?.LogInformation("Skipping query '{Query}' — already being scraped by another node", query.Query);
-                continue;
-            }
+                if (_cancellationTokenSource.Token.IsCancellationRequested) break;
 
-            try
-            {
-                if (isDeepSearch)
+                // Acquire distributed lock — skip if another node is already scraping this query
+                if (!await TryAcquireScrapeQueryLockAsync(query.Id, _cancellationTokenSource.Token))
                 {
-                    await RunDeepSearchAsync(tokens, query, tokenCursor, discoveredBy);
+                    _logger?.LogInformation("Skipping query '{Query}' — already being scraped by another node", query.Query);
+                    continue;
                 }
-                else
-                {
-                    await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null, discoveredBy);
-                }
-            }
-            finally
-            {
-                await ReleaseScrapeQueryLockAsync(query.Id);
-            }
 
-            if (query != queriesToRun.Last())
-            {
-                await Task.Delay(LiteLimits.SEARCH_DELAY_MS, _cancellationTokenSource.Token);
+                try
+                {
+                    if (isDeepSearch)
+                    {
+                        await RunDeepSearchAsync(tokens, query, tokenCursor, discoveredBy);
+                    }
+                    else
+                    {
+                        await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null, discoveredBy);
+                    }
+                }
+                finally
+                {
+                    await ReleaseScrapeQueryLockAsync(query.Id);
+                }
+
+                if (query != queriesToRun.Last())
+                {
+                    await Task.Delay(LiteLimits.SEARCH_DELAY_MS, _cancellationTokenSource.Token);
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error executing scraper for group {GroupName}", selectedGroupName);
+            if (discoveredBy.HasValue && discoveredBy.Value != 0)
+            {
+                await SendTelegramNotificationAsync(discoveredBy.Value, 
+                    $"🚨 <b>Scraper Execution Error</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nAn error occurred while running scraper for <b>{System.Net.WebUtility.HtmlEncode(selectedGroupName)}</b>:\n<code>{System.Net.WebUtility.HtmlEncode(ex.Message)}</code>");
+            }
+            throw;
+        }
+    }
+
+    private async Task SendTelegramNotificationAsync(long chatId, string message)
+    {
+        try
+        {
+            var token = Environment.GetEnvironmentVariable("TELEGRAM_BOT_TOKEN");
+            if (string.IsNullOrEmpty(token) || chatId == 0) return;
+
+            using var client = _httpClientFactory.CreateClient();
+            var url = $"https://api.telegram.org/bot{token}/sendMessage";
+            var payload = new
+            {
+                chat_id = chatId,
+                text = message,
+                parse_mode = "HTML"
+            };
+
+            await client.PostAsJsonAsync(url, payload);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to send Telegram notification to chat {ChatId}", chatId);
         }
     }
 
     public async Task RunScrapeAllGroupsAsync(long? discoveredBy, CancellationToken cancellationToken)
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        
+        var tokenQuery = _dbContext.SearchProviderTokens
+            .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub);
+
+        var user = await _dbContext.TelegramSubscribers.FindAsync(discoveredBy);
+        if (user != null && !user.IsAdmin && discoveredBy.HasValue)
+        {
+            tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == discoveredBy.Value);
+        }
+
+        var tokens = await tokenQuery.ToListAsync(cancellationToken);
+        if (tokens.Count == 0)
+        {
+            _logger?.LogWarning("No enabled GitHub tokens found for comprehensive scan for user {UserId}", discoveredBy);
+            if (discoveredBy.HasValue && discoveredBy.Value != 0)
+            {
+                await SendTelegramNotificationAsync(discoveredBy.Value, 
+                    "⚠️ <b>Comprehensive Scan Failed to Start</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled GitHub search tokens found for your account.\n\n👉 Please configure a token using <code>/add_token &lt;your_github_token&gt;</code>.");
+            }
+            return;
+        }
+
         var groups = await GetAvailableGroupsAsync(cancellationToken);
         
         _logger?.LogInformation("Starting automated scrape for {Count} groups...", groups.Count);
@@ -621,7 +690,11 @@ public class ScraperService
         if (q.Contains("fireworks") || q.StartsWith("fw_")) return "Fireworks AI";
         if (q.Contains("hugging") || q.Contains("hf_token") || q.StartsWith("hf_")) return "Hugging Face";
         if (q.Contains("a2e")) return "A2E AI";
-        if (q.Contains("piapi")) return "PiAPI";
+        if (q.Contains("facebook") || q.Contains("fb_access_token") || q.Contains("eaaq") || q.Contains("eaaf")) return "Facebook";
+        if (q.Contains("gocspx") || q.Contains("googleusercontent") || q.Contains("google_oauth")) return "Google OAuth";
+        if (q.Contains("stripe") || q.Contains("rk_live") || q.Contains("whsec")) return "Stripe";
+        if (q.Contains("tiktok")) return "TikTok";
+        if (q.Contains("goog1") || q.Contains("hmac_access_key")) return "Google Cloud HMAC";
         return "Other";
     }
 

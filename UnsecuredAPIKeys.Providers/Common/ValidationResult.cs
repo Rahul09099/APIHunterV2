@@ -8,7 +8,9 @@ namespace UnsecuredAPIKeys.Providers.Common
         Unauthorized,          // Key is explicitly unauthorized (e.g., HTTP 401).
         HttpError,             // An HTTP error occurred (e.g., 403, 404, 429, 5xx).
         NetworkError,          // A network-level error occurred (e.g., DNS, timeout, connection refused).
-        ProviderSpecificError  // An unexpected error within the provider's logic.
+        ProviderSpecificError, // An unexpected error within the provider's logic.
+        Candidate,             // Credential structure detected; not tested or requires multi-factor authentication flow.
+        ValidationUnavailable  // Live validation endpoint is temporarily unavailable (e.g. rate limit, 5xx).
     }
 
     public class ModelInfo

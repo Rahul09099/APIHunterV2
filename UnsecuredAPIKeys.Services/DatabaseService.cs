@@ -836,21 +836,25 @@ public class DatabaseService(DBContext dbContext)
     {
         try
         {
-            Console.WriteLine("[DB] Purging repo references for invalid keys...");
+            Console.WriteLine("[DB] Purging invalid API keys and junk references...");
 
-            // Direct bulk DELETE — no need to load rows into memory first.
-            // Deletes all RepoReferences whose parent APIKey has Status = Invalid (0).
-            int deleted = await context.RepoReferences
+            // 1. Delete all RepoReferences associated with invalid keys
+            int deletedRefs = await context.RepoReferences
                 .Where(r => context.APIKeys
                     .Any(k => k.Id == r.APIKeyId && k.Status == ApiStatusEnum.Invalid))
                 .ExecuteDeleteAsync();
 
-            if (deleted > 0)
-                Console.WriteLine($"[DB] Purged {deleted} junk repo reference(s) for invalid keys.");
-            else
-                Console.WriteLine("[DB] No junk references found.");
+            // 2. Delete all APIKeys with Status = Invalid (0)
+            int deletedKeys = await context.APIKeys
+                .Where(k => k.Status == ApiStatusEnum.Invalid)
+                .ExecuteDeleteAsync();
 
-            return deleted;
+            if (deletedKeys > 0 || deletedRefs > 0)
+                Console.WriteLine($"[DB] Purged {deletedKeys} invalid API key(s) and {deletedRefs} junk repo reference(s).");
+            else
+                Console.WriteLine("[DB] No invalid keys or junk references found.");
+
+            return deletedKeys + deletedRefs;
         }
         catch (Exception ex)
         {
@@ -875,16 +879,18 @@ public class DatabaseService(DBContext dbContext)
             ApiTypeEnum.AI21Labs or ApiTypeEnum.AssemblyAI or
             ApiTypeEnum.Deepgram or ApiTypeEnum.JinaAI or
             ApiTypeEnum.Upstage or ApiTypeEnum.LeonardoAI or ApiTypeEnum.FalAI or
-            ApiTypeEnum.RunPod
+            ApiTypeEnum.RunPod or ApiTypeEnum.Tavily
                 => ApiCategoryEnum.AIAndLLM,
 
-            ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack
+            ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack or
+            ApiTypeEnum.Facebook or ApiTypeEnum.GoogleOAuth or
+            ApiTypeEnum.Stripe or ApiTypeEnum.TikTok or ApiTypeEnum.GcpHmac
                 => ApiCategoryEnum.Communication,
 
             ApiTypeEnum.ServerCredential
                 => ApiCategoryEnum.ServerCredentials,
 
-            ApiTypeEnum.Mapbox
+            ApiTypeEnum.Mapbox or ApiTypeEnum.WeatherApi
                 => ApiCategoryEnum.MapsAndLocation,
 
             _ => ApiCategoryEnum.Unknown

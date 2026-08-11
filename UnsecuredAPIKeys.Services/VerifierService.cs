@@ -570,23 +570,26 @@ public class VerifierService(
     {
         try
         {
-            // Use a direct DELETE query instead of loading into memory first.
-            // This is much more efficient when a key has many references.
+            // Delete the invalid API key record and its associated repo references directly from the DB
             using var localDb = new DBContext();
 
-            int deleted = await localDb.RepoReferences
+            await localDb.RepoReferences
                 .Where(r => r.APIKeyId == key.Id)
                 .ExecuteDeleteAsync();
 
-            if (deleted > 0)
+            int deletedKeys = await localDb.APIKeys
+                .Where(k => k.Id == key.Id)
+                .ExecuteDeleteAsync();
+
+            if (deletedKeys > 0)
             {
-                Console.WriteLine($"[dim][DB] Purged {deleted} repo reference(s) for invalid key {key.Id}[/]");
+                Console.WriteLine($"[dim][DB] Permanently deleted invalid APIKey #{key.Id} from database[/]");
             }
         }
         catch (Exception ex)
         {
-            // Fail silently — purging is an optimization, not critical
-            logger?.LogWarning(ex, "Failed to purge references for key {KeyId}", key.Id);
+            // Fail silently — deletion is an optimization, not critical
+            logger?.LogWarning(ex, "Failed to purge invalid key record {KeyId}", key.Id);
         }
     }
 

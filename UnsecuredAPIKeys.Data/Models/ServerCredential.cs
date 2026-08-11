@@ -18,6 +18,7 @@ namespace UnsecuredAPIKeys.Data.Models
     {
         SSH,
         FTP,
+        FTPS,
         SFTP,
         RDP,
         VNC,

@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -68,56 +70,23 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders
         [
             // SSH Credentials
             @"ssh\s+([a-zA-Z0-9_-]+)@([a-zA-Z0-9.-]+)",
-            @"-----BEGIN\s+(RSA|DSA|EC|OPENSSH)\s+PRIVATE\s+KEY-----",
-            @"Host\s+([a-zA-Z0-9.-]+)\s+User\s+([a-zA-Z0-9_-]+)",
+            @"-----BEGIN\s+.*PRIVATE\s+KEY-----",
             
-            // FTP/SFTP Credentials
+            // FTP/SFTP/FTPS URIs
             @"(ftp|sftp|ftps)://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?",
-            @"FTP_HOST\s*=\s*['""]?([a-zA-Z0-9.-]+)['""]?",
-            @"FTP_USER\s*=\s*['""]?([a-zA-Z0-9_-]+)['""]?",
-            @"FTP_PASS\s*=\s*['""]?([^\s'""\n]+)['""]?",
             
-            // Database Connection Strings
-            @"mysql://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)",
-            @"postgresql://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)",
-            @"mongodb://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)",
+            // Database Connection URIs & ADO.NET Strings
+            @"mysql://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?(?:/([a-zA-Z0-9_-]+))?",
+            @"postgresql://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?(?:/([a-zA-Z0-9_-]+))?",
+            @"mongodb://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?(?:/([a-zA-Z0-9_-]+))?",
             @"redis://(?::([^@\s]+)@)?([a-zA-Z0-9.-]+)(?::(\d+))?",
             @"Server=([a-zA-Z0-9.-]+);Database=([a-zA-Z0-9_-]+);User Id=([a-zA-Z0-9_-]+);Password=([^;]+);",
-            @"jdbc:(mysql|postgresql|sqlserver)://([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)",
             
-            // RDP and Remote Access
+            // RDP & Remote Access
             @"rdp://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?",
-            @"mstsc\s+/v:([a-zA-Z0-9.-]+)(?::(\d+))?",
-            @"vnc://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?",
-            @"TeamViewer\s+ID:\s*(\d+)\s+Password:\s*([a-zA-Z0-9]+)",
-            @"WinRM\s+([a-zA-Z0-9.-]+)\s+([a-zA-Z0-9_-]+)\s+([^\s]+)",
             
-            // SMTP and Email Servers
-            @"smtp://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?",
-            @"SMTP_HOST\s*=\s*['""]?([a-zA-Z0-9.-]+)['""]?",
-            @"SMTP_USER\s*=\s*['""]?([a-zA-Z0-9_@.-]+)['""]?",
-            @"SMTP_PASSWORD\s*=\s*['""]?([^\s'""\n]+)['""]?",
-            @"SMTP_PORT\s*=\s*['""]?(\d+)['""]?",
-            @"imap://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?",
-            @"pop3://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?",
-            
-            // cPanel and Control Panels
-            @"CPANEL_USER\s*=\s*['""]?([a-zA-Z0-9_-]+)['""]?",
-            @"CPANEL_PASS\s*=\s*['""]?([^\s'""\n]+)['""]?",
-            @"WHM_USER\s*=\s*['""]?([a-zA-Z0-9_-]+)['""]?",
-            @"WHM_PASS\s*=\s*['""]?([^\s'""\n]+)['""]?",
-            @"PLESK_USER\s*=\s*['""]?([a-zA-Z0-9_-]+)['""]?",
-            @"PLESK_PASS\s*=\s*['""]?([^\s'""\n]+)['""]?",
-            
-            // Cloud and Container
-            @"KUBERNETES_SERVICE_HOST\s*=\s*['""]?([a-zA-Z0-9.-]+)['""]?",
-            @"DOCKER_HOST\s*=\s*tcp://([a-zA-Z0-9.-]+):(\d+)",
-            @"kubeconfig",
-            
-            // Web Server Authentication
-            @"AuthUserFile\s+([^\s]+)",
-            @"htpasswd\s+([^\s]+)",
-            @"<user\s+username=['""]([^'""\s]+)['""].*password=['""]([^'""\s]+)['""]",
+            // SMTP & Email Servers
+            @"smtp://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?"
         ];
 
         protected override bool IsValidKeyFormat(string apiKey)
@@ -129,75 +98,117 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders
         {
             try
             {
-                // 1. Parse matched credential details (and isolate raw password from DB model)
+                // 1. Parse matched credential details cleanly
                 var (cred, rawPassword) = ParseCredentialAndGetRawPassword(apiKey);
 
-                // 2. Perform Network Connectivity Check
+                if (cred == null || string.IsNullOrWhiteSpace(cred.Host))
+                {
+                    return ValidationResult.HasHttpError(HttpStatusCode.BadRequest, "Invalid or unparseable server credential format.");
+                }
+
+                // 2. Handle SSH Private Keys (Header detection without Network Connects)
+                if (cred.Host == "HeaderDetectedOnly")
+                {
+                    cred.NetworkStatus = "NotTested";
+                    cred.AuthenticationStatus = "NotTested";
+                    await SaveToDatabaseAsync(cred);
+                    return ValidationResult.Success(HttpStatusCode.OK, "SSH Private Key Header Detected.");
+                }
+
+                // 3. DNS Resolution + Deep SSRF & Localhost/Private IP Protection
+                if (await IsRestrictedOrLocalHostAsync(cred.Host))
+                {
+                    cred.NetworkStatus = "Restricted";
+                    cred.AuthenticationStatus = "NotTested";
+                    await SaveToDatabaseAsync(cred);
+                    return ValidationResult.HasHttpError(HttpStatusCode.Forbidden, $"Target host {cred.Host} is restricted (Internal/SSRF Protection).");
+                }
+
+                // 4. Perform Network Connectivity Check
                 var netResult = await _networkVerifier.VerifyConnectivityAsync(cred.Host, cred.Port);
                 cred.NetworkStatus = netResult.IsAccessible ? "Accessible" : netResult.Status;
 
-                if (netResult.IsAccessible)
+                if (!netResult.IsAccessible)
                 {
-                    // 3. Extract Banner and SSL Certificate
-                    var banner = await _networkVerifier.ExtractBannerAsync(cred.Host, cred.Port);
-                    var sslInfo = SslCertificateInfo.NotAvailable();
-                    if (cred.Port == 443 || cred.Port == 8443 || cred.Port == 2083 || cred.Port == 2087 || cred.Port == 993 || cred.Port == 995 || cred.Port == 465)
-                    {
-                        sslInfo = await _networkVerifier.ExtractSslCertificateAsync(cred.Host, cred.Port);
-                    }
-
-                    cred.ServerMetadata = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        banner,
-                        sslSubject = sslInfo.Subject,
-                        sslIssuer = sslInfo.Issuer,
-                        sslThumbprint = sslInfo.Thumbprint
-                    });
-
-                    // 4. Safe Auth verification attempt
-                    var authRes = await PerformAuthCheckAsync(cred, rawPassword);
-                    cred.AuthenticationStatus = authRes.Status;
-
-                    // 5. Query OSINT for GreyNoise honeypot Classification
-                    try
-                    {
-                        cred.IsHoneypot = await _osintService.IsHoneypotAsync(cred.Host);
-                        var greyResult = await _osintService.QueryGreyNoiseAsync(cred.Host);
-                        cred.OSINTData = System.Text.Json.JsonSerializer.Serialize(new
-                        {
-                            greyNoiseClassification = greyResult.Classification,
-                            greyNoiseIsBot = greyResult.IsBot
-                        });
-                    }
-                    catch
-                    {
-                        cred.OSINTData = "{}";
-                    }
-
-                    // 6. Geolocate IP origin and cloud check
-                    try
-                    {
-                        var geoResult = await _geolocationService.GeolocateAsync(cred.Host);
-                        cred.GeolocationData = System.Text.Json.JsonSerializer.Serialize(geoResult);
-                    }
-                    catch
-                    {
-                        cred.GeolocationData = "{}";
-                    }
+                    await SaveToDatabaseAsync(cred);
+                    return ValidationResult.HasHttpError(HttpStatusCode.ServiceUnavailable, $"Host {cred.Host}:{cred.Port} unreachable ({netResult.Status})");
                 }
 
-                // 7. Persist ServerCredential record to database
+                // 5. Extract Banner and SSL Certificate
+                var banner = await _networkVerifier.ExtractBannerAsync(cred.Host, cred.Port);
+                var sslInfo = SslCertificateInfo.NotAvailable();
+                if (cred.Port is 443 or 8443 or 2083 or 2087 or 993 or 995 or 465)
+                {
+                    sslInfo = await _networkVerifier.ExtractSslCertificateAsync(cred.Host, cred.Port);
+                }
+
+                var metaObj = new Dictionary<string, object>
+                {
+                    ["banner"] = banner,
+                    ["sslSubject"] = sslInfo.Subject,
+                    ["sslIssuer"] = sslInfo.Issuer,
+                    ["sslThumbprint"] = sslInfo.Thumbprint
+                };
+
+                cred.ServerMetadata = JsonSerializer.Serialize(metaObj);
+
+                // 6. Safe Authentication Check
+                if (cred.AuthenticationStatus != "NotTested" && !string.IsNullOrWhiteSpace(rawPassword))
+                {
+                    var authRes = await PerformAuthCheckAsync(cred, rawPassword);
+                    cred.AuthenticationStatus = authRes.Status;
+                }
+                else
+                {
+                    cred.AuthenticationStatus = "NotTested";
+                }
+
+                // 7. OSINT & Geolocation Enrichment (best-effort)
+                try
+                {
+                    cred.IsHoneypot = await _osintService.IsHoneypotAsync(cred.Host);
+                    var greyResult = await _osintService.QueryGreyNoiseAsync(cred.Host);
+                    cred.OSINTData = JsonSerializer.Serialize(new
+                    {
+                        greyNoiseClassification = greyResult.Classification,
+                        greyNoiseIsBot = greyResult.IsBot
+                    });
+                }
+                catch
+                {
+                    cred.OSINTData = "{}";
+                }
+
+                try
+                {
+                    var geoResult = await _geolocationService.GeolocateAsync(cred.Host);
+                    cred.GeolocationData = JsonSerializer.Serialize(geoResult);
+                }
+                catch
+                {
+                    cred.GeolocationData = "{}";
+                }
+
+                // 8. Persist ServerCredential record to database
                 await SaveToDatabaseAsync(cred);
 
-                // Return Success with status
-                return ValidationResult.Success(
-                    HttpStatusCode.OK,
-                    $"Discovered {cred.CredentialType} - Host: {cred.Host}:{cred.Port} - Auth: {cred.AuthenticationStatus}");
+                // 9. Result Classification
+                if (cred.AuthenticationStatus == "Valid")
+                {
+                    return ValidationResult.Success(
+                        HttpStatusCode.OK,
+                        $"Discovered & Verified {cred.CredentialType} - Host: {cred.Host}:{cred.Port} - Auth: Valid");
+                }
+
+                return ValidationResult.IsUnauthorized(
+                    HttpStatusCode.Unauthorized,
+                    $"Discovered {cred.CredentialType} at {cred.Host}:{cred.Port} - Auth Status: {cred.AuthenticationStatus}");
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Failed to validate server credential: {Match}", apiKey);
-                return ValidationResult.HasProviderSpecificError(ex.Message);
+                // Never log raw secret or sensitive credential material in logs or response error messages
+                _logger?.LogError(ex, "Failed to validate server credential for provider {ProviderName}", ProviderName);
+                return ValidationResult.HasProviderSpecificError("Server credential validation failed.");
             }
         }
 
@@ -208,7 +219,7 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders
                 return type switch
                 {
                     CredentialType.SSH or CredentialType.SFTP => await _authVerifier.VerifySSHAsync(cred.Host, cred.Port, cred.Username, rawPassword),
-                    CredentialType.FTP => await _authVerifier.VerifyFTPAsync(cred.Host, cred.Port, cred.Username, rawPassword),
+                    CredentialType.FTP or CredentialType.FTPS => await _authVerifier.VerifyFTPAsync(cred.Host, cred.Port, cred.Username, rawPassword),
                     CredentialType.RDP => await _authVerifier.VerifyRDPAsync(cred.Host, cred.Port, cred.Username, rawPassword, cred.Domain),
                     CredentialType.SMTP or CredentialType.SMTP_Submission or CredentialType.SMTPS => await _authVerifier.VerifySMTPAsync(cred.Host, cred.Port, cred.Username, rawPassword),
                     CredentialType.IMAP or CredentialType.IMAPS => await _authVerifier.VerifyIMAPAsync(cred.Host, cred.Port, cred.Username, rawPassword),
@@ -224,154 +235,157 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders
 
         private async Task SaveToDatabaseAsync(ServerCredential cred)
         {
-            using var db = new DBContext();
-            var existing = await db.ServerCredentials
-                .FirstOrDefaultAsync(s => s.Host == cred.Host 
-                                          && s.Port == cred.Port 
-                                          && s.Username == cred.Username 
-                                          && s.CredentialType == cred.CredentialType);
+            try
+            {
+                using var db = new DBContext();
+                var existing = await db.ServerCredentials
+                    .FirstOrDefaultAsync(s => s.Host == cred.Host 
+                                              && s.Port == cred.Port 
+                                              && s.Username == cred.Username 
+                                              && s.CredentialType == cred.CredentialType);
 
-            if (existing != null)
-            {
-                existing.NetworkStatus = cred.NetworkStatus;
-                existing.AuthenticationStatus = cred.AuthenticationStatus;
-                existing.ServerMetadata = cred.ServerMetadata;
-                existing.GeolocationData = cred.GeolocationData;
-                existing.OSINTData = cred.OSINTData;
-                existing.RiskLevel = cred.RiskLevel;
-                existing.IsHoneypot = cred.IsHoneypot;
-                existing.LastVerifiedAt = DateTime.UtcNow;
-                existing.EntropyScore = cred.EntropyScore;
-                existing.SurroundingContext = cred.SurroundingContext;
-                db.ServerCredentials.Update(existing);
+                if (existing != null)
+                {
+                    existing.NetworkStatus = cred.NetworkStatus;
+                    existing.AuthenticationStatus = cred.AuthenticationStatus;
+                    existing.ServerMetadata = cred.ServerMetadata;
+                    existing.GeolocationData = cred.GeolocationData;
+                    existing.OSINTData = cred.OSINTData;
+                    existing.RiskLevel = cred.RiskLevel;
+                    existing.IsHoneypot = cred.IsHoneypot;
+                    existing.LastVerifiedAt = DateTime.UtcNow;
+                    existing.EntropyScore = cred.EntropyScore;
+                    existing.SurroundingContext = cred.SurroundingContext;
+                    db.ServerCredentials.Update(existing);
+                }
+                else
+                {
+                    cred.LastVerifiedAt = DateTime.UtcNow;
+                    await db.ServerCredentials.AddAsync(cred);
+                }
+                await db.SaveChangesAsync();
             }
-            else
+            catch (Exception ex)
             {
-                cred.LastVerifiedAt = DateTime.UtcNow;
-                await db.ServerCredentials.AddAsync(cred);
+                _logger?.LogWarning(ex, "Failed to persist ServerCredential record to database");
             }
-            await db.SaveChangesAsync();
         }
 
-        private (ServerCredential cred, string rawPassword) ParseCredentialAndGetRawPassword(string matchText)
+        private (ServerCredential? cred, string rawPassword) ParseCredentialAndGetRawPassword(string matchText)
         {
             var cred = new ServerCredential();
             var rawPassword = string.Empty;
             cred.DiscoveredAt = DateTime.UtcNow;
 
-            // 1. FTP/SFTP: (ftp|sftp|ftps)://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?
-            var ftpMatch = Regex.Match(matchText, @"(ftp|sftp|ftps)://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?", RegexOptions.IgnoreCase);
-            if (ftpMatch.Success)
+            // Primary URI-based Parsing via System.Uri
+            if (Uri.TryCreate(matchText, UriKind.Absolute, out var uriResult))
             {
-                var proto = ftpMatch.Groups[1].Value.ToUpper();
-                cred.CredentialType = proto == "SFTP" ? "SFTP" : "FTP";
-                cred.Username = ftpMatch.Groups[2].Value;
-                rawPassword = ftpMatch.Groups[3].Value;
+                var scheme = uriResult.Scheme.ToLowerInvariant();
+                if (scheme is "ftp" or "sftp" or "ftps" or "mysql" or "postgresql" or "mongodb" or "redis" or "smtp" or "rdp")
+                {
+                    cred.Host = uriResult.Host;
+                    cred.SurroundingContext = matchText;
+
+                    var userInfo = uriResult.UserInfo;
+                    if (!string.IsNullOrEmpty(userInfo))
+                    {
+                        var colonIdx = userInfo.IndexOf(':');
+                        if (colonIdx >= 0)
+                        {
+                            cred.Username = Uri.UnescapeDataString(userInfo[..colonIdx]);
+                            rawPassword = Uri.UnescapeDataString(userInfo[(colonIdx + 1)..]);
+                        }
+                        else
+                        {
+                            cred.Username = Uri.UnescapeDataString(userInfo);
+                        }
+                    }
+
+                    cred.PasswordHash = rawPassword;
+                    cred.EntropyScore = _entropyAnalyzer.CalculateEntropy(rawPassword);
+
+                    switch (scheme)
+                    {
+                        case "sftp":
+                            cred.CredentialType = "SFTP";
+                            cred.Port = uriResult.Port > 0 ? uriResult.Port : 22;
+                            cred.RiskLevel = "High";
+                            return (cred, rawPassword);
+
+                        case "ftps":
+                            cred.CredentialType = "FTPS";
+                            cred.Port = uriResult.Port > 0 ? uriResult.Port : 990;
+                            cred.RiskLevel = "High";
+                            return (cred, rawPassword);
+
+                        case "ftp":
+                            cred.CredentialType = "FTP";
+                            cred.Port = uriResult.Port > 0 ? uriResult.Port : 21;
+                            cred.RiskLevel = "High";
+                            return (cred, rawPassword);
+
+                        case "mysql":
+                            cred.CredentialType = "MySQL";
+                            cred.Port = uriResult.Port > 0 ? uriResult.Port : 3306;
+                            cred.RiskLevel = "High";
+                            var mysqlDb = uriResult.AbsolutePath.TrimStart('/');
+                            if (!string.IsNullOrEmpty(mysqlDb)) cred.ServerMetadata = JsonSerializer.Serialize(new { database = mysqlDb });
+                            return (cred, rawPassword);
+
+                        case "postgresql":
+                            cred.CredentialType = "PostgreSQL";
+                            cred.Port = uriResult.Port > 0 ? uriResult.Port : 5432;
+                            cred.RiskLevel = "High";
+                            var pgDb = uriResult.AbsolutePath.TrimStart('/');
+                            if (!string.IsNullOrEmpty(pgDb)) cred.ServerMetadata = JsonSerializer.Serialize(new { database = pgDb });
+                            return (cred, rawPassword);
+
+                        case "mongodb":
+                            cred.CredentialType = "MongoDB";
+                            cred.Port = uriResult.Port > 0 ? uriResult.Port : 27017;
+                            cred.RiskLevel = "High";
+                            var mongoDb = uriResult.AbsolutePath.TrimStart('/');
+                            if (!string.IsNullOrEmpty(mongoDb)) cred.ServerMetadata = JsonSerializer.Serialize(new { database = mongoDb });
+                            return (cred, rawPassword);
+
+                        case "redis":
+                            cred.CredentialType = "Redis";
+                            cred.Port = uriResult.Port > 0 ? uriResult.Port : 6379;
+                            cred.RiskLevel = "Medium";
+                            return (cred, rawPassword);
+
+                        case "smtp":
+                            cred.CredentialType = "SMTP";
+                            cred.Port = uriResult.Port > 0 ? uriResult.Port : 25;
+                            cred.RiskLevel = "Medium";
+                            return (cred, rawPassword);
+
+                        case "rdp":
+                            cred.CredentialType = "RDP";
+                            cred.Port = uriResult.Port > 0 ? uriResult.Port : 3389;
+                            cred.RiskLevel = "High";
+                            return (cred, rawPassword);
+                    }
+                }
+            }
+
+            // Fallback Parsing for Non-Standard URI formats (e.g. ADO.NET Connection Strings, SSH commands)
+            var connStrMatch = Regex.Match(matchText, @"Server=([a-zA-Z0-9.-]+);Database=([a-zA-Z0-9_-]+);User Id=([a-zA-Z0-9_-]+);Password=([^;]+);", RegexOptions.IgnoreCase);
+            if (connStrMatch.Success)
+            {
+                cred.CredentialType = "MSSQL";
+                cred.Host = connStrMatch.Groups[1].Value;
+                cred.Username = connStrMatch.Groups[3].Value;
+                rawPassword = connStrMatch.Groups[4].Value;
                 cred.PasswordHash = rawPassword;
-                cred.Host = ftpMatch.Groups[4].Value;
-                cred.Port = ftpMatch.Groups[5].Success ? int.Parse(ftpMatch.Groups[5].Value) : (proto == "SFTP" ? 22 : 21);
+                cred.Port = 1433;
                 cred.RiskLevel = "High";
                 cred.SurroundingContext = matchText;
+                cred.ServerMetadata = JsonSerializer.Serialize(new { database = connStrMatch.Groups[2].Value });
                 cred.EntropyScore = _entropyAnalyzer.CalculateEntropy(rawPassword);
                 return (cred, rawPassword);
             }
 
-            // 2. MySQL: mysql://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)
-            var mysqlMatch = Regex.Match(matchText, @"mysql://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)", RegexOptions.IgnoreCase);
-            if (mysqlMatch.Success)
-            {
-                cred.CredentialType = "MySQL";
-                cred.Username = mysqlMatch.Groups[1].Value;
-                rawPassword = mysqlMatch.Groups[2].Value;
-                cred.PasswordHash = rawPassword;
-                cred.Host = mysqlMatch.Groups[3].Value;
-                cred.Port = mysqlMatch.Groups[4].Success ? int.Parse(mysqlMatch.Groups[4].Value) : 3306;
-                cred.RiskLevel = "High";
-                cred.SurroundingContext = matchText;
-                cred.EntropyScore = _entropyAnalyzer.CalculateEntropy(rawPassword);
-                return (cred, rawPassword);
-            }
-
-            // 3. PostgreSQL: postgresql://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)
-            var pgMatch = Regex.Match(matchText, @"postgresql://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)", RegexOptions.IgnoreCase);
-            if (pgMatch.Success)
-            {
-                cred.CredentialType = "PostgreSQL";
-                cred.Username = pgMatch.Groups[1].Value;
-                rawPassword = pgMatch.Groups[2].Value;
-                cred.PasswordHash = rawPassword;
-                cred.Host = pgMatch.Groups[3].Value;
-                cred.Port = pgMatch.Groups[4].Success ? int.Parse(pgMatch.Groups[4].Value) : 5432;
-                cred.RiskLevel = "High";
-                cred.SurroundingContext = matchText;
-                cred.EntropyScore = _entropyAnalyzer.CalculateEntropy(rawPassword);
-                return (cred, rawPassword);
-            }
-
-            // 4. MongoDB: mongodb://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)
-            var mongoMatch = Regex.Match(matchText, @"mongodb://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?/([a-zA-Z0-9_-]+)", RegexOptions.IgnoreCase);
-            if (mongoMatch.Success)
-            {
-                cred.CredentialType = "MongoDB";
-                cred.Username = mongoMatch.Groups[1].Value;
-                rawPassword = mongoMatch.Groups[2].Value;
-                cred.PasswordHash = rawPassword;
-                cred.Host = mongoMatch.Groups[3].Value;
-                cred.Port = mongoMatch.Groups[4].Success ? int.Parse(mongoMatch.Groups[4].Value) : 27017;
-                cred.RiskLevel = "High";
-                cred.SurroundingContext = matchText;
-                cred.EntropyScore = _entropyAnalyzer.CalculateEntropy(rawPassword);
-                return (cred, rawPassword);
-            }
-
-            // 5. Redis: redis://(?::([^@\s]+)@)?([a-zA-Z0-9.-]+)(?::(\d+))?
-            var redisMatch = Regex.Match(matchText, @"redis://(?::([^@\s]+)@)?([a-zA-Z0-9.-]+)(?::(\d+))?", RegexOptions.IgnoreCase);
-            if (redisMatch.Success)
-            {
-                cred.CredentialType = "Redis";
-                rawPassword = redisMatch.Groups[1].Success ? redisMatch.Groups[1].Value : string.Empty;
-                cred.PasswordHash = rawPassword;
-                cred.Host = redisMatch.Groups[2].Value;
-                cred.Port = redisMatch.Groups[3].Success ? int.Parse(redisMatch.Groups[3].Value) : 6379;
-                cred.RiskLevel = "Medium";
-                cred.SurroundingContext = matchText;
-                cred.EntropyScore = _entropyAnalyzer.CalculateEntropy(rawPassword);
-                return (cred, rawPassword);
-            }
-
-            // 6. SMTP: smtp://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?
-            var smtpMatch = Regex.Match(matchText, @"smtp://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?", RegexOptions.IgnoreCase);
-            if (smtpMatch.Success)
-            {
-                cred.CredentialType = "SMTP";
-                cred.Username = smtpMatch.Groups[1].Value;
-                rawPassword = smtpMatch.Groups[2].Value;
-                cred.PasswordHash = rawPassword;
-                cred.Host = smtpMatch.Groups[3].Value;
-                cred.Port = smtpMatch.Groups[4].Success ? int.Parse(smtpMatch.Groups[4].Value) : 25;
-                cred.RiskLevel = "Medium";
-                cred.SurroundingContext = matchText;
-                cred.EntropyScore = _entropyAnalyzer.CalculateEntropy(rawPassword);
-                return (cred, rawPassword);
-            }
-
-            // 7. RDP: rdp://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?
-            var rdpMatch = Regex.Match(matchText, @"rdp://([a-zA-Z0-9_-]+):([^@\s]+)@([a-zA-Z0-9.-]+)(?::(\d+))?", RegexOptions.IgnoreCase);
-            if (rdpMatch.Success)
-            {
-                cred.CredentialType = "RDP";
-                cred.Username = rdpMatch.Groups[1].Value;
-                rawPassword = rdpMatch.Groups[2].Value;
-                cred.PasswordHash = rawPassword;
-                cred.Host = rdpMatch.Groups[3].Value;
-                cred.Port = rdpMatch.Groups[4].Success ? int.Parse(rdpMatch.Groups[4].Value) : 3389;
-                cred.RiskLevel = "High";
-                cred.SurroundingContext = matchText;
-                cred.EntropyScore = _entropyAnalyzer.CalculateEntropy(rawPassword);
-                return (cred, rawPassword);
-            }
-
-            // 8. SSH: ssh\s+([a-zA-Z0-9_-]+)@([a-zA-Z0-9.-]+)
             var sshMatch = Regex.Match(matchText, @"ssh\s+([a-zA-Z0-9_-]+)@([a-zA-Z0-9.-]+)", RegexOptions.IgnoreCase);
             if (sshMatch.Success)
             {
@@ -381,41 +395,98 @@ namespace UnsecuredAPIKeys.Providers.ServerProviders
                 cred.Port = 22;
                 cred.RiskLevel = "Critical";
                 cred.SurroundingContext = matchText;
-                // Search context for password
                 rawPassword = _contextExtractor.FindRelatedPassword(matchText, cred.Username);
                 cred.PasswordHash = rawPassword;
                 cred.EntropyScore = _entropyAnalyzer.CalculateEntropy(rawPassword);
+
+                if (string.IsNullOrWhiteSpace(rawPassword))
+                {
+                    cred.AuthenticationStatus = "NotTested";
+                }
                 return (cred, rawPassword);
             }
 
-            // Private Key header: -----BEGIN\s+(RSA|DSA|EC|OPENSSH)\s+PRIVATE\s+KEY-----
-            if (matchText.Contains("PRIVATE KEY"))
+            if (Regex.IsMatch(matchText, @"-----BEGIN\s+.*PRIVATE\s+KEY-----", RegexOptions.IgnoreCase))
             {
                 cred.CredentialType = "SSH";
-                cred.Username = "root";
-                cred.Host = "Unknown";
+                cred.Username = "NotExtracted";
+                cred.Host = "HeaderDetectedOnly";
                 cred.Port = 22;
                 cred.RiskLevel = "Critical";
+                cred.AuthenticationStatus = "NotTested";
                 cred.SurroundingContext = matchText;
-                rawPassword = "KEY_AUTHENTICATED";
-                cred.PasswordHash = rawPassword;
+                rawPassword = string.Empty;
+                cred.PasswordHash = ComputeSha256(matchText);
                 return (cred, rawPassword);
             }
 
-            // Fallback default
-            cred.CredentialType = "SSH";
-            cred.Username = "root";
-            cred.Host = "127.0.0.1";
-            cred.Port = 22;
-            cred.RiskLevel = "Low";
-            cred.SurroundingContext = matchText;
-            return (cred, rawPassword);
+            return (null, string.Empty);
+        }
+
+        private static async Task<bool> IsRestrictedOrLocalHostAsync(string host)
+        {
+            if (string.IsNullOrWhiteSpace(host)) return true;
+            if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                host.Equals("127.0.0.1") ||
+                host.Equals("0.0.0.0") ||
+                host.Equals("::1"))
+            {
+                return true;
+            }
+
+            try
+            {
+                // Resolve host to IP addresses (DNS resolution check to prevent DNS-rebinding SSRF)
+                IPAddress[] ips;
+                if (IPAddress.TryParse(host, out var directIp))
+                {
+                    ips = [directIp];
+                }
+                else
+                {
+                    ips = await Dns.GetHostAddressesAsync(host);
+                }
+
+                foreach (var ip in ips)
+                {
+                    if (IPAddress.IsLoopback(ip)) return true;
+
+                    var bytes = ip.GetAddressBytes();
+                    if (bytes.Length == 4) // IPv4 Private & Link-Local ranges
+                    {
+                        if (bytes[0] == 127 || // Loopback 127.0.0.0/8
+                            bytes[0] == 10 ||  // Private 10.0.0.0/8
+                            (bytes[0] == 169 && bytes[1] == 254) || // Link-Local / Cloud Metadata 169.254.0.0/16
+                            (bytes[0] == 192 && bytes[1] == 168) || // Private 192.168.0.0/16
+                            (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)) // Private 172.16.0.0/12
+                        {
+                            return true;
+                        }
+                    }
+                    else if (bytes.Length == 16) // IPv6 Loopback, Link-Local & Unique Local
+                    {
+                        if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.Equals(IPAddress.IPv6Loopback))
+                            return true;
+
+                        // fc00::/7 Unique Local Addresses
+                        if ((bytes[0] & 0xfe) == 0xfc)
+                            return true;
+                    }
+                }
+            }
+            catch
+            {
+                // If DNS resolution fails, block connection safely
+                return true;
+            }
+
+            return false;
         }
 
         private string ComputeSha256(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return string.Empty;
-            using var sha = System.Security.Cryptography.SHA256.Create();
+            using var sha = SHA256.Create();
             return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(raw)));
         }
     }

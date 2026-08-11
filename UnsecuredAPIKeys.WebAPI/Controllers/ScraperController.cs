@@ -53,6 +53,16 @@ public class ScraperController : ControllerBase
         var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => (j.JobType == "Scraper" || j.JobType == "AutoScraper-All" || j.JobType.StartsWith("Scraper-")) && j.Status == "Running");
         if (isAlreadyRunning) return Conflict(new { message = "A scraper job is already running." });
 
+        var hasTokens = await _dbContext.SearchProviderTokens
+            .AnyAsync(t => t.IsEnabled && t.SearchProvider == UnsecuredAPIKeys.Data.Common.SearchProviderEnum.GitHub);
+
+        if (!hasTokens)
+        {
+            return BadRequest(new { 
+                message = "Scraper cannot start: No enabled GitHub search tokens configured in database. Please add a GitHub token first." 
+            });
+        }
+
         var jobId = _jobManager.StartJob("Scraper", async (cancellationToken) =>
         {
             var scraper = new ScraperService(_dbContext, _httpClientFactory);

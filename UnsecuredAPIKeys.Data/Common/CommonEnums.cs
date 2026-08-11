@@ -86,16 +86,23 @@ namespace UnsecuredAPIKeys.Data.Common
         LeonardoAI = 405,
         FalAI = 415,
         RunPod = 420,
+        Tavily = 422,
 
-        // Communication Category (4)
+        // Communication, Payment & Auth Category (4)
         SendGrid = 410,
         Mailgun = 425,
         Slack = 430,
+        Facebook = 440,
+        GoogleOAuth = 450,
+        Stripe = 460,
+        TikTok = 470,
+        GcpHmac = 480,
 
         // Server Credentials Category (5)
         ServerCredential = 500,
 
         // Maps & Location Category (6)
-        Mapbox = 600
+        Mapbox = 600,
+        WeatherApi = 610
     }
 }

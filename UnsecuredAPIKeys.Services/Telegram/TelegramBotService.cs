@@ -907,9 +907,21 @@ public class TelegramBotService : BackgroundService
         var currentPage = categoryPages[page];
         var pageGroups = allGroups.Where(g => currentPage.Targets.Contains(g)).OrderBy(g => Array.IndexOf(currentPage.Targets, g)).ToList();
 
+        var hasTokens = await dbContext.SearchProviderTokens
+            .AnyAsync(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub, ct);
+
         var sb = new StringBuilder();
         sb.AppendLine($"<b>📡 MISSION CONTROL: SCRAPER</b>");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+
+        if (!hasTokens)
+        {
+            sb.AppendLine("⚠️ <b>WARNING: No GitHub Tokens Configured!</b>");
+            sb.AppendLine("<i>The scraper requires at least one active GitHub token to run.</i>");
+            sb.AppendLine("👉 Add a token using <code>/add_token &lt;token&gt;</code>");
+            sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        }
+
         sb.AppendLine("Select a target provider below to begin key discovery.");
         sb.AppendLine();
 

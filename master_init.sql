@@ -97,7 +97,7 @@ CREATE INDEX IF NOT EXISTS "IX_SearchProviderTokens_AddedByTelegramId"
 --   Upstage       = 400   LeonardoAI      = 405   FalAI         = 415
 --   RunPod        = 420
 --   SendGrid      = 410   Mailgun         = 425   Slack         = 430
---   Mapbox        = 600
+--   Tavily        = 422   WeatherApi      = 610   Mapbox        = 600
 --
 -- Status integer reference (matches ApiStatusEnum):
 --   Unverified    = -99   Invalid = 0   Valid = 1   Error = 6   ValidNoCredits = 7
@@ -388,6 +388,14 @@ FROM (VALUES
     ('RUNPOD_API_KEY'),
     ('rpa_'),
 
+    -- ── Tavily AI Search ──────────────────────────────────────────────────────
+    ('TAVILY_API_KEY'),
+    ('tvly-'),
+
+    -- ── WeatherAPI ────────────────────────────────────────────────────────────
+    ('WEATHERAPI_KEY'),
+    ('weatherapi.com'),
+
     -- ── Server Credentials (Requirement 17) ──────────────────────────────────
     ('ssh '),
     ('ftp://'),
@@ -413,7 +421,23 @@ FROM (VALUES
     ('PLESK_'),
     ('filename:.bash_history'),
     ('filename:id_rsa'),
-    ('extension:env')
+    ('extension:env'),
+    ('filename:cloudbuild.yaml'),
+    ('filename:Dockerfile'),
+    ('filename:docker-compose.yml'),
+    ('STRIPE_SECRET'),
+    ('STRIPE_WEBHOOK_SECRET'),
+    ('sk_live_'),
+    ('sk_test_'),
+    ('sk_org_'),
+    ('rk_live_'),
+    ('whsec_'),
+    ('pk_live_'),
+    ('TIKTOK_CLIENT_ID'),
+    ('TIKTOK_CLIENT_SECRET'),
+    ('GOOGLE_CLOUD_HMAC_ACCESS_KEY_ID'),
+    ('GOOGLE_CLOUD_HMAC_SECRET_ACCESS_KEY'),
+    ('GOOG1E')
 
 ) AS v(q)
 WHERE NOT EXISTS (
@@ -456,7 +480,7 @@ CREATE TABLE IF NOT EXISTS "ServerCredentials" (
     "Host"                 VARCHAR(255) NOT NULL,
     "Port"                 INTEGER      NOT NULL DEFAULT 0,
     "Username"             VARCHAR(255),
-    "PasswordHash"         VARCHAR(64),
+    "PasswordHash"         TEXT,
     "Domain"               VARCHAR(255),
     "NetworkStatus"        VARCHAR(50)  NOT NULL DEFAULT 'Unknown',
     "AuthenticationStatus" VARCHAR(50)  NOT NULL DEFAULT 'Untested',
@@ -479,7 +503,7 @@ ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "CredentialType"       
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Host"                 VARCHAR(255) NOT NULL DEFAULT 'Unknown';
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Port"                 INTEGER      NOT NULL DEFAULT 0;
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Username"             VARCHAR(255);
-ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "PasswordHash"         VARCHAR(64);
+ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "PasswordHash"         TEXT;
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "Domain"               VARCHAR(255);
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "NetworkStatus"        VARCHAR(50)  NOT NULL DEFAULT 'Unknown';
 ALTER TABLE "ServerCredentials" ADD COLUMN IF NOT EXISTS "AuthenticationStatus" VARCHAR(50)  NOT NULL DEFAULT 'Untested';
