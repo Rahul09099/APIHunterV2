@@ -4,18 +4,23 @@ using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.Services.Telegram;
 using UnsecuredAPIKeys.WebAPI.Services;
 
+// Set ASPNETCORE_URLS to 0.0.0.0:{PORT} BEFORE WebApplication.CreateBuilder runs
+var renderPort = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+Environment.SetEnvironmentVariable("ASPNETCORE_URLS", $"http://0.0.0.0:{renderPort}");
+
 // Disable file system watchers BEFORE WebApplication.CreateBuilder runs to prevent inotify limit (128) container crash on Render/Docker
 Environment.SetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE", "false");
 Environment.SetEnvironmentVariable("DOTNET_USE_POLLING_FILE_WATCHER", "true");
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Dynamically bind to Render's PORT environment variable (e.g. 10000) on 0.0.0.0 IPv4 & IPv6
-var renderPort = Environment.GetEnvironmentVariable("PORT");
-if (!string.IsNullOrEmpty(renderPort))
+// Explicitly configure Kestrel to listen on 0.0.0.0 for Render's port detection scanner
+if (int.TryParse(renderPort, out int portNumber))
 {
-    Environment.SetEnvironmentVariable("ASPNETCORE_URLS", $"http://0.0.0.0:{renderPort}");
-    builder.WebHost.UseUrls($"http://0.0.0.0:{renderPort}", $"http://[::]:{renderPort}");
+    builder.WebHost.ConfigureKestrel(options =>
+    {
+        options.ListenAnyIP(portNumber);
+    });
 }
 
 // Disable reloadOnChange FileSystemWatcher to prevent inotify limit (128) container crash (Status 139) on Render/Docker
