@@ -47,12 +47,34 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // Step 1: Discover models via GET /v1/models (read-only lightweight auth check on api.together.ai)
-                using var modelsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.together.ai/v1/models");
-                modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                // Step 1: Discover models via GET /v1/models (with fallback from api.together.ai to api.together.xyz)
+                var endpoints = new[] { "https://api.together.ai/v1", "https://api.together.xyz/v1" };
+                HttpResponseMessage? modelsResponse = null;
+                string modelsBody = string.Empty;
+                string successfulBaseUrl = "https://api.together.ai/v1";
 
-                var modelsResponse = await httpClient.SendAsync(modelsRequest);
-                string modelsBody = await modelsResponse.Content.ReadAsStringAsync();
+                foreach (var baseUrl in endpoints)
+                {
+                    try
+                    {
+                        using var modelsRequest = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/models");
+                        modelsRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+                        modelsResponse = await httpClient.SendAsync(modelsRequest);
+                        modelsBody = await modelsResponse.Content.ReadAsStringAsync();
+                        successfulBaseUrl = baseUrl;
+                        break;
+                    }
+                    catch (HttpRequestException ex) when (baseUrl == endpoints[0])
+                    {
+                        _logger?.LogWarning("Primary Together AI endpoint failed ({Message}), retrying fallback endpoint...", ex.Message);
+                    }
+                }
+
+                if (modelsResponse == null)
+                {
+                    return ValidationResult.HasNetworkError("Together AI network endpoints unreachable");
+                }
 
                 _logger?.LogDebug("Together AI models response: Status={Status}, Body={Body}",
                     modelsResponse.StatusCode, TruncateResponse(modelsBody));
@@ -123,7 +145,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 try
                 {
-                    using var chatRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.together.ai/v1/chat/completions");
+                    using var chatRequest = new HttpRequestMessage(HttpMethod.Post, $"{successfulBaseUrl}/chat/completions");
                     chatRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
                     var payload = new
