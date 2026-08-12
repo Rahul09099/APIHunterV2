@@ -730,8 +730,33 @@ public class ScraperService
         var existingProgress = await _dbContext.DeepSearchProgress
             .Where(p => p.SearchQueryId == query.Id)
             .ToListAsync(_cancellationTokenSource!.Token);
+
+        // Check if all previous partitions were completed
+        bool isPreviousRunFullyCompleted = existingProgress.Any() && existingProgress.All(p => p.IsCompleted);
+
+        // If all partitions were previously completed and we have a recorded LastDeepSearchDateUTC,
+        // automatically clear old progress and scope this new DeepSearch to code pushed since then.
+        string? dateBoundaryFilter = null;
+        if (query.LastDeepSearchDateUTC.HasValue)
+        {
+            var dateCutoff = query.LastDeepSearchDateUTC.Value.AddDays(-1); // 1-day overlap for indexing lag
+            dateBoundaryFilter = $"pushed:>{dateCutoff:yyyy-MM-dd}";
+            
+            if (isPreviousRunFullyCompleted)
+            {
+                Console.WriteLine($"[yellow]Previous Deep Search was completed on {query.LastDeepSearchDateUTC.Value.ToIst():yyyy-MM-dd HH:mm:ss} IST.[/]");
+                Console.WriteLine($"[cyan]Starting new incremental Deep Search for code pushed since {dateCutoff:yyyy-MM-dd}...[/]\n");
+                
+                if (!IsWorkerMode)
+                {
+                    _dbContext.DeepSearchProgress.RemoveRange(existingProgress);
+                    await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
+                }
+                existingProgress.Clear();
+            }
+        }
         
-        // Display progress if any exists
+        // Display progress if any in-progress partitions remain
         if (existingProgress.Any())
         {
             Console.WriteLine("[yellow]Found existing progress for this query:[/]\n");
@@ -758,15 +783,26 @@ public class ScraperService
             AnsiConsole.Write(progressTable);
             AnsiConsole.WriteLine();
             
-            var resumeChoice = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
-                    .Title("[yellow]What would you like to do?[/]")
-                    .AddChoices(new[]
-                    {
-                        "Resume from last position",
-                        "Start fresh (clear all progress)",
-                        "Cancel"
-                    }));
+            string resumeChoice;
+            if (!Environment.UserInteractive || Console.IsInputRedirected)
+            {
+                // Non-interactive environment (Telegram Bot, Docker, Background Service)
+                // Default automatically to resuming from last position without throwing SelectionPrompt exception
+                resumeChoice = "Resume from last position";
+                Console.WriteLine("[yellow]Non-interactive session detected: Auto-resuming Deep Search from last position...[/]\n");
+            }
+            else
+            {
+                resumeChoice = AnsiConsole.Prompt(
+                    new SelectionPrompt<string>()
+                        .Title("[yellow]What would you like to do?[/]")
+                        .AddChoices(new[]
+                        {
+                            "Resume from last position",
+                            "Start fresh (clear all progress)",
+                            "Cancel"
+                        }));
+            }
             
             if (resumeChoice == "Cancel") return;
             
@@ -808,7 +844,8 @@ public class ScraperService
         {
             if (_cancellationTokenSource.Token.IsCancellationRequested) break;
             
-            await SearchPartitionAsync(tokens, query, cursor, "language", language, stats, discoveredBy);
+            string langFilter = dateBoundaryFilter != null ? $"language:{language} {dateBoundaryFilter}" : $"language:{language}";
+            await SearchPartitionAsync(tokens, query, cursor, "language", langFilter, stats, discoveredBy);
         }
         
         // Search by file extension
@@ -816,7 +853,16 @@ public class ScraperService
         {
             if (_cancellationTokenSource.Token.IsCancellationRequested) break;
             
-            await SearchPartitionAsync(tokens, query, cursor, "extension", extension, stats, discoveredBy);
+            string extFilter = dateBoundaryFilter != null ? $"extension:{extension} {dateBoundaryFilter}" : $"extension:{extension}";
+            await SearchPartitionAsync(tokens, query, cursor, "extension", extFilter, stats, discoveredBy);
+        }
+
+        // Record LastDeepSearchDateUTC completion checkpoint
+        if (!IsWorkerMode)
+        {
+            query.LastDeepSearchDateUTC = DateTime.UtcNow;
+            _dbContext.SearchQueries.Update(query);
+            await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
         }
         
         // Display summary
