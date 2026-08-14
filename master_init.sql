@@ -101,11 +101,11 @@ CREATE INDEX IF NOT EXISTS "IX_SearchProviderTokens_AddedByTelegramId"
 --   AI21Labs      = 350   AssemblyAI      = 360
 --   Deepgram      = 370   JinaAI          = 380   Anyscale      = 390
 --   Upstage       = 400   LeonardoAI      = 405   FalAI         = 415
---   RunPod        = 420   SendGrid        = 410   Mailgun       = 425
---   Slack         = 430   Facebook        = 440   GoogleOAuth   = 450
---   Stripe        = 460   TikTok          = 470   GcpHmac       = 480
---   GitHubToken   = 490   ServerCredential= 500   Tavily        = 422
---   Mapbox        = 600   WeatherApi      = 610
+--   RunPod        = 420   Tavily          = 422   SarvamAI      = 424
+--   SendGrid      = 410   Mailgun         = 425   Slack         = 430
+--   Facebook      = 440   GoogleOAuth     = 450   Stripe        = 460
+--   TikTok        = 470   GcpHmac         = 480   GitHubToken   = 490
+--   ServerCredential= 500 Mapbox          = 600   WeatherApi    = 610
 --
 -- Status integer reference (matches ApiStatusEnum):
 --   Unverified    = -99   Invalid = 0   Valid = 1   Error = 6   ValidNoCredits = 7
@@ -401,6 +401,11 @@ FROM (VALUES
     -- ── Tavily AI Search ──────────────────────────────────────────────────────
     ('TAVILY_API_KEY'),
     ('tvly-'),
+
+    -- ── Sarvam AI (Indic GenAI) ───────────────────────────────────────────────
+    ('SARVAM_API_KEY'),
+    ('SARVAM_KEY'),
+    ('api-subscription-key sarvam'),
 
     -- ── WeatherAPI ────────────────────────────────────────────────────────────
     ('WEATHERAPI_KEY'),
