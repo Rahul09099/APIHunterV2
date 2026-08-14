@@ -13,18 +13,22 @@ using UnsecuredAPIKeys.Providers.Common;
 namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
-    /// Provider for Sarvam AI API keys — Indian GenAI platform for Indic LLMs, Speech & Translation.
+    /// Provider for Sarvam AI API keys — Indic GenAI platform for LLMs, Translation & Speech.
     ///
-    /// Auth: api-subscription-key: {apiKey}  (Header)
+    /// Auth: api-subscription-key: {apiKey}  (Header, also accepts Authorization: Bearer {apiKey})
     ///
     /// Verification Strategy:
-    ///   1. GET https://api.sarvam.ai/v2/models (with api-subscription-key header)
-    ///   2. Fallback: POST https://api.sarvam.ai/translate with minimal payload
+    ///   Primary endpoint: POST https://api.sarvam.ai/translate
+    ///   Payload: {"input": "Hi", "source_language_code": "en-IN", "target_language_code": "hi-IN"}
     ///
-    /// Status Codes:
-    ///   - 200 OK: Valid key
-    ///   - 401/403: Invalid/Revoked key
-    ///   - 429: Rate limit / Quota exceeded
+    /// Error Classification (Sarvam AI Official Auth Spec):
+    ///   - 200 OK: Valid key (translation succeeded)
+    ///   - 403 Forbidden:
+    ///       * error.code == "invalid_api_key_error" -> Invalid/Revoked key
+    ///       * other error code -> Authenticated key with restricted resource access
+    ///   - 429 Too Many Requests: Rate limited -> ValidationUnavailable
+    ///   - 5xx Server Error: ValidationUnavailable
+    ///   - 400 / 422 Bad Request: Inspect error payload
     /// </summary>
     [ApiProvider]
     public class SarvamAIProvider : BaseApiKeyProvider
@@ -34,7 +38,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            // Primary env var and config names
+            // Primary env var and config variable names
             @"SARVAM_API_KEY",
             @"SARVAM_KEY",
             @"SARVAM_SUBSCRIPTION_KEY",
@@ -42,12 +46,15 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             @"SHRAVAM_KEY",
 
             // Context-aware value extraction patterns
-            @"SARVAM_API_KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,})['""]?",
-            @"SARVAM_KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,})['""]?",
-            @"SARVAM_SUBSCRIPTION_KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,})['""]?",
-            @"api-subscription-key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,})['""]?",
-            @"sarvam[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,})['""]?",
-            @"shravam[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,})['""]?"
+            @"SARVAM_API_KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
+            @"SARVAM_KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
+            @"SARVAM_SUBSCRIPTION_KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
+            @"api-subscription-key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
+            @"sarvam[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
+            @"shravam[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
+
+            // Sarvam Chat / API subscription keys formatted as sk_xxx
+            @"\b(?:sarvam|shravam)[^a-zA-Z0-9]*['""]?(sk_[A-Za-z0-9\-_]{20,})['""]?"
         ];
 
         public SarvamAIProvider() : base() { }
@@ -57,66 +64,10 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                // Step 1: Check models endpoint with api-subscription-key header
-                using var modelsRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.sarvam.ai/v2/models");
-                modelsRequest.Headers.Add("api-subscription-key", apiKey);
-
-                var modelsResponse = await httpClient.SendAsync(modelsRequest);
-                string modelsBody = await modelsResponse.Content.ReadAsStringAsync();
-
-                _logger?.LogDebug("Sarvam AI models response: Status={StatusCode}, Body={Body}",
-                    modelsResponse.StatusCode, TruncateResponse(modelsBody));
-
-                if (IsSuccessStatusCode(modelsResponse.StatusCode))
-                {
-                    var result = ValidationResult.Success(modelsResponse.StatusCode, "Valid Sarvam AI key");
-                    var metadata = new Dictionary<string, object>
-                    {
-                        ["authentication_valid"] = true,
-                        ["tested_endpoint"] = "https://api.sarvam.ai/v2/models"
-                    };
-
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(modelsBody);
-                        if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                        {
-                            metadata["models_count"] = doc.RootElement.GetArrayLength();
-                        }
-                        else if (doc.RootElement.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
-                        {
-                            metadata["models_count"] = dataArr.GetArrayLength();
-                        }
-                    }
-                    catch { }
-
-                    result.Metadata = metadata;
-                    result.RawResponse = modelsBody;
-                    return result;
-                }
-
-                if (modelsResponse.StatusCode == HttpStatusCode.Unauthorized || modelsResponse.StatusCode == HttpStatusCode.Forbidden)
-                {
-                    var result = ValidationResult.IsUnauthorized(modelsResponse.StatusCode, "Invalid Sarvam AI API key");
-                    result.RawResponse = modelsBody;
-                    return result;
-                }
-
-                if ((int)modelsResponse.StatusCode == 429)
-                {
-                    return new ValidationResult
-                    {
-                        Status = ValidationAttemptStatus.ValidationUnavailable,
-                        HttpStatusCode = modelsResponse.StatusCode,
-                        Detail = "Sarvam AI rate limit exceeded (HTTP 429)",
-                        RawResponse = modelsBody
-                    };
-                }
-
-                // Step 2: Fallback to lightweight translation check
-                using var translateRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.sarvam.ai/translate");
-                translateRequest.Headers.Add("api-subscription-key", apiKey);
-                translateRequest.Content = new StringContent(
+                // Primary Verification: POST https://api.sarvam.ai/translate
+                using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.sarvam.ai/translate");
+                request.Headers.Add("api-subscription-key", apiKey);
+                request.Content = new StringContent(
                     JsonSerializer.Serialize(new
                     {
                         input = "Hi",
@@ -127,44 +78,132 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     "application/json"
                 );
 
-                var translateResponse = await httpClient.SendAsync(translateRequest);
-                string translateBody = await translateResponse.Content.ReadAsStringAsync();
+                var response = await httpClient.SendAsync(request);
+                string responseBody = await response.Content.ReadAsStringAsync();
 
-                _logger?.LogDebug("Sarvam AI translate fallback response: Status={StatusCode}, Body={Body}",
-                    translateResponse.StatusCode, TruncateResponse(translateBody));
+                _logger?.LogDebug("Sarvam AI translate response: Status={StatusCode}, Body={Body}",
+                    response.StatusCode, TruncateResponse(responseBody));
 
-                if (IsSuccessStatusCode(translateResponse.StatusCode))
+                // ── 200 OK: Valid key & translation verified ───────────────────────────
+                if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    var result = ValidationResult.Success(translateResponse.StatusCode, "Valid Sarvam AI key (tested via translate)");
-                    result.Metadata = new Dictionary<string, object>
+                    var result = ValidationResult.Success(response.StatusCode, "Valid Sarvam AI key (translation verified)");
+                    var metadata = new Dictionary<string, object>
                     {
                         ["authentication_valid"] = true,
-                        ["tested_endpoint"] = "https://api.sarvam.ai/translate"
+                        ["tested_endpoint"] = "https://api.sarvam.ai/translate",
+                        ["inference_working"] = true
                     };
-                    result.RawResponse = translateBody;
+
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(responseBody);
+                        if (doc.RootElement.TryGetProperty("translated_text", out var translated))
+                        {
+                            metadata["sample_translation"] = translated.GetString() ?? "";
+                        }
+                    }
+                    catch { }
+
+                    result.Metadata = metadata;
+                    result.RawResponse = responseBody;
                     return result;
                 }
 
-                if (translateResponse.StatusCode == HttpStatusCode.Unauthorized || translateResponse.StatusCode == HttpStatusCode.Forbidden)
+                // ── 403 Forbidden: Body-Aware Inspection ─────────────────────────────
+                if (response.StatusCode == HttpStatusCode.Forbidden || response.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    var result = ValidationResult.IsUnauthorized(translateResponse.StatusCode, "Invalid Sarvam AI API key");
-                    result.RawResponse = translateBody;
-                    return result;
+                    bool isInvalidKey = false;
+                    string errorDetail = "Invalid Sarvam AI API key";
+
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(responseBody);
+                        if (doc.RootElement.TryGetProperty("error", out var errorObj))
+                        {
+                            string? code = errorObj.TryGetProperty("code", out var codeEl) ? codeEl.GetString() : null;
+                            string? message = errorObj.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : null;
+
+                            if (string.Equals(code, "invalid_api_key_error", StringComparison.OrdinalIgnoreCase) ||
+                                (message != null && message.Contains("invalid", StringComparison.OrdinalIgnoreCase) && message.Contains("key", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                isInvalidKey = true;
+                                errorDetail = message ?? "Invalid Sarvam AI API key (invalid_api_key_error)";
+                            }
+                            else if (code != null)
+                            {
+                                // Authenticated key, but resource or policy restricted
+                                isInvalidKey = false;
+                                errorDetail = $"Authenticated key with restricted access ({code}: {message})";
+                            }
+                        }
+                        else if (responseBody.Contains("invalid_api_key_error", StringComparison.OrdinalIgnoreCase) ||
+                                 responseBody.Contains("Invalid API key", StringComparison.OrdinalIgnoreCase))
+                        {
+                            isInvalidKey = true;
+                        }
+                    }
+                    catch
+                    {
+                        if (responseBody.Contains("invalid_api_key", StringComparison.OrdinalIgnoreCase) ||
+                            responseBody.Contains("Invalid API key", StringComparison.OrdinalIgnoreCase))
+                        {
+                            isInvalidKey = true;
+                        }
+                    }
+
+                    if (isInvalidKey)
+                    {
+                        var invalidResult = ValidationResult.IsUnauthorized(response.StatusCode, errorDetail);
+                        invalidResult.RawResponse = responseBody;
+                        return invalidResult;
+                    }
+
+                    // Key is authenticated but access to endpoint is restricted
+                    var restrictedResult = ValidationResult.Success(response.StatusCode, errorDetail);
+                    restrictedResult.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["access_restricted"] = true
+                    };
+                    restrictedResult.RawResponse = responseBody;
+                    return restrictedResult;
                 }
 
-                if ((int)translateResponse.StatusCode == 429)
+                // ── 429 Too Many Requests: Rate limited ──────────────────────────────
+                if ((int)response.StatusCode == 429)
                 {
                     return new ValidationResult
                     {
                         Status = ValidationAttemptStatus.ValidationUnavailable,
-                        HttpStatusCode = translateResponse.StatusCode,
-                        Detail = "Sarvam AI rate limit/quota exceeded (HTTP 429)",
-                        RawResponse = translateBody
+                        HttpStatusCode = response.StatusCode,
+                        Detail = "Sarvam AI rate limit exceeded (HTTP 429)",
+                        RawResponse = responseBody
                     };
                 }
 
-                return ValidationResult.HasHttpError(translateResponse.StatusCode,
-                    $"Sarvam AI verification failed: {TruncateResponse(translateBody)}");
+                // ── 5xx Server Error: Temporary service outage ─────────────────────────
+                if ((int)response.StatusCode >= 500)
+                {
+                    return new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = $"Sarvam AI server error (HTTP {(int)response.StatusCode})",
+                        RawResponse = responseBody
+                    };
+                }
+
+                // ── 400 / 422 Client Error: Inspect payload before declaring error ────
+                if (responseBody.Contains("invalid_api_key_error", StringComparison.OrdinalIgnoreCase))
+                {
+                    var invalidResult = ValidationResult.IsUnauthorized(response.StatusCode, "Invalid Sarvam AI API key");
+                    invalidResult.RawResponse = responseBody;
+                    return invalidResult;
+                }
+
+                return ValidationResult.HasHttpError(response.StatusCode,
+                    $"Sarvam AI verification returned unexpected status {response.StatusCode}: {TruncateResponse(responseBody)}");
             }
             catch (Exception ex)
             {
@@ -175,7 +214,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         protected override bool IsValidKeyFormat(string apiKey)
         {
             return !string.IsNullOrWhiteSpace(apiKey) &&
-                   apiKey.Length >= 20 &&
+                   apiKey.Length >= 16 &&
                    apiKey.Length <= 128 &&
                    !apiKey.Contains(' ');
         }
