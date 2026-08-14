@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using UnsecuredAPIKeys.Data.Common;
@@ -31,7 +32,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             // Classic Google API keys (AIzaSy...)
             @"AIza[0-9A-Za-z\-_]{35,40}",
 
-            // New Google Gemini Developer API keys (AQ.xxx format)
+            // Emerging Google Gemini Developer / Auth keys (AQ.xxx format)
             @"\bAQ\.[0-9A-Za-z\-_]{40,65}\b",
 
             // Context-aware assignment patterns
@@ -47,11 +48,13 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
                 // ── Step 1: GET /v1beta/models with pagination support ─────────────────
                 var allModels = new List<ModelInfo>();
                 string? pageToken = null;
                 int pageCount = 0;
-                const int maxPages = 3;
+                const int maxPages = 5;
 
                 do
                 {
@@ -64,8 +67,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     using var listRequest = new HttpRequestMessage(HttpMethod.Get, modelsUrl);
                     listRequest.Headers.Add("x-goog-api-key", apiKey);
 
-                    var listResponse = await httpClient.SendAsync(listRequest);
-                    var listBody = await listResponse.Content.ReadAsStringAsync();
+                    var listResponse = await httpClient.SendAsync(listRequest, cts.Token);
+                    var listBody = await listResponse.Content.ReadAsStringAsync(cts.Token);
 
                     if (!IsSuccessStatusCode(listResponse.StatusCode))
                     {
@@ -94,12 +97,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         "Model listing succeeded, but no active models with generateContent support were found.");
                 }
 
-                // ── Step 2: Prioritize best inference model ────────────────────────────
-                // Prefer modern fast/flash models, then pro models, then first available
-                var selectedModel = modelsToUse.FirstOrDefault(m => m.ModelId.Contains("2.5-flash", StringComparison.OrdinalIgnoreCase))
-                                 ?? modelsToUse.FirstOrDefault(m => m.ModelId.Contains("2.0-flash", StringComparison.OrdinalIgnoreCase))
-                                 ?? modelsToUse.FirstOrDefault(m => m.ModelId.Contains("1.5-flash", StringComparison.OrdinalIgnoreCase))
-                                 ?? modelsToUse.FirstOrDefault(m => m.ModelId.Contains("flash", StringComparison.OrdinalIgnoreCase))
+                // ── Step 2: Select best inference model ────────────────────────────────
+                // Prioritize fast/flash models, then pro models, then first available
+                var selectedModel = modelsToUse.FirstOrDefault(m => m.ModelId.Contains("flash", StringComparison.OrdinalIgnoreCase))
                                  ?? modelsToUse.FirstOrDefault(m => m.ModelId.Contains("pro", StringComparison.OrdinalIgnoreCase))
                                  ?? modelsToUse.First();
 
@@ -126,8 +126,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     Encoding.UTF8,
                     "application/json");
 
-                var generateResponse = await httpClient.SendAsync(generateRequest);
-                var generateBody = await generateResponse.Content.ReadAsStringAsync();
+                var generateResponse = await httpClient.SendAsync(generateRequest, cts.Token);
+                var generateBody = await generateResponse.Content.ReadAsStringAsync(cts.Token);
 
                 _logger?.LogDebug(
                     "Google AI generateContent response ({Model}): Status={Status}, Body={Body}",
@@ -144,7 +144,12 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         var leakedResult = ValidationResult.IsUnauthorized(
                             HttpStatusCode.Forbidden,
                             "Key reported as leaked by Google");
-                        leakedResult.RawResponse = generateBody;
+                        leakedResult.Metadata = new Dictionary<string, object>
+                        {
+                            ["is_leaked"] = true,
+                            ["security_status"] = "LEAKED_KEY"
+                        };
+                        leakedResult.RawResponse = TruncateResponse(generateBody);
                         return leakedResult;
                     }
 
@@ -159,14 +164,19 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         ["inference_working"] = true,
                         ["tested_model"] = modelPath,
                         ["api_endpoint_version"] = "v1beta",
-                        ["total_models_available"] = allModels.Count
+                        ["total_models_available"] = allModels.Count,
+                        ["models_scan_truncated"] = !string.IsNullOrEmpty(pageToken)
                     };
-                    result.RawResponse = generateBody;
+                    result.RawResponse = TruncateResponse(generateBody);
                     return result;
                 }
 
                 // ── Error Response Inspection ─────────────────────────────────────────
                 return ParseGoogleErrorResponse(generateBody, generateResponse.StatusCode, $"Generation failed on {modelPath}", modelsToUse, modelPath);
+            }
+            catch (OperationCanceledException)
+            {
+                return ValidationResult.HasNetworkError("Google AI request timed out (15s limit reached)");
             }
             catch (Exception ex)
             {
@@ -212,14 +222,16 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 if (doc.RootElement.TryGetProperty("error", out var errorObj))
                 {
                     if (errorObj.TryGetProperty("code", out var codeEl)) errorCode = codeEl.ToString();
-                    if (errorObj.TryGetProperty("message", out var msgEl)) errorMessage = msgEl.GetString();
-                    if (errorObj.TryGetProperty("status", out var statusEl)) errorStatus = statusEl.GetString();
+                    if (errorObj.TryGetProperty("message", out var msgEl) && msgEl.ValueKind == JsonValueKind.String)
+                        errorMessage = msgEl.GetString();
+                    if (errorObj.TryGetProperty("status", out var statusEl) && statusEl.ValueKind == JsonValueKind.String)
+                        errorStatus = statusEl.GetString();
 
                     if (errorObj.TryGetProperty("details", out var detailsArr) && detailsArr.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var detail in detailsArr.EnumerateArray())
                         {
-                            if (detail.TryGetProperty("reason", out var reasonEl))
+                            if (detail.TryGetProperty("reason", out var reasonEl) && reasonEl.ValueKind == JsonValueKind.String)
                             {
                                 errorReason = reasonEl.GetString();
                                 break;
@@ -236,13 +248,17 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 var result = ValidationResult.IsUnauthorized(
                     statusCode,
                     "Key reported as leaked by Google");
-                result.RawResponse = jsonBody;
+                result.Metadata = new Dictionary<string, object>
+                {
+                    ["is_leaked"] = true,
+                    ["security_status"] = "LEAKED_KEY"
+                };
+                result.RawResponse = TruncateResponse(jsonBody);
                 return result;
             }
 
             // 2. Authentication failure / invalid key
             if (statusCode == HttpStatusCode.Unauthorized ||
-                statusCode == HttpStatusCode.Forbidden ||
                 errorStatus == "UNAUTHENTICATED" ||
                 errorReason == "API_KEY_INVALID" ||
                 errorReason == "API_KEY_SERVICE_BLOCKED")
@@ -250,11 +266,39 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 var result = ValidationResult.IsUnauthorized(
                     statusCode,
                     errorMessage ?? "Invalid Google AI API key");
-                result.RawResponse = jsonBody;
+                result.RawResponse = TruncateResponse(jsonBody);
                 return result;
             }
 
-            // 3. Quota vs Rate Limit handling (429 / RESOURCE_EXHAUSTED)
+            // 3. 403 Forbidden: Differentiate access/policy restrictions from invalid credentials
+            if (statusCode == HttpStatusCode.Forbidden)
+            {
+                if (errorStatus == "PERMISSION_DENIED" && errorReason != "API_KEY_INVALID")
+                {
+                    var restrictedResult = new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = statusCode,
+                        Detail = $"Google AI returned 403 Forbidden ({errorReason ?? "PERMISSION_DENIED"}): {TruncateResponse(errorMessage ?? "Access restricted")}"
+                    };
+                    restrictedResult.Metadata = new Dictionary<string, object>
+                    {
+                        ["authentication_valid"] = true,
+                        ["access_restricted"] = true,
+                        ["permission_reason"] = errorReason ?? "PERMISSION_DENIED"
+                    };
+                    restrictedResult.RawResponse = TruncateResponse(jsonBody);
+                    return restrictedResult;
+                }
+
+                var invalidResult = ValidationResult.IsUnauthorized(
+                    statusCode,
+                    errorMessage ?? "Invalid Google AI API key (403 Forbidden)");
+                invalidResult.RawResponse = TruncateResponse(jsonBody);
+                return invalidResult;
+            }
+
+            // 4. Quota vs Rate Limit handling (429 / RESOURCE_EXHAUSTED)
             if ((int)statusCode == 429 || errorStatus == "RESOURCE_EXHAUSTED")
             {
                 bool isQuotaExhausted = errorReason == "QUOTA_EXCEEDED" ||
@@ -276,7 +320,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         ["quota_exceeded"] = true,
                         ["tested_model"] = testedModel ?? "unknown"
                     };
-                    result.RawResponse = jsonBody;
+                    result.RawResponse = TruncateResponse(jsonBody);
                     return result;
                 }
 
@@ -294,11 +338,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     ["inference_limited"] = true,
                     ["tested_model"] = testedModel ?? "unknown"
                 };
-                rateLimitResult.RawResponse = jsonBody;
+                rateLimitResult.RawResponse = TruncateResponse(jsonBody);
                 return rateLimitResult;
             }
 
-            // 4. Server error (5xx)
+            // 5. Server error (5xx)
             if ((int)statusCode >= 500)
             {
                 var result = new ValidationResult
@@ -307,16 +351,16 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     HttpStatusCode = statusCode,
                     Detail = $"Google AI server error (HTTP {(int)statusCode})"
                 };
-                result.RawResponse = jsonBody;
+                result.RawResponse = TruncateResponse(jsonBody);
                 return result;
             }
 
-            // 5. Generic HTTP Error
+            // 6. Generic HTTP Error
             var httpErr = ValidationResult.HasHttpError(
                 statusCode,
                 $"{defaultErrorPrefix}: {TruncateResponse(errorMessage ?? jsonBody)}");
             httpErr.AvailableModels = availableModels;
-            httpErr.RawResponse = jsonBody;
+            httpErr.RawResponse = TruncateResponse(jsonBody);
             return httpErr;
         }
 
@@ -327,7 +371,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 using var doc = JsonDocument.Parse(jsonResponse);
                 string? nextPage = null;
 
-                if (doc.RootElement.TryGetProperty("nextPageToken", out var nextEl))
+                if (doc.RootElement.TryGetProperty("nextPageToken", out var nextEl) && nextEl.ValueKind == JsonValueKind.String)
                 {
                     nextPage = nextEl.GetString();
                 }

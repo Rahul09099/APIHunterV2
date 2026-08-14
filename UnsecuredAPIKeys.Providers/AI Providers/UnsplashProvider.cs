@@ -29,7 +29,10 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Status Codes:
     ///   - 200 OK: Valid key (extracts rate limit & remaining calls)
     ///   - 401 Unauthorized: Invalid or revoked Access Key
-    ///   - 403 / 429: Rate limit exceeded / Hourly quota exhausted
+    ///   - 429 Too Many Requests:
+    ///       * X-Ratelimit-Remaining == 0 -> Valid key + Quota Exhausted
+    ///       * Other 429 -> Rate Limited / ValidationUnavailable
+    ///   - 403 Forbidden: Access restricted or application policy issue (ValidationUnavailable)
     ///   - 5xx: Service outage (ValidationUnavailable)
     /// </summary>
     [ApiProvider]
@@ -47,13 +50,13 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             @"UNSPLASH_KEY",
 
             // Context-aware value extraction patterns
-            @"UNSPLASH[._-]?ACCESS[._-]?KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{30,64})['""]?",
-            @"UNSPLASH[._-]?API[._-]?KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{30,64})['""]?",
-            @"UNSPLASH[._-]?CLIENT[._-]?ID\s*[=:]\s*['""]?([A-Za-z0-9\-_]{30,64})['""]?",
-            @"unsplash[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{30,64})['""]?",
+            @"UNSPLASH[._-]?ACCESS[._-]?KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,128})['""]?",
+            @"UNSPLASH[._-]?API[._-]?KEY\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,128})['""]?",
+            @"UNSPLASH[._-]?CLIENT[._-]?ID\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,128})['""]?",
+            @"unsplash[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{20,128})['""]?",
 
             // Client-ID header format
-            @"Client-ID\s+([A-Za-z0-9\-_]{30,64})"
+            @"Client-ID\s+([A-Za-z0-9\-_]{20,128})"
         ];
 
         public UnsplashProvider() : base() { }
@@ -66,7 +69,6 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 // Primary Verification: GET https://api.unsplash.com/photos?per_page=1
                 using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.unsplash.com/photos?per_page=1");
                 request.Headers.Add("Authorization", $"Client-ID {apiKey}");
-                request.Headers.Add("Accept-Version", "v1");
 
                 var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
@@ -95,7 +97,13 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                     if (int.TryParse(rateLimit, out int limitNum))
                     {
-                        result.AccountTier = limitNum >= 1000 ? $"Production ({limitNum:N0} req/hr)" : $"Demo ({limitNum} req/hr)";
+                        if (limitNum == 50)
+                            result.AccountTier = "Demo (50 req/hr)";
+                        else if (limitNum >= 5000)
+                            result.AccountTier = "Production (5,000 req/hr)";
+                        else
+                            result.AccountTier = $"Custom ({limitNum:N0} req/hr)";
+
                         if (int.TryParse(rateRemaining, out int remNum))
                         {
                             result.Balance = $"{remNum}/{limitNum} requests remaining this hour";
@@ -103,7 +111,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     }
 
                     result.Metadata = metadata;
-                    result.RawResponse = responseBody;
+                    result.RawResponse = TruncateResponse(responseBody);
                     return result;
                 }
 
@@ -111,12 +119,12 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
                     var result = ValidationResult.IsUnauthorized(response.StatusCode, "Invalid Unsplash Access Key");
-                    result.RawResponse = responseBody;
+                    result.RawResponse = TruncateResponse(responseBody);
                     return result;
                 }
 
-                // ── 403 Forbidden / 429 Too Many Requests: Rate Limited ────────────────
-                if (response.StatusCode == HttpStatusCode.Forbidden || (int)response.StatusCode == 429)
+                // ── 429 Too Many Requests: Differentiate Quota vs Throttling ──────────
+                if ((int)response.StatusCode == 429)
                 {
                     string? rateRemaining = response.Headers.TryGetValues("X-Ratelimit-Remaining", out var remVals)
                         ? remVals.FirstOrDefault() : null;
@@ -130,7 +138,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                             Status = ValidationAttemptStatus.Valid,
                             HttpStatusCode = response.StatusCode,
                             IsQuotaExceeded = true,
-                            Detail = "Valid Unsplash key — hourly rate limit exhausted"
+                            Detail = "Valid Unsplash key — hourly rate limit exhausted (0 remaining)"
                         };
                         quotaResult.Metadata = new Dictionary<string, object>
                         {
@@ -138,7 +146,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                             ["quota_exceeded"] = true,
                             ["rate_limit_remaining"] = "0"
                         };
-                        quotaResult.RawResponse = responseBody;
+                        quotaResult.RawResponse = TruncateResponse(responseBody);
                         return quotaResult;
                     }
 
@@ -146,8 +154,20 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     {
                         Status = ValidationAttemptStatus.ValidationUnavailable,
                         HttpStatusCode = response.StatusCode,
-                        Detail = "Unsplash rate limit reached (HTTP 429/403)",
-                        RawResponse = responseBody
+                        Detail = "Unsplash rate limit reached (HTTP 429)",
+                        RawResponse = TruncateResponse(responseBody)
+                    };
+                }
+
+                // ── 403 Forbidden: Policy / Access Restriction ────────────────────────
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return new ValidationResult
+                    {
+                        Status = ValidationAttemptStatus.ValidationUnavailable,
+                        HttpStatusCode = response.StatusCode,
+                        Detail = "Unsplash returned 403 Forbidden — access restriction or application policy issue",
+                        RawResponse = TruncateResponse(responseBody)
                     };
                 }
 
@@ -159,7 +179,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         Status = ValidationAttemptStatus.ValidationUnavailable,
                         HttpStatusCode = response.StatusCode,
                         Detail = $"Unsplash server error (HTTP {(int)response.StatusCode})",
-                        RawResponse = responseBody
+                        RawResponse = TruncateResponse(responseBody)
                     };
                 }
 
@@ -175,8 +195,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         protected override bool IsValidKeyFormat(string apiKey)
         {
             return !string.IsNullOrWhiteSpace(apiKey) &&
-                   apiKey.Length >= 30 &&
-                   apiKey.Length <= 64 &&
+                   apiKey.Length >= 20 &&
+                   apiKey.Length <= 256 &&
                    !apiKey.Contains(' ');
         }
     }
