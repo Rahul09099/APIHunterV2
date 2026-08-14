@@ -270,6 +270,8 @@ FROM (VALUES
     ('AIzaSy'),
     ('GOOGLE_API_KEY'),
     ('GEMINI_API_KEY'),
+    ('AQ.Ab'),
+    ('AQ.'),
 
     -- ── DeepSeek ─────────────────────────────────────────────────────────────
     ('DEEPSEEK_API_KEY'),

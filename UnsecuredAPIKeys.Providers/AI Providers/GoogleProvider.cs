@@ -28,7 +28,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         public override IEnumerable<string> RegexPatterns =>
         [
-            @"AIza[0-9A-Za-z\-_]{35,40}"
+            @"AIza[0-9A-Za-z\-_]{35,40}",
+            @"\bAQ\.[0-9A-Za-z\-_]{40,65}\b",
+            @"(?:GEMINI_API_KEY|GOOGLE_API_KEY|GEMINI_KEY)\s*[=:]\s*['""]?(AQ\.[0-9A-Za-z\-_]{40,65}|AIza[0-9A-Za-z\-_]{35,40})['""]?"
         ];
 
         public GoogleProvider() : base() { }
@@ -233,10 +235,17 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            return !string.IsNullOrWhiteSpace(apiKey)
-                && apiKey.StartsWith("AIza", StringComparison.Ordinal)
-                && apiKey.Length >= 39
-                && apiKey.Length <= 44;
+            if (string.IsNullOrWhiteSpace(apiKey)) return false;
+
+            // Classic Google API key: AIzaSy... (39-44 chars)
+            if (apiKey.StartsWith("AIza", StringComparison.Ordinal) && apiKey.Length >= 39 && apiKey.Length <= 44)
+                return true;
+
+            // New Google Gemini Developer API key: AQ.xxxx (45-65 chars)
+            if (apiKey.StartsWith("AQ.", StringComparison.Ordinal) && apiKey.Length >= 45 && apiKey.Length <= 65)
+                return true;
+
+            return false;
         }
 
         private List<ModelInfo>? ParseGoogleModels(string jsonResponse)

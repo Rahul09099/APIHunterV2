@@ -684,7 +684,7 @@ public class ScraperService
         if (q.Contains("sk-ant") || q.Contains("anthropic") || q.Contains("claude")) return "Anthropic";
         if (q.Contains("sk-or-v1") || q.Contains("openrouter")) return "OpenRouter";
         if (q.Contains("openai") || q.Contains("sk-proj") || q.Contains("sk-svcacct") || q.Contains("gpt")) return "OpenAI";
-        if (q.Contains("google") || q.Contains("gemini") || q.Contains("aizasy") || q.Contains("aiza")) return "Google";
+        if (q.Contains("google") || q.Contains("gemini") || q.Contains("aizasy") || q.Contains("aiza") || q.Contains("aq.")) return "Google";
         if (q.Contains("groq") || q.Contains("gsk_")) return "Groq";
         if (q.Contains("perplexity") || q.Contains("pplx")) return "Perplexity";
         if (q.Contains("cerebras") || q.Contains("csk-")) return "Cerebras";
