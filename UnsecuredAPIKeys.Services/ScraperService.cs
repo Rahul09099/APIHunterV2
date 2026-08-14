@@ -711,6 +711,7 @@ public class ScraperService
         if (q.Contains("stripe") || q.Contains("rk_live") || q.Contains("whsec")) return "Stripe";
         if (q.Contains("tiktok")) return "TikTok";
         if (q.Contains("goog1") || q.Contains("hmac_access_key")) return "Google Cloud HMAC";
+        if (q.Contains("sarvam") || q.Contains("shravam")) return "Sarvam AI";
         return "Other";
     }
 
