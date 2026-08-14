@@ -26,7 +26,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     ///   - 403 Forbidden:
     ///       * error.code == "invalid_api_key_error" -> Invalid/Revoked key
     ///       * other error code -> Authenticated key with restricted resource access
-    ///   - 429 Too Many Requests: Rate limited -> ValidationUnavailable
+    ///   - 429 Too Many Requests:
+    ///       * error.code == "insufficient_quota_error" -> Valid key, Quota Exceeded
+    ///       * error.code == "rate_limit_exceeded_error" or general -> ValidationUnavailable (Throttled)
     ///   - 5xx Server Error: ValidationUnavailable
     ///   - 400 / 422 Bad Request: Inspect error payload
     /// </summary>
@@ -53,10 +55,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             @"sarvam[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
             @"shravam[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
 
-            // Standalone signature for Sarvam AI keys (format: sk_{8chars}_{24chars} e.g. sk_chne7u67_KfAdxIynlGiA7By1UsIxTfFX)
-            @"\bsk_[a-z0-9]{6,12}_[A-Za-z0-9]{20,32}\b",
-
-            // Sarvam Chat / API subscription keys formatted as sk_xxx
+            // Standalone and prefixed subscription keys (sk_xxx format)
+            @"\bsk_[A-Za-z0-9_\-]{20,128}\b",
             @"\b(?:sarvam|shravam)[^a-zA-Z0-9]*['""]?(sk_[A-Za-z0-9\-_]{20,})['""]?"
         ];
 
@@ -90,16 +90,14 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 // ── 200 OK: Valid key & translation verified ───────────────────────────
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
-                    var result = ValidationResult.Success(response.StatusCode, "Valid Sarvam AI key (translation verified)");
-                    result.Balance = "Active (pay-as-you-go)";
-                    result.AccountTier = "Standard / Pay-per-use";
-
+                    var result = ValidationResult.Success(response.StatusCode, "Valid Sarvam AI key — translation request succeeded.");
                     var metadata = new Dictionary<string, object>
                     {
                         ["authentication_valid"] = true,
                         ["tested_endpoint"] = "https://api.sarvam.ai/translate",
                         ["inference_working"] = true,
-                        ["supported_models"] = "sarvam-105b, sarvam-105b-conversations"
+                        ["translation_models"] = "mayura:v1, sarvam-translate:v1",
+                        ["chat_models"] = "sarvam-30b, sarvam-105b"
                     };
 
                     try
@@ -177,19 +175,58 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     return restrictedResult;
                 }
 
-                // ── 429 Too Many Requests: Rate limited ──────────────────────────────
+                // ── 429 Too Many Requests / Quota Inspection ─────────────────────────
                 if ((int)response.StatusCode == 429)
                 {
+                    bool isQuotaExceeded = false;
+                    string rateLimitDetail = "Sarvam AI rate limit exceeded (HTTP 429)";
+
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(responseBody);
+                        if (doc.RootElement.TryGetProperty("error", out var errorObj))
+                        {
+                            string? code = errorObj.TryGetProperty("code", out var codeEl) ? codeEl.GetString() : null;
+                            string? message = errorObj.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : null;
+
+                            if (string.Equals(code, "insufficient_quota_error", StringComparison.OrdinalIgnoreCase) ||
+                                (message != null && (message.Contains("quota", StringComparison.OrdinalIgnoreCase) || message.Contains("credit", StringComparison.OrdinalIgnoreCase))))
+                            {
+                                isQuotaExceeded = true;
+                                rateLimitDetail = "Valid Sarvam AI key — quota exhausted (insufficient_quota_error)";
+                            }
+                        }
+                    }
+                    catch { }
+
+                    if (isQuotaExceeded)
+                    {
+                        var quotaResult = new ValidationResult
+                        {
+                            Status = ValidationAttemptStatus.Valid,
+                            HttpStatusCode = response.StatusCode,
+                            IsQuotaExceeded = true,
+                            Detail = rateLimitDetail
+                        };
+                        quotaResult.Metadata = new Dictionary<string, object>
+                        {
+                            ["authentication_valid"] = true,
+                            ["quota_exceeded"] = true
+                        };
+                        quotaResult.RawResponse = responseBody;
+                        return quotaResult;
+                    }
+
                     return new ValidationResult
                     {
                         Status = ValidationAttemptStatus.ValidationUnavailable,
                         HttpStatusCode = response.StatusCode,
-                        Detail = "Sarvam AI rate limit exceeded (HTTP 429)",
+                        Detail = "Sarvam AI rate limit exceeded (rate_limit_exceeded_error)",
                         RawResponse = responseBody
                     };
                 }
 
-                // ── 5xx Server Error: Temporary service outage ─────────────────────────
+                // ── 5xx Server Error / Service Outage ─────────────────────────────────
                 if ((int)response.StatusCode >= 500)
                 {
                     return new ValidationResult
