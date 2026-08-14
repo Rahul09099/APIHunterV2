@@ -888,7 +888,7 @@ public class DatabaseService(DBContext dbContext)
             ApiTypeEnum.AI21Labs or ApiTypeEnum.AssemblyAI or
             ApiTypeEnum.Deepgram or ApiTypeEnum.JinaAI or
             ApiTypeEnum.Upstage or ApiTypeEnum.LeonardoAI or ApiTypeEnum.FalAI or
-            ApiTypeEnum.RunPod or ApiTypeEnum.Tavily or ApiTypeEnum.SarvamAI
+            ApiTypeEnum.RunPod or ApiTypeEnum.Tavily or ApiTypeEnum.SarvamAI or ApiTypeEnum.Unsplash
                 => ApiCategoryEnum.AIAndLLM,
 
             ApiTypeEnum.SendGrid or ApiTypeEnum.Mailgun or ApiTypeEnum.Slack or

@@ -102,10 +102,11 @@ CREATE INDEX IF NOT EXISTS "IX_SearchProviderTokens_AddedByTelegramId"
 --   Deepgram      = 370   JinaAI          = 380   Anyscale      = 390
 --   Upstage       = 400   LeonardoAI      = 405   FalAI         = 415
 --   RunPod        = 420   Tavily          = 422   SarvamAI      = 424
---   SendGrid      = 410   Mailgun         = 425   Slack         = 430
---   Facebook      = 440   GoogleOAuth     = 450   Stripe        = 460
---   TikTok        = 470   GcpHmac         = 480   GitHubToken   = 490
---   ServerCredential= 500 Mapbox          = 600   WeatherApi    = 610
+--   Unsplash      = 426   SendGrid        = 410   Mailgun       = 425
+--   Slack         = 430   Facebook        = 440   GoogleOAuth   = 450
+--   Stripe        = 460   TikTok          = 470   GcpHmac       = 480
+--   GitHubToken   = 490   ServerCredential= 500   Mapbox        = 600
+--   WeatherApi    = 610
 --
 -- Status integer reference (matches ApiStatusEnum):
 --   Unverified    = -99   Invalid = 0   Valid = 1   Error = 6   ValidNoCredits = 7
@@ -408,6 +409,11 @@ FROM (VALUES
     ('SARVAM_API_KEY'),
     ('SARVAM_KEY'),
     ('api-subscription-key sarvam'),
+
+    -- ── Unsplash (Stock Media / Visual API) ──────────────────────────────────
+    ('UNSPLASH_ACCESS_KEY'),
+    ('UNSPLASH_CLIENT_ID'),
+    ('UNSPLASH_API_KEY'),
 
     -- ── WeatherAPI ────────────────────────────────────────────────────────────
     ('WEATHERAPI_KEY'),

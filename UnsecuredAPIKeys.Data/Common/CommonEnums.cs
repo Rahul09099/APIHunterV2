@@ -88,6 +88,7 @@ namespace UnsecuredAPIKeys.Data.Common
         RunPod = 420,
         Tavily = 422,
         SarvamAI = 424,
+        Unsplash = 426,
 
         // Communication, Payment & Auth Category (4)
         SendGrid = 410,
