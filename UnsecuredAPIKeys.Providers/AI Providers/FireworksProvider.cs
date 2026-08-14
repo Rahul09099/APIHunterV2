@@ -58,15 +58,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 {
                     result = accountResponse.StatusCode switch
                     {
-                        HttpStatusCode.Unauthorized =>
+                        HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
                             ValidationResult.IsUnauthorized(accountResponse.StatusCode, "Invalid Fireworks AI API key"),
-                        HttpStatusCode.Forbidden =>
-                            new ValidationResult
-                            {
-                                Status = ValidationAttemptStatus.ValidationUnavailable,
-                                HttpStatusCode = accountResponse.StatusCode,
-                                Detail = "Fireworks AI account access forbidden; key validity could not be determined."
-                            },
                         (HttpStatusCode)429 =>
                             new ValidationResult
                             {
@@ -105,9 +98,6 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                         if (firstAccount.TryGetProperty("displayName", out var dispProp))
                             displayName = dispProp.GetString();
-
-                        if (firstAccount.TryGetProperty("suspendState", out var suspendProp))
-                            result.Metadata["suspend_state"] = suspendProp.GetString() ?? "";
 
                         result.AccountTier = !string.IsNullOrEmpty(displayName) ? displayName : accountId;
                         result.Detail = $"Valid Fireworks AI key — {accounts.GetArrayLength()} account(s)";
@@ -153,12 +143,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                                                     if (quota.TryGetProperty("maxValue", out var maxProp))
                                                         result.Metadata[$"quota_{name}_max"] = maxProp.GetString() ?? "";
 
-                                                    if (quota.TryGetProperty("usage", out var usageProp) &&
-                                                        usageProp.ValueKind == JsonValueKind.Number &&
-                                                        usageProp.TryGetDouble(out var usageVal))
-                                                    {
-                                                        result.Metadata[$"quota_{name}_usage"] = usageVal;
-                                                    }
+                                                    if (quota.TryGetProperty("usage", out var usageProp) && usageProp.ValueKind == JsonValueKind.Number)
+                                                        result.Metadata[$"quota_{name}_usage"] = usageProp.GetInt32();
                                                 }
                                             }
                                         }

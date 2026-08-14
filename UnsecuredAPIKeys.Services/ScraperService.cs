@@ -740,12 +740,13 @@ public class ScraperService
         if (query.LastDeepSearchDateUTC.HasValue)
         {
             var dateCutoff = query.LastDeepSearchDateUTC.Value.AddDays(-1); // 1-day overlap for indexing lag
-            dateBoundaryFilter = $"pushed:>{dateCutoff:yyyy-MM-dd}";
+            // NOTE: GitHub Code Search does NOT support 'pushed:'. Use 'created:' instead.
+            dateBoundaryFilter = $"created:>{dateCutoff:yyyy-MM-dd}";
             
             if (isPreviousRunFullyCompleted)
             {
                 Console.WriteLine($"[yellow]Previous Deep Search was completed on {query.LastDeepSearchDateUTC.Value.ToIst():yyyy-MM-dd HH:mm:ss} IST.[/]");
-                Console.WriteLine($"[cyan]Starting new incremental Deep Search for code pushed since {dateCutoff:yyyy-MM-dd}...[/]\n");
+                Console.WriteLine($"[cyan]Starting new incremental Deep Search for code created since {dateCutoff:yyyy-MM-dd}...[/]\n");
                 
                 if (!IsWorkerMode)
                 {
@@ -919,7 +920,9 @@ public class ScraperService
             return null;
         }
         
-        string filter = $"{partitionType}:{partitionValue}";
+        // partitionValue IS the full GitHub query filter (e.g. "extension:txt", "language:python created:>2026-01-01").
+        // partitionType is only a DB label for tracking progress — do NOT prepend it to the query.
+        string filter = partitionValue;
         int startPage = progress.LastPageSearched + 1;
         
         Console.WriteLine($"[dim]→ Searching {partitionValue} ({partitionType}) from page {startPage}...[/]");
@@ -1043,13 +1046,9 @@ public class ScraperService
             {
                 if (DateTime.UtcNow < depletedTokens[cursor.Index])
                 {
-                    // Still depleted, move to next
-                    cursor.Index = (cursor.Index + 1) % tokens.Count;
-                    retryCount++;
-                    
                     if (depletedTokens.Count == tokens.Count)
                     {
-                        // ALL tokens are rate limited
+                        // ALL tokens are rate limited — wait for the soonest reset instead of busy-looping
                         var nextReset = depletedTokens.Values.Min();
                         var waitTime = nextReset - DateTime.UtcNow;
                         if (waitTime > TimeSpan.Zero)
@@ -1059,7 +1058,11 @@ public class ScraperService
                             await Task.Delay(waitTime, _cancellationTokenSource!.Token);
                             depletedTokens.Remove(depletedTokens.First(x => x.Value == nextReset).Key);
                         }
+                        // Don't increment retryCount here — we're just waiting, not failing
+                        continue;
                     }
+                    // Still depleted, move to next token (don't burn retry budget)
+                    cursor.Index = (cursor.Index + 1) % tokens.Count;
                     continue;
                 }
                 else
@@ -1104,23 +1107,25 @@ public class ScraperService
         _newKeysFound = 0;
         _duplicateKeysFound = 0;
 
-        // Build dynamic pushed:> filter based on last successful scrape checkpoint.
-        // This prevents blind spots if the scraper is down for extended periods:
-        //   - If we have a recorded successful search, start the window 1 day before it (overlap to catch indexing lag)
-        //   - If no checkpoint exists (first run), default to 7 days ago
-        // The filter is only injected on page 1 of primary (non-partitioned) searches.
-        string? pushedFilter = null;
-        if (startPage == 1 && string.IsNullOrEmpty(extraParams))
+        // Build date filter based on last successful scrape checkpoint.
+        // IMPORTANT: GitHub Code Search API does NOT support the 'pushed:' qualifier.
+        // 'pushed:' is only valid for REPOSITORY search, not code search.
+        // Code search supports 'created:' for filtering by file creation date.
+        // We only apply this filter on page 1 of primary (non-partitioned) searches
+        // to allow re-scanning recent content when we have a known checkpoint.
+        string? dateFilter = null;
+        if (startPage == 1 && string.IsNullOrEmpty(extraParams) && query.LastSuccessfulSearchUTC.HasValue)
         {
-            var windowStart = query.LastSuccessfulSearchUTC.HasValue
-                ? query.LastSuccessfulSearchUTC.Value.AddDays(-1)  // 1-day overlap for indexing lag
-                : DateTime.UtcNow.AddDays(-7);                     // first-run default: 7-day lookback
-            pushedFilter = $"pushed:>{windowStart:yyyy-MM-dd}";
+            // Apply 1-day overlap on the checkpoint to catch indexing lag
+            var windowStart = query.LastSuccessfulSearchUTC.Value.AddDays(-1);
+            dateFilter = $"created:>{windowStart:yyyy-MM-dd}";
         }
+        // NOTE: If no LastSuccessfulSearchUTC (first run), we intentionally send NO date filter
+        // so GitHub returns results sorted by Indexed date (most recent first).
 
-        // Compose the effective extra params (pushed filter takes precedence, then caller params)
-        string? effectiveParams = pushedFilter != null
-            ? (string.IsNullOrEmpty(extraParams) ? pushedFilter : $"{pushedFilter} {extraParams}")
+        // Compose the effective extra params
+        string? effectiveParams = dateFilter != null
+            ? (string.IsNullOrEmpty(extraParams) ? dateFilter : $"{dateFilter} {extraParams}")
             : extraParams;
 
         string displayQuery = query.Query + (effectiveParams != null ? $" {effectiveParams}" : "");
