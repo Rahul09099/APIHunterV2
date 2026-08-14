@@ -53,6 +53,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             @"sarvam[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
             @"shravam[._-]?api[._-]?key\s*[=:]\s*['""]?([A-Za-z0-9\-_]{16,})['""]?",
 
+            // Standalone signature for Sarvam AI keys (format: sk_{8chars}_{24chars} e.g. sk_chne7u67_KfAdxIynlGiA7By1UsIxTfFX)
+            @"\bsk_[a-z0-9]{6,12}_[A-Za-z0-9]{20,32}\b",
+
             // Sarvam Chat / API subscription keys formatted as sk_xxx
             @"\b(?:sarvam|shravam)[^a-zA-Z0-9]*['""]?(sk_[A-Za-z0-9\-_]{20,})['""]?"
         ];
@@ -88,11 +91,15 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 if (IsSuccessStatusCode(response.StatusCode))
                 {
                     var result = ValidationResult.Success(response.StatusCode, "Valid Sarvam AI key (translation verified)");
+                    result.Balance = "Active (pay-as-you-go)";
+                    result.AccountTier = "Standard / Pay-per-use";
+
                     var metadata = new Dictionary<string, object>
                     {
                         ["authentication_valid"] = true,
                         ["tested_endpoint"] = "https://api.sarvam.ai/translate",
-                        ["inference_working"] = true
+                        ["inference_working"] = true,
+                        ["supported_models"] = "sarvam-105b, sarvam-105b-conversations"
                     };
 
                     try
