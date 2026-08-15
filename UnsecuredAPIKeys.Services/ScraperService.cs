@@ -189,59 +189,59 @@ public class ScraperService
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         
-        // Fetch tokens belonging to this user or ALL tokens if admin
-        var tokenQuery = _dbContext.SearchProviderTokens
-            .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub);
-
-        // If not admin, restrict to tokens added by this user
-        // We'll assume if discoveredBy has a value, we should check their role.
-        // Better: Fetch the subscriber record to check IsAdmin.
-        var user = await _dbContext.TelegramSubscribers.FindAsync(discoveredBy);
-        if (user != null && !user.IsAdmin && discoveredBy.HasValue)
-        {
-            tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == discoveredBy.Value);
-        }
-
-        var tokens = await tokenQuery.ToListAsync(cancellationToken);
-
-        if (tokens.Count == 0)
-        {
-            _logger?.LogWarning("No enabled GitHub tokens found for user {UserId}", discoveredBy);
-            if (discoveredBy.HasValue && discoveredBy.Value != 0)
-            {
-                await SendTelegramNotificationAsync(discoveredBy.Value, 
-                    "⚠️ <b>Scraper Startup Failed</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled GitHub search tokens were found for your account.\n\n👉 Please configure at least one token using:\n<code>/add_token &lt;your_github_token&gt;</code>");
-            }
-            return;
-        }
-
-        var tokenCursor = new TokenCursor { Index = 0 };
-        
-        var allQueries = await _dbContext.SearchQueries
-            .Where(q => q.IsEnabled)
-            .OrderBy(q => q.LastSearchUTC)
-            .ToListAsync(cancellationToken);
-
-        var queriesToRun = allQueries
-            .Where(q => InferProviderFromQuery(q.Query) == selectedGroupName)
-            .ToList();
-
-        if (queriesToRun.Count == 0)
-        {
-            _logger?.LogWarning("No queries found for group: {GroupName}", selectedGroupName);
-            if (discoveredBy.HasValue && discoveredBy.Value != 0)
-            {
-                await SendTelegramNotificationAsync(discoveredBy.Value, 
-                    $"⚠️ <b>Scraper Startup Warning</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled search queries were found for target group <b>{System.Net.WebUtility.HtmlEncode(selectedGroupName)}</b>.\n\n👉 Please enable or add queries using <code>/queries</code> or <code>/add_query</code>.");
-            }
-            return;
-        }
-
-        _logger?.LogInformation("Starting {Mode} scrape for {Count} queries in group {Group}...", 
-            isDeepSearch ? "DEEP" : "LITE", queriesToRun.Count, selectedGroupName);
-
         try
         {
+            // Fetch tokens belonging to this user or ALL tokens if admin
+            var tokenQuery = _dbContext.SearchProviderTokens
+                .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub);
+
+            // If not admin, restrict to tokens added by this user
+            // We'll assume if discoveredBy has a value, we should check their role.
+            // Better: Fetch the subscriber record to check IsAdmin.
+            var user = await _dbContext.TelegramSubscribers.FindAsync(discoveredBy);
+            if (user != null && !user.IsAdmin && discoveredBy.HasValue)
+            {
+                tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == discoveredBy.Value);
+            }
+
+            var tokens = await tokenQuery.ToListAsync(_cancellationTokenSource.Token);
+
+            if (tokens.Count == 0)
+            {
+                _logger?.LogWarning("No enabled GitHub tokens found for user {UserId}", discoveredBy);
+                if (discoveredBy.HasValue && discoveredBy.Value != 0)
+                {
+                    await SendTelegramNotificationAsync(discoveredBy.Value, 
+                        "⚠️ <b>Scraper Startup Failed</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled GitHub search tokens were found for your account.\n\n👉 Please configure at least one token using:\n<code>/add_token &lt;your_github_token&gt;</code>");
+                }
+                return;
+            }
+
+            var tokenCursor = new TokenCursor { Index = 0 };
+            
+            var allQueries = await _dbContext.SearchQueries
+                .Where(q => q.IsEnabled)
+                .OrderBy(q => q.LastSearchUTC)
+                .ToListAsync(_cancellationTokenSource.Token);
+
+            var queriesToRun = allQueries
+                .Where(q => InferProviderFromQuery(q.Query) == selectedGroupName)
+                .ToList();
+
+            if (queriesToRun.Count == 0)
+            {
+                _logger?.LogWarning("No queries found for group: {GroupName}", selectedGroupName);
+                if (discoveredBy.HasValue && discoveredBy.Value != 0)
+                {
+                    await SendTelegramNotificationAsync(discoveredBy.Value, 
+                        $"⚠️ <b>Scraper Startup Warning</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled search queries were found for target group <b>{System.Net.WebUtility.HtmlEncode(selectedGroupName)}</b>.\n\n👉 Please enable or add queries using <code>/queries</code> or <code>/add_query</code>.");
+                }
+                return;
+            }
+
+            _logger?.LogInformation("Starting {Mode} scrape for {Count} queries in group {Group}...", 
+                isDeepSearch ? "DEEP" : "LITE", queriesToRun.Count, selectedGroupName);
+
             foreach (var query in queriesToRun)
             {
                 if (_cancellationTokenSource.Token.IsCancellationRequested) break;
@@ -274,6 +274,10 @@ public class ScraperService
                     await Task.Delay(LiteLimits.SEARCH_DELAY_MS, _cancellationTokenSource.Token);
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger?.LogInformation("Scraper for group {GroupName} was cancelled gracefully.", selectedGroupName);
         }
         catch (Exception ex)
         {
@@ -315,45 +319,52 @@ public class ScraperService
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         
-        var tokenQuery = _dbContext.SearchProviderTokens
-            .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub);
-
-        var user = await _dbContext.TelegramSubscribers.FindAsync(discoveredBy);
-        if (user != null && !user.IsAdmin && discoveredBy.HasValue)
+        try
         {
-            tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == discoveredBy.Value);
-        }
+            var tokenQuery = _dbContext.SearchProviderTokens
+                .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub);
 
-        var tokens = await tokenQuery.ToListAsync(cancellationToken);
-        if (tokens.Count == 0)
-        {
-            _logger?.LogWarning("No enabled GitHub tokens found for comprehensive scan for user {UserId}", discoveredBy);
-            if (discoveredBy.HasValue && discoveredBy.Value != 0)
+            var user = await _dbContext.TelegramSubscribers.FindAsync(discoveredBy);
+            if (user != null && !user.IsAdmin && discoveredBy.HasValue)
             {
-                await SendTelegramNotificationAsync(discoveredBy.Value, 
-                    "⚠️ <b>Comprehensive Scan Failed to Start</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled GitHub search tokens found for your account.\n\n👉 Please configure a token using <code>/add_token &lt;your_github_token&gt;</code>.");
+                tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == discoveredBy.Value);
             }
-            return;
-        }
 
-        var groups = await GetAvailableGroupsAsync(cancellationToken);
-        
-        _logger?.LogInformation("Starting automated scrape for {Count} groups...", groups.Count);
-        
-        foreach (var group in groups)
-        {
-            if (_cancellationTokenSource.Token.IsCancellationRequested) break;
-            
-            // For automated mode, we use Lite search by default to avoid excessive partitioning
-            await RunScrapeByGroupAsync(group, false, discoveredBy, _cancellationTokenSource.Token);
-            
-            if (group != groups.Last())
+            var tokens = await tokenQuery.ToListAsync(_cancellationTokenSource.Token);
+            if (tokens.Count == 0)
             {
-                await Task.Delay(5000, _cancellationTokenSource.Token);
+                _logger?.LogWarning("No enabled GitHub tokens found for comprehensive scan for user {UserId}", discoveredBy);
+                if (discoveredBy.HasValue && discoveredBy.Value != 0)
+                {
+                    await SendTelegramNotificationAsync(discoveredBy.Value, 
+                        "⚠️ <b>Comprehensive Scan Failed to Start</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled GitHub search tokens found for your account.\n\n👉 Please configure a token using <code>/add_token &lt;your_github_token&gt;</code>.");
+                }
+                return;
             }
+
+            var groups = await GetAvailableGroupsAsync(_cancellationTokenSource.Token);
+            
+            _logger?.LogInformation("Starting automated scrape for {Count} groups...", groups.Count);
+            
+            foreach (var group in groups)
+            {
+                if (_cancellationTokenSource.Token.IsCancellationRequested) break;
+                
+                // For automated mode, we use Lite search by default to avoid excessive partitioning
+                await RunScrapeByGroupAsync(group, false, discoveredBy, _cancellationTokenSource.Token);
+                
+                if (group != groups.Last())
+                {
+                    await Task.Delay(5000, _cancellationTokenSource.Token);
+                }
+            }
+            
+            _logger?.LogInformation("Automated scrape completed.");
         }
-        
-        _logger?.LogInformation("Automated scrape completed.");
+        catch (OperationCanceledException)
+        {
+            _logger?.LogInformation("Automated scrape was cancelled gracefully.");
+        }
     }
 
     // Default RunAsync for CLI (no discovery tagging)
@@ -1079,6 +1090,10 @@ public class ScraperService
                finalResponse = await RunScrapingCycleAsync(currentToken, query, extraParams, discoveredBy, startPage);
                querySuccess = true;
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Octokit.RateLimitExceededException ex)
             {
                 Console.WriteLine($"[yellow]Token {cursor.Index + 1} hit GitHub rate limit. Reset at {ex.Reset.LocalDateTime.ToIst():HH:mm:ss} IST.[/]");
@@ -1208,7 +1223,15 @@ public class ScraperService
 
             var processingTasks = chunk.Select(async repoRef =>
             {
-                await _parallelSemaphore.WaitAsync(_cancellationTokenSource!.Token);
+                try
+                {
+                    await _parallelSemaphore.WaitAsync(_cancellationTokenSource!.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
                 try
                 {
                     if (_cancellationTokenSource!.Token.IsCancellationRequested) return;
@@ -1220,6 +1243,10 @@ public class ScraperService
                     {
                         foreach (var discovery in found) discoveries.Add(discovery);
                     }
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
                 }
                 catch (Exception ex)
                 {
@@ -1486,6 +1513,7 @@ public class ScraperService
         try
         {
             using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(15);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("UnsecuredAPIKeys-Lite/1.1");
             client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token.Token);
@@ -1518,6 +1546,10 @@ public class ScraperService
                 return null;
 
             return await response.Content.ReadAsStringAsync(_cancellationTokenSource.Token);
+        }
+        catch (OperationCanceledException) when (_cancellationTokenSource!.Token.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {

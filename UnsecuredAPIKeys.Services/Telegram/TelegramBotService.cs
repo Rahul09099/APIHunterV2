@@ -1420,7 +1420,7 @@ public class TelegramBotService : BackgroundService
     {
         if (user == null && chatId == _adminChatId)
         {
-            await _botClient.SendMessage(chatId, "<b>💎 Premium Status:</b> <code>Super Admin (Lifetime)</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+            await _botClient.SendMessage(chatId, "<b>💎 Premium Status:</b> <code>Super Admin (Lifetime)</code>\n\n<b>📡 Ghost Node Controls:</b>\n• <code>/node_status</code> - Check live worker health\n• <code>/master_url</code> - Master connection address\n• <code>/node_token</code> - Your private access token", parseMode: ParseMode.Html, cancellationToken: ct);
             return;
         }
 
@@ -1438,6 +1438,12 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine($"<b>Expiry:</b> <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd HH:mm} UTC</code>");
         sb.AppendLine($"<b>Role:</b> {(user.IsAdmin ? "Admin" : "Subscriber")}");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        sb.AppendLine("<b>📡 Ghost Node Controls:</b>");
+        sb.AppendLine("• <code>/node_status</code> - Check live worker health");
+        sb.AppendLine("• <code>/master_url</code> - Master connection address");
+        sb.AppendLine("• <code>/node_token</code> - Your private access token");
+        sb.AppendLine("• <code>/set_deploy_hook</code> - Register one-click updates");
+        sb.AppendLine("• <code>/redeploy_node</code> - Redeploy your worker");
         
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
     }
@@ -1457,11 +1463,21 @@ public class TelegramBotService : BackgroundService
         var user = await dbContext.TelegramSubscribers.FindAsync(targetId, ct);
         if (user == null)
         {
-            user = new TelegramSubscriber { TelegramId = targetId, SubscriptionExpiryUtc = DateTime.UtcNow.AddDays(days) };
+            user = new TelegramSubscriber 
+            { 
+                TelegramId = targetId, 
+                SubscriptionExpiryUtc = DateTime.UtcNow.AddDays(days),
+                NodeToken = Guid.NewGuid().ToString("N"),
+                CreatedAtUtc = DateTime.UtcNow
+            };
             dbContext.TelegramSubscribers.Add(user);
         }
         else
         {
+            if (string.IsNullOrEmpty(user.NodeToken))
+            {
+                user.NodeToken = Guid.NewGuid().ToString("N");
+            }
             user.SubscriptionExpiryUtc = (user.SubscriptionExpiryUtc > DateTime.UtcNow ? user.SubscriptionExpiryUtc : DateTime.UtcNow).AddDays(days);
         }
 
@@ -1480,25 +1496,22 @@ public class TelegramBotService : BackgroundService
             msg.AppendLine("🎊 <b>WELCOME TO THE NETWORK!</b>");
             msg.AppendLine($"Your subscription is active until: <code>{user.SubscriptionExpiryUtc:yyyy-MM-dd}</code>");
             msg.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
-            msg.AppendLine("🚀 <b>PROPER RENDER SETUP GUIDE:</b>");
+            msg.AppendLine("🚀 <b>QUICK SETUP GUIDE (RENDER / CLOUD):</b>");
             msg.AppendLine();
-            msg.AppendLine("1️⃣ <b>Create a Web Service</b> on Render.");
-            msg.AppendLine($"2️⃣ <b>Image URL:</b> <code>{image}</code>");
-            msg.AppendLine("3️⃣ <b>Runtime:</b> Docker");
+            msg.AppendLine("1️⃣ <b>Create Web Service</b> on Render (or Railway / Koyeb / VPS).");
+            msg.AppendLine($"2️⃣ <b>Docker Image:</b> <code>{image}</code>");
             msg.AppendLine();
             msg.AppendLine("⚙️ <b>REQUIRED ENVIRONMENT VARIABLES:</b>");
             msg.AppendLine($"• <code>IS_WORKER_MODE</code> = <code>true</code>");
             msg.AppendLine($"• <code>MASTER_API_URL</code> = <code>{masterUrl}</code>");
-            msg.AppendLine($"• <code>NODE_TOKEN</code> = <code>{user.NodeToken ?? "[Click /node_token to generate]"}</code>");
+            msg.AppendLine($"• <code>NODE_TOKEN</code> = <code>{user.NodeToken}</code>");
             msg.AppendLine($"• <code>PORT</code> = <code>10000</code>");
             msg.AppendLine();
-            msg.AppendLine("🔑 <b>Access Key:</b> Click /node_token to view or generate your secure key.");
-            if (string.IsNullOrEmpty(user.NodeToken))
-            {
-                msg.AppendLine("<i>(New users: you must run the command above first to create your key!)</i>");
-            }
+            msg.AppendLine("🔄 <b>ONE-CLICK AUTO-UPDATES:</b>");
+            msg.AppendLine("Copy your Render Deploy Hook from Settings and run:");
+            msg.AppendLine("👉 <code>/set_deploy_hook &lt;your_url&gt;</code>");
             msg.AppendLine();
-            msg.AppendLine("🏁 <b>Finish:</b> Deploy and check /node_status.");
+            msg.AppendLine("🏁 <b>Finish:</b> Deploy your service and check <code>/node_status</code> in the bot.");
             msg.AppendLine();
             msg.AppendLine("<i>Need help? Check the detailed Subscriber Guide in the repository!</i>");
 
@@ -1729,8 +1742,10 @@ public class TelegramBotService : BackgroundService
             }
 
             var displayName = !string.IsNullOrEmpty(node.Username) ? $"@{node.Username} (<code>{node.TelegramId}</code>)" : $"<code>{node.TelegramId}</code>";
+            var hookStatus = !string.IsNullOrEmpty(node.DeployHook) ? "✅ Configured" : "❌ Not Set";
             sb.AppendLine($"<b>Node:</b> {displayName}");
             sb.AppendLine($"<b>Status:</b> {status}");
+            sb.AppendLine($"<b>Deploy Hook:</b> {hookStatus}");
             sb.AppendLine($"<b>Last Heartbeat:</b> {lastSeen}");
             sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         }
@@ -1764,10 +1779,9 @@ public class TelegramBotService : BackgroundService
 
         var hookUrl = args.Trim();
         if (!Uri.TryCreate(hookUrl, UriKind.Absolute, out var uriResult) ||
-            !(uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps) ||
-            !hookUrl.StartsWith("https://api.render.com/deploy/srv-"))
+            !(uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps))
         {
-            await _botClient.SendMessage(chatId, "❌ <b>Invalid URL format!</b>\n\nYour Render Deploy Hook must be a valid HTTPS URL starting with:\n<code>https://api.render.com/deploy/srv-</code>", parseMode: ParseMode.Html, cancellationToken: ct);
+            await _botClient.SendMessage(chatId, "❌ <b>Invalid URL format!</b>\n\nYour Deploy Hook must be a valid HTTP or HTTPS URL.\n\n<b>Example (Render):</b>\n<code>https://api.render.com/deploy/srv-xxxxxxxxxxxx?key=yyyyyyyyyyyy</code>\n\n<b>Example (Railway / Koyeb / Custom):</b>\n<code>https://your-platform-webhook-url</code>", parseMode: ParseMode.Html, cancellationToken: ct);
             return;
         }
 
@@ -1775,7 +1789,7 @@ public class TelegramBotService : BackgroundService
         await dbContext.SaveChangesAsync(ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine("✅ <b>Render Deploy Hook Saved Successfully!</b>");
+        sb.AppendLine("✅ <b>Deploy Hook Saved Successfully!</b>");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         sb.AppendLine("Your private node is now integrated with the bot's automated deployment engine.");
         sb.AppendLine();
@@ -1947,6 +1961,7 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine($"<b>Total Found:</b> <code>{stats.TotalKeys}</code>");
         sb.AppendLine($"<b>Valid Keys:</b> <code>{stats.ValidKeys}</code>");
         sb.AppendLine($"<b>Active Tokens:</b> <code>{stats.GitHubTokensCount}</code>");
+        sb.AppendLine($"<b>Deploy Hook:</b> {(!string.IsNullOrEmpty(targetUser.DeployHook) ? "✅ Configured" : "❌ Not Set")}");
         sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         sb.AppendLine("<i>[Admin Mode] Remote actions operate silently.</i>");
 
