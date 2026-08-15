@@ -841,6 +841,61 @@ public class DatabaseService(DBContext dbContext)
         return 0L;
     }
 
+    public (string ProviderName, double StorageLimitMb) GetDatabaseProviderInfo()
+    {
+        // 1. Check for manual environment override
+        if (double.TryParse(Environment.GetEnvironmentVariable("DATABASE_STORAGE_LIMIT_MB"), out double manualLimit) && manualLimit > 0)
+        {
+            var provider = GetDetectedProviderName();
+            return (provider, manualLimit);
+        }
+
+        var connStr = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING") ?? "";
+        if (string.IsNullOrEmpty(connStr))
+        {
+            return ("SQLite", 1024.0); // 1 GB local default
+        }
+
+        var lowerConn = connStr.ToLowerInvariant();
+        if (lowerConn.Contains("aivencloud.com") || lowerConn.Contains("aiven"))
+        {
+            // Aiven plan default is 1024 MB (1 GB) for initial free plan or 5120 MB (5 GB)
+            return ("Aiven", 1024.0);
+        }
+        if (lowerConn.Contains("supabase.co") || lowerConn.Contains("supabase.com"))
+        {
+            return ("Supabase", 500.0); // 500 MB Supabase Free Tier
+        }
+        if (lowerConn.Contains("cockroachlabs.cloud") || lowerConn.Contains("cockroach"))
+        {
+            return ("CockroachDB", 10240.0); // 10 GB Cockroach Serverless
+        }
+        if (lowerConn.Contains("neon.tech"))
+        {
+            return ("Neon", 500.0); // 500 MB Neon Free
+        }
+        if (lowerConn.Contains("railway.app") || lowerConn.Contains("railway.internal"))
+        {
+            return ("Railway", 5120.0); // 5 GB Railway
+        }
+
+        return ("PostgreSQL", 5120.0); // Generic Postgres Default 5 GB
+    }
+
+    private string GetDetectedProviderName()
+    {
+        var connStr = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING") ?? "";
+        if (string.IsNullOrEmpty(connStr)) return "SQLite";
+        
+        var lowerConn = connStr.ToLowerInvariant();
+        if (lowerConn.Contains("aivencloud.com") || lowerConn.Contains("aiven")) return "Aiven";
+        if (lowerConn.Contains("supabase.co") || lowerConn.Contains("supabase.com")) return "Supabase";
+        if (lowerConn.Contains("cockroachlabs.cloud") || lowerConn.Contains("cockroach")) return "CockroachDB";
+        if (lowerConn.Contains("neon.tech")) return "Neon";
+        if (lowerConn.Contains("railway.app") || lowerConn.Contains("railway.internal")) return "Railway";
+        return "PostgreSQL";
+    }
+
     public async Task<int> PurgeJunkSourcesAsync(DBContext context)
     {
         try

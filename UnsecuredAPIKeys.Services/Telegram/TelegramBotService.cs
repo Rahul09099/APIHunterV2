@@ -769,14 +769,15 @@ public class TelegramBotService : BackgroundService
         
         // 1. Database Health Section (Top)
         sb.AppendLine();
-        sb.AppendLine("<b>💾 DATABASE HEALTH (Supabase)</b>");
+        var (providerName, dbLimitMb) = dbService.GetDatabaseProviderInfo();
+        sb.AppendLine($"<b>💾 DATABASE HEALTH ({providerName})</b>");
         double dbSizeMb = stats.DatabaseSizeBytes / (1024.0 * 1024.0);
-        const double dbLimitMb = 500.0; // Supabase Free Tier Limit
         double dbUsagePercent = Math.Min(dbSizeMb / dbLimitMb, 1.0);
         
-        string dbSizeStr = dbSizeMb > 1024 ? $"{(dbSizeMb / 1024.0):F2} GB" : $"{dbSizeMb:F2} MB";
+        string dbSizeStr = dbSizeMb >= 1024 ? $"{(dbSizeMb / 1024.0):F2} GB" : $"{dbSizeMb:F2} MB";
+        string limitStr = dbLimitMb >= 1024 ? $"{(dbLimitMb / 1024.0):F1} GB" : $"{dbLimitMb:F0} MB";
         sb.AppendLine($"<b>Storage:</b> {GetProgressBar(dbUsagePercent)} {dbUsagePercent:P1}");
-        sb.AppendLine($"<b>Used:</b> <code>{dbSizeStr} / {dbLimitMb} MB</code>");
+        sb.AppendLine($"<b>Used:</b> <code>{dbSizeStr} / {limitStr}</code>");
         sb.AppendLine();
 
         // 2. Key Statistics (Bottom)
