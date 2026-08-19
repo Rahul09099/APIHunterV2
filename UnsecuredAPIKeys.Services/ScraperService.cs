@@ -1329,7 +1329,9 @@ public class ScraperService
 
                 foreach (System.Text.RegularExpressions.Match match in matches)
                 {
-                    var apiKey = match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
+                    var apiKey = (provider.ApiType == ApiTypeEnum.ServerCredential || match.Groups.Count <= 1)
+                        ? match.Value
+                        : match.Groups[1].Value;
 
                         // Special handling for Kling AI (Access Key + Secret Key pairing)
                         if (provider.ApiType == ApiTypeEnum.KlingAI && !apiKey.Contains(':'))

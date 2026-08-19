@@ -101,6 +101,10 @@ else
 
 var app = builder.Build();
 
+// Health check endpoints placed at top of pipeline for immediate <1ms responses to Render health probes
+app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }));
+app.MapGet("/api/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }));
+
 // Auto-create SQLite database directory and schema if Npgsql connection string is not present
 using (var scope = app.Services.CreateScope())
 {
@@ -134,7 +138,5 @@ app.UseStaticFiles();
 
 app.UseAuthorization();
 app.MapControllers();
-app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }));
-app.MapGet("/api/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }));
 
 app.Run();

@@ -80,28 +80,40 @@ public class TelegramBotService : BackgroundService
             cancellationToken: stoppingToken
         );
 
-        // Set bot commands menu
-        await _botClient.SetMyCommands(new[]
+        // Set bot commands and send startup notification in background without blocking server startup
+        _ = Task.Run(async () =>
         {
-            new BotCommand { Command = "status", Description = "Mission Control" },
-            new BotCommand { Command = "dashboard", Description = "Open Visual Dashboard" },
-            new BotCommand { Command = "stats", Description = "Statistics" },
-            new BotCommand { Command = "start_scraper", Description = "Start Scraper" },
-            new BotCommand { Command = "start_verifier", Description = "Start Verifier" },
-            new BotCommand { Command = "valid_keys", Description = "Valid Keys" },
-            new BotCommand { Command = "export", Description = "Export Data" },
-            new BotCommand { Command = "help", Description = "Show Commands" }
-        }, cancellationToken: stoppingToken);
+            try
+            {
+                await _botClient.SetMyCommands(new[]
+                {
+                    new BotCommand { Command = "status", Description = "Mission Control" },
+                    new BotCommand { Command = "dashboard", Description = "Open Visual Dashboard" },
+                    new BotCommand { Command = "stats", Description = "Statistics" },
+                    new BotCommand { Command = "start_scraper", Description = "Start Scraper" },
+                    new BotCommand { Command = "start_verifier", Description = "Start Verifier" },
+                    new BotCommand { Command = "valid_keys", Description = "Valid Keys" },
+                    new BotCommand { Command = "export", Description = "Export Data" },
+                    new BotCommand { Command = "help", Description = "Show Commands" }
+                }, cancellationToken: stoppingToken);
 
-        // Notify admin that bot is online
-        if (_adminChatId != 0)
-        {
-            await _botClient.SendMessage(
-                chatId: _adminChatId,
-                text: "<b>💎 APIHunterV2 Dashboard Online</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n<i>Satellite connection established.</i>",
-                parseMode: ParseMode.Html,
-                cancellationToken: stoppingToken);
-        }
+                if (_adminChatId != 0)
+                {
+                    await _botClient.SendMessage(
+                        chatId: _adminChatId,
+                        text: "<b>💎 APIHunterV2 Dashboard Online</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n<i>Satellite connection established.</i>",
+                        parseMode: ParseMode.Html,
+                        cancellationToken: stoppingToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Bot startup command registration warning: {Msg}", ex.Message);
+            }
+        }, stoppingToken);
+
+        // Wait 2 minutes after startup before first anti-sleep ping cycle to allow WebAPI to warm up and respond to health checks
+        await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken);
 
         // Anti-Sleep Loop (for Render Free Tier)
         while (!stoppingToken.IsCancellationRequested)
