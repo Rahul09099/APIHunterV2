@@ -239,30 +239,32 @@ public class VerifierService(
             .StartAsync(async ctx =>
             {
                 var task = ctx.AddTask("[green]Re-verifying keys[/]", maxValue: keysToReVerify.Count);
-                // Reduced from 10 to 3 — Render free tier (0.1 CPU) starves with 10 concurrent HTTP calls
-                var semaphore = new SemaphoreSlim(3);
 
-                var parallelTasks = keysToReVerify.Select(async key =>
+                await Parallel.ForEachAsync(keysToReVerify, new ParallelOptions
                 {
-                    await semaphore.WaitAsync(_cancellationTokenSource.Token);
+                    MaxDegreeOfParallelism = 3,
+                    CancellationToken = _cancellationTokenSource.Token
+                }, async (key, ct) =>
+                {
                     try
                     {
-                        await using var localDb = await dbContextFactory.CreateDbContextAsync(_cancellationTokenSource.Token);
-                        var localKey = await localDb.APIKeys.FindAsync(key.Id, _cancellationTokenSource.Token);
+                        await using var localDb = await dbContextFactory.CreateDbContextAsync(ct);
+                        var localKey = await localDb.APIKeys.FindAsync(new object[] { key.Id }, ct);
                         if (localKey != null)
                         {
                             await VerifyKeyAsync(localDb, localKey);
-                            await localDb.SaveChangesAsync(_cancellationTokenSource.Token);
+                            await localDb.SaveChangesAsync(ct);
                         }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        logger?.LogWarning(ex, "Failed to re-verify key {KeyId}", key.Id);
                     }
                     finally
                     {
-                        semaphore.Release();
                         task.Increment(1);
                     }
                 });
-
-                await Task.WhenAll(parallelTasks);
             });
     }
 
@@ -300,9 +302,11 @@ public class VerifierService(
             }
         }
 
+        // Bounded batch fetch: Process at most LiteLimits.VERIFICATION_BATCH_SIZE keys per cycle to prevent OOM
+        var batchSize = Math.Min(neededCount * 2, LiteLimits.VERIFICATION_BATCH_SIZE);
         var keysToVerify = await query
             .OrderBy(k => k.FirstFoundUTC)
-            .Take(Math.Max(neededCount * 2, LiteLimits.VERIFICATION_BATCH_SIZE))
+            .Take(batchSize)
             .ToListAsync(_cancellationTokenSource!.Token);
 
         if (keysToVerify.Count == 0)
@@ -321,35 +325,37 @@ public class VerifierService(
             .StartAsync(async ctx =>
             {
                 var task = ctx.AddTask("[green]Verifying new keys[/]", maxValue: keysToVerify.Count);
-                // Reduced from 10 to 3 — prevents thread pool starvation on Render free tier
-                var semaphore = new SemaphoreSlim(3);
                 var validFound = 0;
 
-                var parallelTasks = keysToVerify.Select(async key =>
+                await Parallel.ForEachAsync(keysToVerify, new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = 3,
+                    CancellationToken = _cancellationTokenSource.Token
+                }, async (key, ct) =>
                 {
                     if (Volatile.Read(ref validFound) >= neededCount) return;
-                    
-                    await semaphore.WaitAsync(_cancellationTokenSource.Token);
+
                     try
                     {
                         // Use a factory-created context per key for concurrency safety
-                        await using var localDb = await dbContextFactory.CreateDbContextAsync(_cancellationTokenSource.Token);
-                        var localKey = await localDb.APIKeys.FindAsync(key.Id, _cancellationTokenSource.Token);
+                        await using var localDb = await dbContextFactory.CreateDbContextAsync(ct);
+                        var localKey = await localDb.APIKeys.FindAsync(new object[] { key.Id }, ct);
                         if (localKey != null)
                         {
                             var wasValid = await VerifyKeyAsync(localDb, localKey);
                             if (wasValid) Interlocked.Increment(ref validFound);
-                            await localDb.SaveChangesAsync(_cancellationTokenSource.Token);
+                            await localDb.SaveChangesAsync(ct);
                         }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        logger?.LogWarning(ex, "Failed to verify key {KeyId}", key.Id);
                     }
                     finally
                     {
-                        semaphore.Release();
                         task.Increment(1);
                     }
                 });
-
-                await Task.WhenAll(parallelTasks);
             });
     }
 

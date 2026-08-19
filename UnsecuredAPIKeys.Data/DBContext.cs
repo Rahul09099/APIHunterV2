@@ -88,12 +88,12 @@ namespace UnsecuredAPIKeys.Data
                 var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
                 var database = uri.AbsolutePath.TrimStart('/');
                 var port = uri.Port == -1 ? 5432 : uri.Port;
-                var connStr = $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true;Timeout=15;Command Timeout=30;";
+                var connStr = $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true;Timeout=15;Command Timeout=30;Maximum Pool Size=10;";
                 
-                // If using the pooler (6543 or pooler.supabase.com), disable prepared statements to prevent PgBouncer conflicts
+                // If using transaction pooler (6543) or Supabase pooler, disable auto prepare for PgBouncer compatibility while keeping connection pooling
                 if (port == 6543 || uri.Host.Contains("pooler.supabase.com"))
                 {
-                    connStr += "Max Auto Prepare=0;Pooling=false;";
+                    connStr += "Max Auto Prepare=0;";
                 }
                 
                 return connStr;
