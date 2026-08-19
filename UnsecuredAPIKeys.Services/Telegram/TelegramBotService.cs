@@ -1362,12 +1362,14 @@ public class TelegramBotService : BackgroundService
         long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
         await dbService.ExportKeysAsync(dbContext, filePath, fmt, status, filterBy);
 
-        using var stream = System.IO.File.OpenRead(filePath);
-        await _botClient.SendDocument(
-            chatId: chatId,
-            document: InputFile.FromStream(stream, fileName),
-            caption: $"📂 Exported {statusLabel} keys in {fmt.ToUpper()} format.",
-            cancellationToken: ct);
+        using (var stream = System.IO.File.OpenRead(filePath))
+        {
+            await _botClient.SendDocument(
+                chatId: chatId,
+                document: InputFile.FromStream(stream, fileName),
+                caption: $"📂 Exported {statusLabel} keys in {fmt.ToUpper()} format.",
+                cancellationToken: ct);
+        }
 
         try { System.IO.File.Delete(filePath); } catch { }
     }
@@ -1390,12 +1392,14 @@ public class TelegramBotService : BackgroundService
 
         await dbService.ExportServerCredentialsAsync(dbContext, filePath, fmt);
 
-        using var stream = System.IO.File.OpenRead(filePath);
-        await _botClient.SendDocument(
-            chatId: chatId,
-            document: InputFile.FromStream(stream, fileName),
-            caption: $"📂 Exported server credentials in {fmt.ToUpper()} format.",
-            cancellationToken: ct);
+        using (var stream = System.IO.File.OpenRead(filePath))
+        {
+            await _botClient.SendDocument(
+                chatId: chatId,
+                document: InputFile.FromStream(stream, fileName),
+                caption: $"📂 Exported server credentials in {fmt.ToUpper()} format.",
+                cancellationToken: ct);
+        }
 
         try { System.IO.File.Delete(filePath); } catch { }
     }

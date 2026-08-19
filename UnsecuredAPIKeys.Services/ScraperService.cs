@@ -24,7 +24,7 @@ public class ScraperService
     private readonly ILogger<ScraperService>? _logger;
     private readonly IReadOnlyList<IApiKeyProvider> _providers;
     private CancellationTokenSource? _cancellationTokenSource;
-    private readonly SemaphoreSlim _parallelSemaphore = new(8); // Limit concurrency for Render Free Tier (512MB RAM)
+    private readonly SemaphoreSlim _parallelSemaphore = new(4); // Limit concurrency for Render Free Tier (512MB RAM)
 
     // Pre-compiled regex patterns for performance (compiled once at startup, not per-file)
     private readonly IReadOnlyList<(IApiKeyProvider Provider, System.Text.RegularExpressions.Regex Regex)> _compiledPatterns;
@@ -1512,6 +1512,7 @@ public class ScraperService
     {
         try
         {
+            var ct = _cancellationTokenSource?.Token ?? CancellationToken.None;
             using var client = _httpClientFactory.CreateClient();
             client.Timeout = TimeSpan.FromSeconds(15);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("UnsecuredAPIKeys-Lite/1.1");
@@ -1533,21 +1534,35 @@ public class ScraperService
             if (string.IsNullOrEmpty(url))
                 return null;
 
-            var response = await client.GetAsync(url, _cancellationTokenSource!.Token);
+            var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
 
             // Try 'master' if 'main' fails
             if (!response.IsSuccessStatusCode && repoRef.Branch == null)
             {
                 url = $"https://raw.githubusercontent.com/{repoRef.RepoOwner}/{repoRef.RepoName}/master/{repoRef.FilePath}";
-                response = await client.GetAsync(url, _cancellationTokenSource!.Token);
+                response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
             }
 
             if (!response.IsSuccessStatusCode)
                 return null;
 
-            return await response.Content.ReadAsStringAsync(_cancellationTokenSource.Token);
+            // Skip excessively large files (e.g. > 1MB) to prevent LOH memory fragmentation on Render Free Tier
+            if (response.Content.Headers.ContentLength.HasValue && response.Content.Headers.ContentLength.Value > 1024 * 1024)
+            {
+                _logger?.LogDebug("Skipping large file {Path} ({Size} bytes)", repoRef.FilePath, response.Content.Headers.ContentLength.Value);
+                return null;
+            }
+
+            // Stream and limit reading to max 512KB
+            const int maxBytes = 512 * 1024;
+            using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var reader = new StreamReader(stream, System.Text.Encoding.UTF8, true, 4096, leaveOpen: false);
+            var charBuffer = new char[maxBytes / 2];
+            int charsRead = await reader.ReadAsync(charBuffer, 0, charBuffer.Length);
+            if (charsRead <= 0) return null;
+            return new string(charBuffer, 0, charsRead);
         }
-        catch (OperationCanceledException) when (_cancellationTokenSource!.Token.IsCancellationRequested)
+        catch (OperationCanceledException) when (_cancellationTokenSource?.Token.IsCancellationRequested == true)
         {
             throw;
         }

@@ -12,6 +12,11 @@ Environment.SetEnvironmentVariable("ASPNETCORE_URLS", $"http://0.0.0.0:{renderPo
 Environment.SetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE", "false");
 Environment.SetEnvironmentVariable("DOTNET_USE_POLLING_FILE_WATCHER", "true");
 
+// Configure .NET GC for memory conservation on Render Free Tier (512MB RAM)
+Environment.SetEnvironmentVariable("DOTNET_gcServer", "0");
+Environment.SetEnvironmentVariable("DOTNET_GCConserveMemory", "5");
+Environment.SetEnvironmentVariable("DOTNET_GCHeapHardLimitPercent", "75");
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Explicitly configure Kestrel to listen on 0.0.0.0 for Render's port detection scanner

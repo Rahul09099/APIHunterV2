@@ -1038,7 +1038,7 @@ public class DatabaseService(DBContext dbContext)
 
     public async Task ExportKeysAsync(DBContext dbContext, string filePath, string format, ApiStatusEnum? statusFilter = null, long? filterByTelegramId = null)
     {
-        var query = dbContext.APIKeys.AsQueryable();
+        var query = dbContext.APIKeys.AsNoTracking();
 
         if (filterByTelegramId.HasValue)
         {
@@ -1201,7 +1201,7 @@ public class DatabaseService(DBContext dbContext)
 
     public async Task ExportServerCredentialsAsync(DBContext dbContext, string filePath, string format, string? typeFilter = null, string? riskFilter = null, string? authStatusFilter = null)
     {
-        var query = dbContext.ServerCredentials.AsQueryable();
+        var query = dbContext.ServerCredentials.AsNoTracking();
 
         if (!string.IsNullOrEmpty(typeFilter) && typeFilter != "All")
         {

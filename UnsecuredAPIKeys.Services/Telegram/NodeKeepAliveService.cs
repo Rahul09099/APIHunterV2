@@ -49,16 +49,19 @@ public class NodeKeepAliveService : BackgroundService
                 {
                     _logger.LogInformation("Sending keep-alive pings to {Count} active nodes...", nodesToPing.Count);
                     using var client = _httpClientFactory.CreateClient();
+                    client.Timeout = TimeSpan.FromSeconds(10);
                     
                     foreach (var node in nodesToPing)
                     {
+                        if (stoppingToken.IsCancellationRequested) break;
                         try 
                         {
                             var url = node.NodeUrl!.TrimEnd('/') + "/health";
                             _logger.LogDebug("Pinging node: {Url}", url);
                             
-                            // Fire and forget (optional: await with timeout)
-                            _ = client.GetAsync(url, stoppingToken);
+                            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+                            await client.GetAsync(url, timeoutCts.Token);
                         }
                         catch (Exception ex)
                         {

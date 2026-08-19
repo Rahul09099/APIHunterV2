@@ -125,7 +125,7 @@ public class StatusController : ControllerBase
         var access = await GetAccess(nodeToken, accessToken);
         if (access is null) return Unauthorized("Valid access code session required");
 
-        var query = _dbContext.APIKeys.AsQueryable();
+        var query = _dbContext.APIKeys.AsNoTracking();
 
         // Telegram subscribers retain their own-result filter. Dashboard users see
         // aggregate records but normal sessions receive a masked key value below.

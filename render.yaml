@@ -23,5 +23,11 @@ services:
         sync: false
       - key: PORT
         value: 10000
+      - key: DOTNET_gcServer
+        value: "0"
+      - key: DOTNET_GCConserveMemory
+        value: "5"
+      - key: DOTNET_GCHeapHardLimitPercent
+        value: "75"
 
 # Databases section removed as we are using Supabase (External PostgreSQL)

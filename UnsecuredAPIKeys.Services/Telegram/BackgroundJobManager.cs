@@ -9,6 +9,8 @@ public class BackgroundJobManager
 
     public string StartJob(string jobType, Func<CancellationToken, Task> jobTask, long? ownerTelegramId = null)
     {
+        PruneJobHistory();
+
         var jobId = Guid.NewGuid().ToString();
         var cts = new CancellationTokenSource();
         
@@ -46,7 +48,10 @@ public class BackgroundJobManager
             }
             finally
             {
-                _cancellationTokens.TryRemove(jobId, out _);
+                if (_cancellationTokens.TryRemove(jobId, out var removedCts))
+                {
+                    try { removedCts.Dispose(); } catch { }
+                }
             }
         }, cts.Token);
 
@@ -57,7 +62,11 @@ public class BackgroundJobManager
     {
         if (_cancellationTokens.TryGetValue(jobId, out var cts))
         {
-            cts.Cancel();
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException) { }
             return true;
         }
         return false;
@@ -87,6 +96,41 @@ public class BackgroundJobManager
         {
             _jobs.TryRemove(jobId, out _);
         }
+    }
+
+    private void PruneJobHistory()
+    {
+        try
+        {
+            var cutoff = DateTime.UtcNow.AddHours(-1);
+            var finishedJobs = _jobs.Where(kvp =>
+                (kvp.Value.Status == "Completed" || kvp.Value.Status == "Failed" || kvp.Value.Status == "Cancelled") &&
+                (kvp.Value.CompletedAt == null || kvp.Value.CompletedAt < cutoff))
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var id in finishedJobs)
+            {
+                _jobs.TryRemove(id, out _);
+            }
+
+            // Keep at most 50 total jobs
+            if (_jobs.Count > 50)
+            {
+                var overflow = _jobs.Values
+                    .Where(j => j.Status != "Running")
+                    .OrderBy(j => j.StartedAt)
+                    .Take(_jobs.Count - 50)
+                    .Select(j => j.JobId)
+                    .ToList();
+
+                foreach (var id in overflow)
+                {
+                    _jobs.TryRemove(id, out _);
+                }
+            }
+        }
+        catch { }
     }
 }
 

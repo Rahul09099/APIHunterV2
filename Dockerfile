@@ -23,6 +23,9 @@ RUN mkdir -p /app/data
 ENV DATABASE_PATH=/app/data/unsecuredapikeys.db
 ENV DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false
 ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+ENV DOTNET_gcServer=0
+ENV DOTNET_GCConserveMemory=5
+ENV DOTNET_GCHeapHardLimitPercent=75
 
 # Expose port (Render assigns this dynamically)
 EXPOSE $PORT
