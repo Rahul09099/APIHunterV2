@@ -900,29 +900,66 @@ public class DatabaseService(DBContext dbContext)
     {
         try
         {
-            Console.WriteLine("[DB] Purging invalid API keys and junk references...");
+            Console.WriteLine("[DB] Purging junk repo references for invalid API keys...");
 
-            // 1. Delete all RepoReferences associated with invalid keys
+            // 1. Delete all RepoReferences associated with invalid keys (reclaims 90%+ disk space)
             int deletedRefs = await context.RepoReferences
                 .Where(r => context.APIKeys
                     .Any(k => k.Id == r.APIKeyId && k.Status == ApiStatusEnum.Invalid))
                 .ExecuteDeleteAsync();
 
-            // 2. Delete all APIKeys with Status = Invalid (0)
-            int deletedKeys = await context.APIKeys
-                .Where(k => k.Status == ApiStatusEnum.Invalid)
-                .ExecuteDeleteAsync();
+            // 2. Strip heavy text payloads from invalid keys, keeping the slim row for deduplication
+            await context.APIKeys
+                .Where(k => k.Status == ApiStatusEnum.Invalid && (k.ValidationResponse != null || k.Metadata != null))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(k => k.ValidationResponse, (string?)null)
+                    .SetProperty(k => k.Metadata, (string?)null)
+                    .SetProperty(k => k.Balance, (string?)null)
+                    .SetProperty(k => k.AccountTier, (string?)null)
+                    .SetProperty(k => k.AwsAttachedPolicies, (string?)null));
 
-            if (deletedKeys > 0 || deletedRefs > 0)
-                Console.WriteLine($"[DB] Purged {deletedKeys} invalid API key(s) and {deletedRefs} junk repo reference(s).");
+            if (deletedRefs > 0)
+                Console.WriteLine($"[DB] Purged {deletedRefs} junk repo reference(s). Invalid keys retained as tombstones for deduplication.");
             else
-                Console.WriteLine("[DB] No invalid keys or junk references found.");
+                Console.WriteLine("[DB] No junk repo references found.");
 
-            return deletedKeys + deletedRefs;
+            return deletedRefs;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[DB] Error during purge: {ex.Message}");
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Purges very old dead key tombstones (older than N days, default 90) to ensure bounded storage growth.
+    /// </summary>
+    public async Task<int> PurgeOldInvalidKeysAsync(DBContext context, int olderThanDays = 90)
+    {
+        try
+        {
+            var cutoff = DateTime.UtcNow.AddDays(-olderThanDays);
+            
+            // Delete references first
+            await context.RepoReferences
+                .Where(r => context.APIKeys
+                    .Any(k => k.Id == r.APIKeyId && k.Status == ApiStatusEnum.Invalid && (k.LastCheckedUTC == null || k.LastCheckedUTC < cutoff)))
+                .ExecuteDeleteAsync();
+
+            // Delete stale tombstone keys
+            int deleted = await context.APIKeys
+                .Where(k => k.Status == ApiStatusEnum.Invalid && (k.LastCheckedUTC == null || k.LastCheckedUTC < cutoff))
+                .ExecuteDeleteAsync();
+
+            if (deleted > 0)
+                Console.WriteLine($"[DB] Cleaned up {deleted} stale invalid key tombstones older than {olderThanDays} days.");
+
+            return deleted;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DB] Error cleaning up stale tombstones: {ex.Message}");
             return 0;
         }
     }

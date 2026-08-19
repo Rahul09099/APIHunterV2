@@ -582,19 +582,27 @@ public class VerifierService(
     {
         try
         {
-            // Delete associated repo references
+            // 1. Delete associated repo references to reclaim 90%+ disk space
             await localDb.RepoReferences
                 .Where(r => r.APIKeyId == key.Id)
                 .ExecuteDeleteAsync();
 
-            // Mark key entity for deletion in DbContext tracking
-            localDb.APIKeys.Remove(key);
-            Console.WriteLine($"[dim][DB] Marked invalid APIKey #{key.Id} for deletion[/]");
+            // 2. Strip large text fields to leave only a lightweight ~60 byte tombstone
+            key.ValidationResponse = null;
+            key.Metadata = null;
+            key.Balance = null;
+            key.AccountTier = null;
+            key.AwsAttachedPolicies = null;
+            key.Status = ApiStatusEnum.Invalid;
+            key.LastCheckedUTC = DateTime.UtcNow;
+
+            // Keep the key row in APIKeys table so Scraper deduplication skips it!
+            Console.WriteLine($"[dim][DB] Purged repo references for invalid APIKey #{key.Id} (retained for deduplication)[/]");
         }
         catch (Exception ex)
         {
-            // Fail silently — deletion is an optimization, not critical
-            logger?.LogWarning(ex, "Failed to purge invalid key record {KeyId}", key.Id);
+            // Fail silently — reference cleanup is an optimization, not critical
+            logger?.LogWarning(ex, "Failed to purge key references for {KeyId}", key.Id);
         }
     }
 
