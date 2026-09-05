@@ -6,7 +6,8 @@ namespace UnsecuredAPIKeys.Data.Common
     public enum SearchProviderEnum
     {
         Unknown = -99,
-        GitHub = 1
+        GitHub = 1,
+        GitLab = 2
     }
 
     /// <summary>

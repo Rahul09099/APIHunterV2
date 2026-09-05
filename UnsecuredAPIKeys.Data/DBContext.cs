@@ -57,7 +57,12 @@ namespace UnsecuredAPIKeys.Data
                 var connectionString = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING");
                 if (!string.IsNullOrEmpty(connectionString))
                 {
-                    optionsBuilder.UseNpgsql(ConvertPostgresUrl(connectionString));
+                    optionsBuilder.UseNpgsql(
+                        ConvertPostgresUrl(connectionString),
+                        npgsqlOptions => npgsqlOptions.EnableRetryOnFailure(
+                            maxRetryCount: 5,
+                            maxRetryDelay: TimeSpan.FromSeconds(10),
+                            errorCodesToAdd: null));
                 }
                 else
                 {
@@ -88,12 +93,12 @@ namespace UnsecuredAPIKeys.Data
                 var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
                 var database = uri.AbsolutePath.TrimStart('/');
                 var port = uri.Port == -1 ? 5432 : uri.Port;
-                var connStr = $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true;Timeout=15;Command Timeout=30;Maximum Pool Size=10;";
+                var connStr = $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true;Timeout=30;Command Timeout=60;Keepalive=30;Maximum Pool Size=10;";
                 
-                // If using transaction pooler (6543) or Supabase pooler, disable auto prepare for PgBouncer compatibility while keeping connection pooling
+                // If using transaction pooler (6543) or Supabase pooler, disable auto prepare and prevent DISCARD ALL on close for PgBouncer compatibility
                 if (port == 6543 || uri.Host.Contains("pooler.supabase.com"))
                 {
-                    connStr += "Max Auto Prepare=0;";
+                    connStr += "Max Auto Prepare=0;No Reset On Close=true;";
                 }
                 
                 return connStr;

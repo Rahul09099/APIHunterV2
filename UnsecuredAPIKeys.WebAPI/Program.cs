@@ -57,10 +57,21 @@ if (!string.IsNullOrEmpty(connectionString))
     Console.WriteLine("🗄️ Database: Using PostgreSQL");
     Console.WriteLine($"🗄️ Connection: {maskedConnectionString}");
 
+    const int maxRetryCount = 5;
+    var maxRetryDelay = TimeSpan.FromSeconds(10);
+
     builder.Services.AddDbContext<DBContext>(options =>
-        options.UseNpgsql(parsedConnectionString));
+        options.UseNpgsql(parsedConnectionString, npgsqlOptions =>
+            npgsqlOptions.EnableRetryOnFailure(
+                maxRetryCount: maxRetryCount,
+                maxRetryDelay: maxRetryDelay,
+                errorCodesToAdd: null)));
     builder.Services.AddDbContextFactory<DBContext>(options =>
-        options.UseNpgsql(parsedConnectionString), ServiceLifetime.Scoped);
+        options.UseNpgsql(parsedConnectionString, npgsqlOptions =>
+            npgsqlOptions.EnableRetryOnFailure(
+                maxRetryCount: maxRetryCount,
+                maxRetryDelay: maxRetryDelay,
+                errorCodesToAdd: null)), ServiceLifetime.Scoped);
 }
 else
 {

@@ -31,7 +31,8 @@ public class ScraperService
 
     private int _newKeysFound;
     private int _duplicateKeysFound;
-    private readonly ISearchProvider _searchProvider;
+    private readonly GitHubSearchProvider _gitHubSearchProvider;
+    private readonly GitLabSearchProvider _gitLabSearchProvider;
 
     // Worker Mode Properties
     public bool IsWorkerMode { get; set; } = false;
@@ -144,7 +145,8 @@ public class ScraperService
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _providers = ApiProviderRegistry.ScraperProviders;
-        _searchProvider = new GitHubSearchProvider();
+        _gitHubSearchProvider = new GitHubSearchProvider();
+        _gitLabSearchProvider = new GitLabSearchProvider(httpClientFactory.CreateClient());
 
         // Pre-compile all regex patterns once at startup for performance
         var compiled = new List<(IApiKeyProvider, System.Text.RegularExpressions.Regex)>();
@@ -166,6 +168,15 @@ public class ScraperService
             }
         }
         _compiledPatterns = compiled;
+    }
+
+    private ISearchProvider GetSearchProvider(SearchProviderEnum providerEnum)
+    {
+        return providerEnum switch
+        {
+            SearchProviderEnum.GitLab => _gitLabSearchProvider,
+            _ => _gitHubSearchProvider
+        };
     }
 
     public async Task<List<string>> GetAvailableGroupsAsync(CancellationToken cancellationToken = default)
@@ -193,7 +204,7 @@ public class ScraperService
         {
             // Fetch tokens belonging to this user or ALL tokens if admin
             var tokenQuery = _dbContext.SearchProviderTokens
-                .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub);
+                .Where(t => t.IsEnabled && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab));
 
             // If not admin, restrict to tokens added by this user
             // We'll assume if discoveredBy has a value, we should check their role.
@@ -208,16 +219,19 @@ public class ScraperService
 
             if (tokens.Count == 0)
             {
-                _logger?.LogWarning("No enabled GitHub tokens found for user {UserId}", discoveredBy);
+                _logger?.LogWarning("No enabled search tokens found for user {UserId}", discoveredBy);
                 if (discoveredBy.HasValue && discoveredBy.Value != 0)
                 {
                     await SendTelegramNotificationAsync(discoveredBy.Value, 
-                        "⚠️ <b>Scraper Startup Failed</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled GitHub search tokens were found for your account.\n\n👉 Please configure at least one token using:\n<code>/add_token &lt;your_github_token&gt;</code>");
+                        "⚠️ <b>Scraper Startup Failed</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled search tokens (GitHub / GitLab) were found for your account.\n\n👉 Please configure at least one token using:\n<code>/add_token &lt;your_token&gt;</code>");
                 }
                 return;
             }
 
-            var tokenCursor = new TokenCursor { Index = 0 };
+            var githubTokens = tokens.Where(t => t.SearchProvider == SearchProviderEnum.GitHub).ToList();
+            var gitlabTokens = tokens.Where(t => t.SearchProvider == SearchProviderEnum.GitLab).ToList();
+            var githubCursor = new TokenCursor { Index = 0 };
+            var gitlabCursor = new TokenCursor { Index = 0 };
             
             var allQueries = await _dbContext.SearchQueries
                 .Where(q => q.IsEnabled)
@@ -239,8 +253,8 @@ public class ScraperService
                 return;
             }
 
-            _logger?.LogInformation("Starting {Mode} scrape for {Count} queries in group {Group}...", 
-                isDeepSearch ? "DEEP" : "LITE", queriesToRun.Count, selectedGroupName);
+            _logger?.LogInformation("Starting {Mode} scrape for {Count} queries in group {Group} (GitHub: {GhCount} tokens, GitLab: {GlCount} tokens)...",
+                isDeepSearch ? "DEEP" : "LITE", queriesToRun.Count, selectedGroupName, githubTokens.Count, gitlabTokens.Count);
 
             foreach (var query in queriesToRun)
             {
@@ -255,14 +269,8 @@ public class ScraperService
 
                 try
                 {
-                    if (isDeepSearch)
-                    {
-                        await RunDeepSearchAsync(tokens, query, tokenCursor, discoveredBy);
-                    }
-                    else
-                    {
-                        await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null, discoveredBy);
-                    }
+                    // Run GitHub and GitLab simultaneously in parallel
+                    await ExecuteParallelScrapeForQueryAsync(githubTokens, gitlabTokens, query, githubCursor, gitlabCursor, isDeepSearch, discoveredBy, _cancellationTokenSource.Token);
                 }
                 finally
                 {
@@ -322,7 +330,7 @@ public class ScraperService
         try
         {
             var tokenQuery = _dbContext.SearchProviderTokens
-                .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub);
+                .Where(t => t.IsEnabled && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab));
 
             var user = await _dbContext.TelegramSubscribers.FindAsync(discoveredBy);
             if (user != null && !user.IsAdmin && discoveredBy.HasValue)
@@ -333,11 +341,11 @@ public class ScraperService
             var tokens = await tokenQuery.ToListAsync(_cancellationTokenSource.Token);
             if (tokens.Count == 0)
             {
-                _logger?.LogWarning("No enabled GitHub tokens found for comprehensive scan for user {UserId}", discoveredBy);
+                _logger?.LogWarning("No enabled search tokens found for comprehensive scan for user {UserId}", discoveredBy);
                 if (discoveredBy.HasValue && discoveredBy.Value != 0)
                 {
                     await SendTelegramNotificationAsync(discoveredBy.Value, 
-                        "⚠️ <b>Comprehensive Scan Failed to Start</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled GitHub search tokens found for your account.\n\n👉 Please configure a token using <code>/add_token &lt;your_github_token&gt;</code>.");
+                        "⚠️ <b>Comprehensive Scan Failed to Start</b>\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nNo enabled search tokens found for your account.\n\n👉 Please configure a token using <code>/add_token &lt;your_token&gt;</code>.");
                 }
                 return;
             }
@@ -425,7 +433,18 @@ public class ScraperService
             {
                 tokensToUse.Add(new SearchProviderToken { Token = t.Trim(), SearchProvider = SearchProviderEnum.GitHub, IsEnabled = true });
             }
-            Console.WriteLine($"[green]Loaded {localTokens.Length} LOCAL tokens from environment.[/]");
+            Console.WriteLine($"[green]Loaded {localTokens.Length} LOCAL GitHub tokens from environment.[/]");
+        }
+
+        var localGitLabTokensRaw = Environment.GetEnvironmentVariable("WORKER_GITLAB_TOKENS");
+        if (!string.IsNullOrEmpty(localGitLabTokensRaw))
+        {
+            var localTokens = localGitLabTokensRaw.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var t in localTokens)
+            {
+                tokensToUse.Add(new SearchProviderToken { Token = t.Trim(), SearchProvider = SearchProviderEnum.GitLab, IsEnabled = true });
+            }
+            Console.WriteLine($"[green]Loaded {localTokens.Length} LOCAL GitLab tokens from environment.[/]");
         }
 
         // Add Master Tokens (assigned by admin)
@@ -573,21 +592,24 @@ public class ScraperService
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        Console.WriteLine("[cyan]Starting GitHub scraper...[/]");
+        Console.WriteLine("[cyan]Starting scraper...[/]");
 
-        // Get GitHub tokens
+        // Get tokens
         var tokens = await _dbContext.SearchProviderTokens
-            .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub)
+            .Where(t => t.IsEnabled && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab))
             .ToListAsync(cancellationToken);
 
         if (tokens.Count == 0)
         {
-            Console.WriteLine("[red]No GitHub tokens configured. Use 'Configure Settings' to add one.[/]");
+            Console.WriteLine("[red]No search tokens configured. Use 'Configure Settings' to add one.[/]");
             return;
         }
 
-        Console.WriteLine($"[dim]Loaded {tokens.Count} GitHub token(s).[/]");
-        var tokenCursor = new TokenCursor { Index = 0 };
+        Console.WriteLine($"[dim]Loaded {tokens.Count} search token(s).[/]");
+        var githubTokens = tokens.Where(t => t.SearchProvider == SearchProviderEnum.GitHub).ToList();
+        var gitlabTokens = tokens.Where(t => t.SearchProvider == SearchProviderEnum.GitLab).ToList();
+        var githubCursor = new TokenCursor { Index = 0 };
+        var gitlabCursor = new TokenCursor { Index = 0 };
 
         while (!_cancellationTokenSource.Token.IsCancellationRequested)
         {
@@ -654,14 +676,7 @@ public class ScraperService
                 {
                     if (_cancellationTokenSource.Token.IsCancellationRequested) break;
 
-                    if (isDeepSearch)
-                    {
-                        await RunDeepSearchAsync(tokens, query, tokenCursor, discoveredBy);
-                    }
-                    else
-                    {
-                        await RunScrapingCycleUtilsAsync(tokens, query, tokenCursor, null, discoveredBy);
-                    }
+                    await ExecuteParallelScrapeForQueryAsync(githubTokens, gitlabTokens, query, githubCursor, gitlabCursor, isDeepSearch, discoveredBy, _cancellationTokenSource.Token);
 
                     // Delay between queries (if not the last one)
                     if (query != queriesToRun.Last())
@@ -725,6 +740,63 @@ public class ScraperService
         if (q.Contains("sarvam") || q.Contains("shravam")) return "Sarvam AI";
         if (q.Contains("unsplash")) return "Unsplash";
         return "Other";
+    }
+
+    private async Task ExecuteParallelScrapeForQueryAsync(
+        List<SearchProviderToken> githubTokens,
+        List<SearchProviderToken> gitlabTokens,
+        SearchQuery query,
+        TokenCursor githubCursor,
+        TokenCursor gitlabCursor,
+        bool isDeepSearch,
+        long? discoveredBy,
+        CancellationToken ct)
+    {
+        var tasks = new List<Task>();
+
+        if (githubTokens.Count > 0)
+        {
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    if (isDeepSearch)
+                    {
+                        await RunDeepSearchAsync(githubTokens, query, githubCursor, discoveredBy);
+                    }
+                    else
+                    {
+                        await RunScrapingCycleUtilsAsync(githubTokens, query, githubCursor, null, discoveredBy);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "GitHub parallel scrape failed for query: {Query}", query.Query);
+                }
+            }, ct));
+        }
+
+        if (gitlabTokens.Count > 0)
+        {
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    await RunScrapingCycleUtilsAsync(gitlabTokens, query, gitlabCursor, null, discoveredBy);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "GitLab parallel scrape failed for query: {Query}", query.Query);
+                }
+            }, ct));
+        }
+
+        if (tasks.Count > 0)
+        {
+            await Task.WhenAll(tasks);
+        }
     }
 
     private async Task RunDeepSearchAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, long? discoveredBy)
@@ -1128,17 +1200,19 @@ public class ScraperService
         // IMPORTANT: GitHub Code Search API does NOT support the 'pushed:' qualifier.
         // 'pushed:' is only valid for REPOSITORY search, not code search.
         // Code search supports 'created:' for filtering by file creation date.
-        // We only apply this filter on page 1 of primary (non-partitioned) searches
+        // We only apply this filter on page 1 of primary (non-partitioned) searches on GitHub
         // to allow re-scanning recent content when we have a known checkpoint.
         string? dateFilter = null;
-        if (startPage == 1 && string.IsNullOrEmpty(extraParams) && query.LastSuccessfulSearchUTC.HasValue)
+        if (token.SearchProvider == SearchProviderEnum.GitHub && startPage == 1 && string.IsNullOrEmpty(extraParams))
         {
-            // Apply 1-day overlap on the checkpoint to catch indexing lag
-            var windowStart = query.LastSuccessfulSearchUTC.Value.AddDays(-1);
+            // Apply 1-day overlap on checkpoint, or default to last 2 days for standard scans
+            // so GitHub does NOT scan all-time throughout history.
+            var windowStart = query.LastSuccessfulSearchUTC.HasValue
+                ? query.LastSuccessfulSearchUTC.Value.AddDays(-1)
+                : DateTime.UtcNow.AddDays(-2);
+
             dateFilter = $"created:>{windowStart:yyyy-MM-dd}";
         }
-        // NOTE: If no LastSuccessfulSearchUTC (first run), we intentionally send NO date filter
-        // so GitHub returns results sorted by Indexed date (most recent first).
 
         // Compose the effective extra params
         string? effectiveParams = dateFilter != null
@@ -1156,12 +1230,13 @@ public class ScraperService
             await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
         }
 
-        // Search GitHub
+        // Search provider
         SearchResponse? response;
 
         try
         {
-            response = await _searchProvider.SearchAsync(query, token, effectiveParams, startPage);
+            var searchProvider = GetSearchProvider(token.SearchProvider);
+            response = await searchProvider.SearchAsync(query, token, effectiveParams, startPage);
             
             // Update results count stat on Master if we got a response
             if (!IsWorkerMode && response != null && startPage == 1 && string.IsNullOrEmpty(extraParams))
@@ -1398,7 +1473,7 @@ public class ScraperService
                             ApiKey = apiKey,
                             ApiType = provider.ApiType,
                             Status = ApiStatusEnum.Unverified,
-                            SearchProvider = SearchProviderEnum.GitHub,
+                            SearchProvider = token.SearchProvider,
                             FirstFoundUTC = DateTime.UtcNow,
                             LastFoundUTC = DateTime.UtcNow,
                             DiscoveredByTelegramId = discoveredBy
@@ -1422,7 +1497,7 @@ public class ScraperService
                             Branch = repoRef.Branch,
                             SearchQueryId = query.Id,
                             FoundUTC = DateTime.UtcNow,
-                            Provider = "GitHub"
+                            Provider = repoRef.Provider ?? (token.SearchProvider == SearchProviderEnum.GitLab ? "GitLab" : "GitHub")
                         };
                         newKey.References.Add(newRepoRef);
 
@@ -1518,19 +1593,30 @@ public class ScraperService
             using var client = _httpClientFactory.CreateClient();
             client.Timeout = TimeSpan.FromSeconds(15);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("UnsecuredAPIKeys-Lite/1.1");
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token.Token);
 
-            // Build raw content URL from repo info
-            // Format: https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}
             string? url = null;
 
-            if (!string.IsNullOrEmpty(repoRef.RepoOwner) &&
-                !string.IsNullOrEmpty(repoRef.RepoName) &&
-                !string.IsNullOrEmpty(repoRef.FilePath))
+            if (repoRef.Provider == "GitLab" || (!string.IsNullOrEmpty(repoRef.ApiContentUrl) && repoRef.ApiContentUrl.Contains("gitlab.com")))
             {
-                var branch = repoRef.Branch ?? "main";
-                url = $"https://raw.githubusercontent.com/{repoRef.RepoOwner}/{repoRef.RepoName}/{branch}/{repoRef.FilePath}";
+                client.DefaultRequestHeaders.Add("PRIVATE-TOKEN", token.Token);
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token.Token);
+                url = repoRef.ApiContentUrl;
+            }
+            else
+            {
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token.Token);
+
+                // Build raw content URL from repo info
+                // Format: https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}
+                if (!string.IsNullOrEmpty(repoRef.RepoOwner) &&
+                    !string.IsNullOrEmpty(repoRef.RepoName) &&
+                    !string.IsNullOrEmpty(repoRef.FilePath))
+                {
+                    var branch = repoRef.Branch ?? "main";
+                    url = $"https://raw.githubusercontent.com/{repoRef.RepoOwner}/{repoRef.RepoName}/{branch}/{repoRef.FilePath}";
+                }
             }
 
             if (string.IsNullOrEmpty(url))
@@ -1538,8 +1624,8 @@ public class ScraperService
 
             var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
 
-            // Try 'master' if 'main' fails
-            if (!response.IsSuccessStatusCode && repoRef.Branch == null)
+            // Try 'master' if 'main' fails for GitHub
+            if (!response.IsSuccessStatusCode && repoRef.Branch == null && repoRef.Provider != "GitLab")
             {
                 url = $"https://raw.githubusercontent.com/{repoRef.RepoOwner}/{repoRef.RepoName}/master/{repoRef.FilePath}";
                 response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);

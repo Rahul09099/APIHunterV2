@@ -395,7 +395,10 @@ public class TelegramBotService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling Telegram command");
-            await _botClient.SendMessage(chatId, $"❌ Error: {ex.Message}", cancellationToken: cancellationToken);
+            await _botClient.SendMessage(
+                chatId,
+                "❌ The command could not be completed right now. Please try again shortly. Technical details have been logged.",
+                cancellationToken: cancellationToken);
         }
     }
 
@@ -622,7 +625,10 @@ public class TelegramBotService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling Telegram callback");
-            await _botClient.SendMessage(chatId, $"❌ Error: {ex.Message}", cancellationToken: cancellationToken);
+            await _botClient.SendMessage(
+                chatId,
+                "❌ The action could not be completed right now. Please try again shortly. Technical details have been logged.",
+                cancellationToken: cancellationToken);
         }
     }
 
@@ -939,7 +945,7 @@ public class TelegramBotService : BackgroundService
         var pageGroups = allGroups.Where(g => currentPage.Targets.Contains(g)).OrderBy(g => Array.IndexOf(currentPage.Targets, g)).ToList();
 
         var hasTokens = await dbContext.SearchProviderTokens
-            .AnyAsync(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub, ct);
+            .AnyAsync(t => t.IsEnabled && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab), ct);
 
         var sb = new StringBuilder();
         sb.AppendLine($"<b>📡 MISSION CONTROL: SCRAPER</b>");
@@ -947,8 +953,8 @@ public class TelegramBotService : BackgroundService
 
         if (!hasTokens)
         {
-            sb.AppendLine("⚠️ <b>WARNING: No GitHub Tokens Configured!</b>");
-            sb.AppendLine("<i>The scraper requires at least one active GitHub token to run.</i>");
+            sb.AppendLine("⚠️ <b>WARNING: No Search Tokens Configured!</b>");
+            sb.AppendLine("<i>The scraper requires at least one active GitHub or GitLab token to run.</i>");
             sb.AppendLine("👉 Add a token using <code>/add_token &lt;token&gt;</code>");
             sb.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
         }
@@ -1171,11 +1177,11 @@ public class TelegramBotService : BackgroundService
         
         // Filter: Use targetUserId if provided (Admin mode), otherwise filter by chatId if not admin
         long? filterBy = targetUserId ?? (isAdmin ? null : chatId);
-        var tokens = await dbService.GetGitHubTokensAsync(dbContext, filterBy);
+        var tokens = await dbService.GetSearchTokensAsync(dbContext, null, filterBy);
 
         if (tokens.Count == 0)
         {
-            await _botClient.SendMessage(chatId, "No GitHub tokens found for your account.", cancellationToken: ct);
+            await _botClient.SendMessage(chatId, "No search tokens found for your account.", cancellationToken: ct);
             return;
         }
 
@@ -1188,13 +1194,13 @@ public class TelegramBotService : BackgroundService
         var statuses = (await Task.WhenAll(statusTasks)).ToDictionary(x => x.Id, x => x.Status);
 
         var sb = new StringBuilder();
-        sb.AppendLine("<b>🔑 GitHub Tokens:</b>");
+        sb.AppendLine("<b>🔑 Search Provider Tokens:</b>");
         foreach (var t in tokens)
         {
             var preview = System.Net.WebUtility.HtmlEncode(t.Token);
             var owner = t.AddedByTelegramId.HasValue ? $" [Owner: {t.AddedByTelegramId}]" : " [System]";
             var status = statuses[t.Id];
-            sb.AppendLine($"- ID: <code>{t.Id}</code> | {preview} | Enabled: {t.IsEnabled}{(isAdmin ? owner : "")}   <b>{status}</b>");
+            sb.AppendLine($"- [{t.SearchProvider}] ID: <code>{t.Id}</code> | {preview} | Enabled: {t.IsEnabled}{(isAdmin ? owner : "")}   <b>{status}</b>");
         }
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
@@ -1212,10 +1218,13 @@ public class TelegramBotService : BackgroundService
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         
-        // Pass chatId as owner
-        await dbService.AddGitHubTokenAsync(dbContext, token, chatId);
+        var isGitLab = token.StartsWith("glpat-", StringComparison.OrdinalIgnoreCase);
+        var provider = isGitLab ? SearchProviderEnum.GitLab : SearchProviderEnum.GitHub;
 
-        await _botClient.SendMessage(chatId, "✅ GitHub token added successfully!", cancellationToken: ct);
+        await dbService.AddSearchProviderTokenAsync(dbContext, token, provider, chatId);
+
+        var providerName = isGitLab ? "GitLab" : "GitHub";
+        await _botClient.SendMessage(chatId, $"✅ {providerName} token added successfully!", cancellationToken: ct);
     }
 
     private async Task HandleDeleteTokenCommand(long chatId, string arg, bool isAdmin, CancellationToken ct)
@@ -2133,7 +2142,7 @@ public class TelegramBotService : BackgroundService
         }
 
         var tokens = await dbContext.SearchProviderTokens
-            .Where(t => t.AddedByTelegramId == targetUserId && t.SearchProvider == SearchProviderEnum.GitHub)
+            .Where(t => t.AddedByTelegramId == targetUserId && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab))
             .OrderBy(t => t.Id)
             .ToListAsync(ct);
 
@@ -2144,7 +2153,7 @@ public class TelegramBotService : BackgroundService
 
         if (!tokens.Any())
         {
-            sb.AppendLine("<i>No GitHub tokens found for this user.</i>");
+            sb.AppendLine("<i>No search tokens found for this user.</i>");
         }
         else
         {
@@ -2161,7 +2170,7 @@ public class TelegramBotService : BackgroundService
                 var status = t.IsEnabled ? "🟢" : "🔴";
                 var statusText = statuses[t.Id];
                 var fullToken = System.Net.WebUtility.HtmlEncode(t.Token);
-                sb.AppendLine($"{status} ID: <code>{t.Id}</code> | <code>{fullToken}</code> | <b>{statusText}</b>");
+                sb.AppendLine($"{status} [{t.SearchProvider}] ID: <code>{t.Id}</code> | <code>{fullToken}</code> | <b>{statusText}</b>");
             }
         }
 
@@ -2173,7 +2182,7 @@ public class TelegramBotService : BackgroundService
     }
 
     /// <summary>
-    /// Admin: add a GitHub token on behalf of a subscriber.
+    /// Admin: add a search provider token on behalf of a subscriber.
     /// </summary>
     private async Task HandleAdminAddTokenForUserCommand(long chatId, long targetUserId, string token, CancellationToken ct)
     {
@@ -2194,9 +2203,12 @@ public class TelegramBotService : BackgroundService
             return;
         }
 
+        var isGitLab = token.StartsWith("glpat-", StringComparison.OrdinalIgnoreCase);
+        var provider = isGitLab ? SearchProviderEnum.GitLab : SearchProviderEnum.GitHub;
+
         // Check for duplicate
         var exists = await dbContext.SearchProviderTokens
-            .AnyAsync(t => t.Token == token && t.SearchProvider == SearchProviderEnum.GitHub, ct);
+            .AnyAsync(t => t.Token == token && t.SearchProvider == provider, ct);
 
         if (exists)
         {
@@ -2204,11 +2216,12 @@ public class TelegramBotService : BackgroundService
             return;
         }
 
-        await dbService.AddGitHubTokenAsync(dbContext, token, targetUserId);
+        await dbService.AddSearchProviderTokenAsync(dbContext, token, provider, targetUserId);
 
         var nameStr = !string.IsNullOrEmpty(targetUser.Username) ? $"@{targetUser.Username}" : $"{targetUserId}";
+        var providerName = isGitLab ? "GitLab" : "GitHub";
         await _botClient.SendMessage(chatId,
-            $"✅ GitHub token added for <b>{System.Net.WebUtility.HtmlEncode(nameStr)}</b>.",
+            $"✅ {providerName} token added for <b>{System.Net.WebUtility.HtmlEncode(nameStr)}</b>.",
             parseMode: ParseMode.Html, cancellationToken: ct);
     }
 
@@ -2337,29 +2350,40 @@ public class TelegramBotService : BackgroundService
         {
             using var client = httpClientFactory.CreateClient();
             client.DefaultRequestHeaders.UserAgent.ParseAdd("UnsecuredAPIKeys-Bot/1.1");
-            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             
-            var response = await client.GetAsync("https://api.github.com/rate_limit");
-            
-            if (response.IsSuccessStatusCode)
+            if (token.StartsWith("glpat-", StringComparison.OrdinalIgnoreCase))
             {
-                if (response.Headers.Contains("X-RateLimit-Remaining"))
-                {
-                    var remainingStr = response.Headers.GetValues("X-RateLimit-Remaining").FirstOrDefault();
-                    if (int.TryParse(remainingStr, out int remaining) && remaining == 0)
-                    {
-                        return "Rate Limited";
-                    }
-                }
-                return "Valid";
-            }
-            else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-            {
-                return "Invalid";
+                using var request = new HttpRequestMessage(HttpMethod.Get, "https://gitlab.com/api/v4/user");
+                request.Headers.Add("PRIVATE-TOKEN", token);
+                var response = await client.SendAsync(request);
+                if (response.IsSuccessStatusCode) return "Valid (GitLab)";
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) return "Invalid";
+                return $"Error ({response.StatusCode})";
             }
             else
             {
-                return $"Error ({response.StatusCode})";
+                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                var response = await client.GetAsync("https://api.github.com/rate_limit");
+                if (response.IsSuccessStatusCode)
+                {
+                    if (response.Headers.Contains("X-RateLimit-Remaining"))
+                    {
+                        var remainingStr = response.Headers.GetValues("X-RateLimit-Remaining").FirstOrDefault();
+                        if (int.TryParse(remainingStr, out int remaining) && remaining == 0)
+                        {
+                            return "Rate Limited";
+                        }
+                    }
+                    return "Valid";
+                }
+                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    return "Invalid";
+                }
+                else
+                {
+                    return $"Error ({response.StatusCode})";
+                }
             }
         }
         catch

@@ -1013,16 +1013,26 @@ public class DatabaseService(DBContext dbContext)
 
     public async Task AddGitHubTokenAsync(DBContext dbContext, string token, long? addedBy = null)
     {
+        await AddSearchProviderTokenAsync(dbContext, token, SearchProviderEnum.GitHub, addedBy);
+    }
+
+    public async Task AddGitLabTokenAsync(DBContext dbContext, string token, long? addedBy = null)
+    {
+        await AddSearchProviderTokenAsync(dbContext, token, SearchProviderEnum.GitLab, addedBy);
+    }
+
+    public async Task AddSearchProviderTokenAsync(DBContext dbContext, string token, SearchProviderEnum provider, long? addedBy = null)
+    {
         // Check if token already exists to prevent duplicates
         var exists = await dbContext.SearchProviderTokens
-            .AnyAsync(t => t.Token == token && t.SearchProvider == SearchProviderEnum.GitHub);
+            .AnyAsync(t => t.Token == token && t.SearchProvider == provider);
 
         if (!exists)
         {
             dbContext.SearchProviderTokens.Add(new SearchProviderToken
             {
                 Token = token,
-                SearchProvider = SearchProviderEnum.GitHub,
+                SearchProvider = provider,
                 IsEnabled = true,
                 AddedByTelegramId = addedBy
             });
@@ -1032,8 +1042,21 @@ public class DatabaseService(DBContext dbContext)
 
     public async Task<List<SearchProviderToken>> GetGitHubTokensAsync(DBContext dbContext, long? filterByTelegramId = null)
     {
-        var query = dbContext.SearchProviderTokens
-            .Where(t => t.SearchProvider == SearchProviderEnum.GitHub && t.IsEnabled);
+        return await GetSearchTokensAsync(dbContext, SearchProviderEnum.GitHub, filterByTelegramId);
+    }
+
+    public async Task<List<SearchProviderToken>> GetGitLabTokensAsync(DBContext dbContext, long? filterByTelegramId = null)
+    {
+        return await GetSearchTokensAsync(dbContext, SearchProviderEnum.GitLab, filterByTelegramId);
+    }
+
+    public async Task<List<SearchProviderToken>> GetSearchTokensAsync(DBContext dbContext, SearchProviderEnum? provider = null, long? filterByTelegramId = null)
+    {
+        var query = dbContext.SearchProviderTokens.Where(t => t.IsEnabled);
+        if (provider.HasValue)
+        {
+            query = query.Where(t => t.SearchProvider == provider.Value);
+        }
             
         if (filterByTelegramId.HasValue)
         {
