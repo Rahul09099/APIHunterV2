@@ -871,30 +871,38 @@ public class ScraperService
             .Where(p => p.SearchQueryId == query.Id)
             .ToListAsync(_cancellationTokenSource!.Token);
 
+        // Clean up any historical corrupted partitions that contained invalid date qualifiers (created:> or pushed:>)
+        var corruptedPartitions = existingProgress
+            .Where(p => p.PartitionValue.Contains("created:>") || p.PartitionValue.Contains("pushed:"))
+            .ToList();
+        if (corruptedPartitions.Any())
+        {
+            if (!IsWorkerMode)
+            {
+                _dbContext.DeepSearchProgress.RemoveRange(corruptedPartitions);
+                await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
+            }
+            existingProgress.RemoveAll(p => p.PartitionValue.Contains("created:>") || p.PartitionValue.Contains("pushed:"));
+        }
+
         // Check if all previous partitions were completed
         bool isPreviousRunFullyCompleted = existingProgress.Any() && existingProgress.All(p => p.IsCompleted);
 
-        // If all partitions were previously completed and we have a recorded LastDeepSearchDateUTC,
-        // automatically clear old progress and scope this new DeepSearch to code pushed since then.
-        string? dateBoundaryFilter = null;
-        if (query.LastDeepSearchDateUTC.HasValue)
+        // If all partitions were previously completed, reset progress so a new DeepSearch cycle can run
+        if (isPreviousRunFullyCompleted)
         {
-            var dateCutoff = query.LastDeepSearchDateUTC.Value.AddDays(-1); // 1-day overlap for indexing lag
-            // NOTE: GitHub Code Search does NOT support 'pushed:'. Use 'created:' instead.
-            dateBoundaryFilter = $"created:>{dateCutoff:yyyy-MM-dd}";
-            
-            if (isPreviousRunFullyCompleted)
+            if (query.LastDeepSearchDateUTC.HasValue)
             {
                 Console.WriteLine($"[yellow]Previous Deep Search was completed on {query.LastDeepSearchDateUTC.Value.ToIst():yyyy-MM-dd HH:mm:ss} IST.[/]");
-                Console.WriteLine($"[cyan]Starting new incremental Deep Search for code created since {dateCutoff:yyyy-MM-dd}...[/]\n");
-                
-                if (!IsWorkerMode)
-                {
-                    _dbContext.DeepSearchProgress.RemoveRange(existingProgress);
-                    await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
-                }
-                existingProgress.Clear();
             }
+            Console.WriteLine($"[cyan]Starting new Deep Search cycle across partitions...[/]\n");
+            
+            if (!IsWorkerMode)
+            {
+                _dbContext.DeepSearchProgress.RemoveRange(existingProgress);
+                await _dbContext.SaveChangesAsync(_cancellationTokenSource!.Token);
+            }
+            existingProgress.Clear();
         }
         
         // Display progress if any in-progress partitions remain
@@ -985,7 +993,7 @@ public class ScraperService
         {
             if (_cancellationTokenSource.Token.IsCancellationRequested) break;
             
-            string langFilter = dateBoundaryFilter != null ? $"language:{language} {dateBoundaryFilter}" : $"language:{language}";
+            string langFilter = $"language:{language}";
             await SearchPartitionAsync(tokens, query, cursor, "language", langFilter, stats, discoveredBy);
         }
         
@@ -994,7 +1002,7 @@ public class ScraperService
         {
             if (_cancellationTokenSource.Token.IsCancellationRequested) break;
             
-            string extFilter = dateBoundaryFilter != null ? $"extension:{extension} {dateBoundaryFilter}" : $"extension:{extension}";
+            string extFilter = $"extension:{extension}";
             await SearchPartitionAsync(tokens, query, cursor, "extension", extFilter, stats, discoveredBy);
         }
 
@@ -1060,7 +1068,7 @@ public class ScraperService
             return null;
         }
         
-        // partitionValue IS the full GitHub query filter (e.g. "extension:txt", "language:python created:>2026-01-01").
+        // partitionValue IS the full GitHub query filter (e.g. "extension:txt", "language:python").
         // partitionType is only a DB label for tracking progress — do NOT prepend it to the query.
         string filter = partitionValue;
         int startPage = progress.LastPageSearched + 1;
@@ -1108,14 +1116,13 @@ public class ScraperService
                 await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy);
             }
 
-            // Subdivision Strategy 3: Adaptive Date Partitioning (Recursive Bisection)
-            DateTime now = DateTime.UtcNow;
-            for (int i = 0; i < 4; i++) // 4 x 7-day windows = past 28 days
+            // Subdivision Strategy 3: Common Filenames
+            var filenames = new[] { ".env", "config", "settings", "credentials", "secrets", "application" };
+            foreach (var fn in filenames)
             {
                 if (_cancellationTokenSource!.Token.IsCancellationRequested) break;
-                DateTime windowEnd = now.AddDays(-i * 7);
-                DateTime windowStart = windowEnd.AddDays(-7);
-                await SearchDateRangePartitionAsync(tokens, query, cursor, filter, windowStart, windowEnd, stats, discoveredBy);
+                string subFilter = $"{filter} filename:{fn}";
+                await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy);
             }
 
             progress.IsCompleted = true; // The parent partition is effectively "managed" by sub-partitions now
@@ -1138,39 +1145,6 @@ public class ScraperService
         GC.WaitForPendingFinalizers();
 
         return response;
-    }
-
-    private async Task SearchDateRangePartitionAsync(
-        IReadOnlyList<CredentialOperationReference> tokens,
-        SearchQuery query,
-        TokenCursor cursor,
-        string baseFilter,
-        DateTime startDate,
-        DateTime endDate,
-        DeepSearchStats stats,
-        long? discoveredBy)
-    {
-        if (_cancellationTokenSource!.Token.IsCancellationRequested) return;
-
-        string dateRangeStr = $"{startDate:yyyy-MM-dd}..{endDate:yyyy-MM-dd}";
-        string dateFilter = $"{baseFilter} pushed:{dateRangeStr}";
-        
-        var response = await SearchPartitionAsync(tokens, query, cursor, "date-partition", dateFilter, stats, discoveredBy);
-
-        // If this date-range sub-partition STILL hit the 1,000 ceiling and range is >= 1 day, bisect it recursively!
-        if (response != null && response.HitLimit && (endDate - startDate).TotalDays >= 1)
-        {
-            int midDays = (int)Math.Max(1, Math.Floor((endDate - startDate).TotalDays / 2.0));
-            DateTime midDate = startDate.AddDays(midDays);
-
-            Console.WriteLine($"[yellow]⚠ Date window {dateRangeStr} hit 1,000 ceiling. Bisecting into [{startDate:yyyy-MM-dd}..{midDate:yyyy-MM-dd}] & [{midDate.AddDays(1):yyyy-MM-dd}..{endDate:yyyy-MM-dd}]...[/]");
-
-            await SearchDateRangePartitionAsync(tokens, query, cursor, baseFilter, startDate, midDate, stats, discoveredBy);
-            if (midDate.AddDays(1) <= endDate)
-            {
-                await SearchDateRangePartitionAsync(tokens, query, cursor, baseFilter, midDate.AddDays(1), endDate, stats, discoveredBy);
-            }
-        }
     }
 
     private async Task<SearchResponse?> RunScrapingCycleUtilsAsync(IReadOnlyList<CredentialOperationReference> tokens, SearchQuery query, TokenCursor cursor, string? extraParams, long? discoveredBy, int startPage = 1)

@@ -132,6 +132,11 @@ namespace UnsecuredAPIKeys.Providers.Search_Providers
                     await Task.Delay(TimeSpan.FromSeconds(2)); 
                 }
             }
+            catch (RateLimitExceededException)
+            {
+                // Re-throw so caller (ScraperService) can rotate tokens and wait for reset time
+                throw;
+            }
             catch (Exception ex)
             {
                 logger?.LogError(ex, "An unexpected error occurred during GitHub search for query: {Query}", query.Query);
