@@ -206,15 +206,21 @@ public class ScraperService
             return null;
         }
 
+        var adminChatIdStr = Environment.GetEnvironmentVariable("TELEGRAM_ADMIN_CHAT_ID");
+        var isSuperAdmin = long.TryParse(adminChatIdStr, out var adminChatId) && initiatingTelegramId == adminChatId;
+
         var subscriber = await _dbContext.TelegramSubscribers
             .AsNoTracking()
             .Where(candidate => candidate.TelegramId == initiatingTelegramId.Value)
             .Select(candidate => new { candidate.TelegramId, candidate.IsAdmin })
             .SingleOrDefaultAsync(cancellationToken);
 
-        return subscriber is null
-            ? null
-            : SchedulerPrincipal.ForTelegram(subscriber.TelegramId, subscriber.IsAdmin);
+        if (subscriber is not null)
+        {
+            return SchedulerPrincipal.ForTelegram(subscriber.TelegramId, subscriber.IsAdmin || isSuperAdmin);
+        }
+
+        return SchedulerPrincipal.ForTelegram(initiatingTelegramId.Value, isSuperAdmin);
     }
 
     private async Task<List<CredentialOperationReference>> LoadAuthorizedCredentialReferencesAsync(
@@ -231,9 +237,9 @@ public class ScraperService
                 .AsNoTracking()
                 .Where(credential =>
                     credential.IsEnabled &&
-                    credential.DisabledAtUtc == null &&
                     !credential.IsArchived &&
                     (credential.SearchProvider == SearchProviderEnum.GitHub ||
+                     (int)credential.SearchProvider == 0 ||
                      credential.SearchProvider == SearchProviderEnum.GitLab)),
             principal);
 
@@ -241,8 +247,8 @@ public class ScraperService
             .OrderBy(credential => credential.Id)
             .Select(credential => new CredentialOperationReference(
                 credential.StableId,
-                credential.SearchProvider,
-                credential.ProviderInstance!.StableId,
+                credential.SearchProvider == 0 ? SearchProviderEnum.GitHub : credential.SearchProvider,
+                credential.ProviderInstance != null ? credential.ProviderInstance.StableId : ProviderInstanceSchema.DefaultGitHubStableId,
                 credential.Revision,
                 credential.LeaseId))
             .ToListAsync(cancellationToken);
@@ -346,7 +352,7 @@ public class ScraperService
             }
 
             var githubCredentials = credentials
-                .Where(credential => credential.ProviderKind == SearchProviderEnum.GitHub)
+                .Where(credential => credential.ProviderKind == SearchProviderEnum.GitHub || (int)credential.ProviderKind == 0)
                 .ToList();
             var gitlabCredentials = credentials
                 .Where(credential => credential.ProviderKind == SearchProviderEnum.GitLab)
