@@ -31,5 +31,9 @@ services:
         value: "75"
       - key: SearchCredentials__LegacyUnownedGrantScope
         value: "Global"
+      - key: SearchCredentials__Migration__PreScrubGuardEnabled
+        value: "true"
+      - key: SearchCredentials__Migration__LegacyPlaintextReadEnabled
+        value: "true"
 
 # Databases section removed as we are using Supabase (External PostgreSQL)
