@@ -1298,17 +1298,9 @@ public class ScraperService
         // Code search supports 'created:' for filtering by file creation date.
         // We only apply this filter on page 1 of primary (non-partitioned) searches on GitHub
         // to allow re-scanning recent content when we have a known checkpoint.
+        // NOTE: GitHub Code Search API does not support created: or pushed: filters (returns 0 results).
+        // Standard code search should execute clean queries without broken qualifiers.
         string? dateFilter = null;
-        if (token.SearchProvider == SearchProviderEnum.GitHub && startPage == 1 && string.IsNullOrEmpty(extraParams))
-        {
-            // Apply 1-day overlap on checkpoint, or default to last 2 days for standard scans
-            // so GitHub does NOT scan all-time throughout history.
-            var windowStart = query.LastSuccessfulSearchUTC.HasValue
-                ? query.LastSuccessfulSearchUTC.Value.AddDays(-1)
-                : DateTime.UtcNow.AddDays(-2);
-
-            dateFilter = $"created:>{windowStart:yyyy-MM-dd}";
-        }
 
         // Compose the effective extra params
         string? effectiveParams = dateFilter != null
