@@ -318,11 +318,21 @@
 
                     <!-- GITHUB TOKENS -->
                     <div class="section-card glass">
-                        <h3 class="section-title">GitHub Scraping Quota Keys</h3>
-                        <p class="section-desc">API tokens used to bypass search rate limiting.</p>
+                        <h3 class="section-title">Search Provider Scraping Tokens</h3>
+                        <p class="section-desc">Tokens used to bypass search rate limiting and perform deep scans.</p>
+
+                        <details class="token-guide-details" style="margin-bottom: 1.2rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 0.7rem 0.9rem; font-size: 0.85rem; color: #cbd5e0;">
+                            <summary style="cursor: pointer; font-weight: 600; color: #63b3ed; user-select: none;">📖 Token Setup Guide (How to create tokens)</summary>
+                            <div style="margin-top: 0.7rem; line-height: 1.6;">
+                                <p style="margin-bottom: 0.5rem;"><strong style="color:#e2e8f0;">🐙 GitHub Classic Token:</strong> Go to <a href="https://github.com/settings/tokens" target="_blank" rel="noopener" style="color:#63b3ed; text-decoration: underline;">github.com/settings/tokens</a> &rarr; <em>Generate new token (classic)</em> &rarr; check <code>public_repo</code> &rarr; copy <code>ghp_...</code></p>
+                                <p style="margin-bottom: 0.5rem;"><strong style="color:#e2e8f0;">🔒 GitHub Fine-Grained Token:</strong> Go to <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:#63b3ed; text-decoration: underline;">Fine-grained Tokens</a> &rarr; Repository access: <em>All / Public</em> &rarr; Repository permissions &rarr; <em>Contents (Read-only)</em> &rarr; copy <code>github_pat_...</code></p>
+                                <p style="margin-bottom: 0.5rem;"><strong style="color:#e2e8f0;">🦊 GitLab Token:</strong> Go to <a href="https://gitlab.com/-/user_settings/personal_access_tokens" target="_blank" rel="noopener" style="color:#63b3ed; text-decoration: underline;">gitlab.com/personal_access_tokens</a> &rarr; select <code>read_api</code> &rarr; copy <code>glpat-...</code></p>
+                                <p style="margin-bottom: 0; color: #f6e05e;"><strong>💡 Pro-Tip:</strong> Add 3–5 tokens for automatic round-robin rotation to avoid GitHub's 30 req/min rate limit.</p>
+                            </div>
+                        </details>
 
                         <div class="config-add-form">
-                            <input type="password" id="new-token-input" class="form-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxx">
+                            <input type="password" id="new-token-input" class="form-input" placeholder="ghp_... or glpat-...">
                             <button id="add-token-btn" class="btn btn-success">Add</button>
                         </div>
 

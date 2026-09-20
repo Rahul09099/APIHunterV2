@@ -90,6 +90,7 @@ public class TelegramBotService : BackgroundService
                 {
                     new BotCommand { Command = "status", Description = "Mission Control" },
                     new BotCommand { Command = "dashboard", Description = "Open Visual Dashboard" },
+                    new BotCommand { Command = "token_guide", Description = "Token Setup Guide" },
                     new BotCommand { Command = "stats", Description = "Statistics" },
                     new BotCommand { Command = "start_scraper", Description = "Start Scraper" },
                     new BotCommand { Command = "start_verifier", Description = "Start Verifier" },
@@ -270,6 +271,9 @@ public class TelegramBotService : BackgroundService
                     break;
                 case "/add_token":
                     await HandleAddTokenCommand(chatId, args, cancellationToken);
+                    break;
+                case "/token_guide":
+                    await HandleTokenGuideCommand(chatId, cancellationToken);
                     break;
                 case "/delete_token":
                     await HandleDeleteTokenCommand(chatId, args, isAdmin, cancellationToken);
@@ -498,6 +502,10 @@ public class TelegramBotService : BackgroundService
                     await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: cancellationToken);
                 }
             }
+            else if (callbackData == "show_token_guide")
+            {
+                await HandleTokenGuideCommand(chatId, cancellationToken);
+            }
             else if (callbackData == "purge_junk" || callbackData == "purge")
             {
                 if (isAdmin)
@@ -702,6 +710,7 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("├ /node_token - Your personal access token");
         help.AppendLine("├ /tokens - List your provider credentials");
         help.AppendLine("├ /add_token &lt;token&gt; - Add a provider credential");
+        help.AppendLine("├ /token_guide - How to obtain & add tokens");
         help.AppendLine("└ /node_status - View your node status");
         help.AppendLine("├ /set_deploy_hook &lt;url&gt; - Save Render Deploy Hook");
         help.AppendLine("├ /remove_deploy_hook - Clear Deploy Hook");
@@ -782,7 +791,8 @@ public class TelegramBotService : BackgroundService
         {
             new[]
             {
-                InlineKeyboardButton.WithWebApp("📊 Open Dashboard", new WebAppInfo { Url = dashboardUrl })
+                InlineKeyboardButton.WithWebApp("📊 Open Dashboard", new WebAppInfo { Url = dashboardUrl }),
+                InlineKeyboardButton.WithCallbackData("📖 Token Setup Guide", "show_token_guide")
             }
         });
 
@@ -1244,6 +1254,53 @@ public class TelegramBotService : BackgroundService
         }
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
+    }
+
+    private async Task HandleTokenGuideCommand(long chatId, CancellationToken ct)
+    {
+        var guide = new StringBuilder();
+        guide.AppendLine("📖 <b>APIHunter Token Setup Guide</b>");
+        guide.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+        guide.AppendLine("Tokens allow the scraper to search public code repositories without hitting rate limits. Adding multiple tokens enables automatic round-robin rotation.");
+        guide.AppendLine();
+        guide.AppendLine("🐙 <b>1. GitHub Classic Token (Recommended)</b>");
+        guide.AppendLine("├ <b>URL:</b> <a href=\"https://github.com/settings/tokens\">github.com/settings/tokens</a>");
+        guide.AppendLine("├ <b>Steps:</b>");
+        guide.AppendLine("│ 1. Click <i>Generate new token</i> → <i>Generate new token (classic)</i>");
+        guide.AppendLine("│ 2. Set Note: <code>APIHunter</code>");
+        guide.AppendLine("│ 3. Select scope: <b>public_repo</b> (access public repositories)");
+        guide.AppendLine("│ 4. Click <i>Generate token</i> and copy (starts with <code>ghp_</code>)");
+        guide.AppendLine("└ <b>Command:</b> <code>/add_token ghp_YourGitHubTokenHere</code>");
+        guide.AppendLine();
+        guide.AppendLine("🔒 <b>2. GitHub Fine-Grained Token</b>");
+        guide.AppendLine("├ <b>URL:</b> <a href=\"https://github.com/settings/personal-access-tokens/new\">Fine-grained Tokens</a>");
+        guide.AppendLine("├ <b>Steps:</b>");
+        guide.AppendLine("│ 1. Repository access: <b>All repositories</b> (or Public Repositories)");
+        guide.AppendLine("│ 2. Permissions → <b>Repository permissions</b>:");
+        guide.AppendLine("│    • <b>Contents:</b> Read-only");
+        guide.AppendLine("│ 3. Click <i>Generate token</i> and copy (starts with <code>github_pat_</code>)");
+        guide.AppendLine("└ <b>Command:</b> <code>/add_token github_pat_YourGitHubTokenHere</code>");
+        guide.AppendLine();
+        guide.AppendLine("🦊 <b>3. GitLab Personal Access Token</b>");
+        guide.AppendLine("├ <b>URL:</b> <a href=\"https://gitlab.com/-/user_settings/personal_access_tokens\">gitlab.com/personal_access_tokens</a>");
+        guide.AppendLine("├ <b>Steps:</b>");
+        guide.AppendLine("│ 1. Set Token name: <code>APIHunter-GitLab</code>");
+        guide.AppendLine("│ 2. Select scope: <b>read_api</b>");
+        guide.AppendLine("│ 3. Click <i>Create personal access token</i> and copy (starts with <code>glpat-</code>)");
+        guide.AppendLine("└ <b>Command:</b> <code>/add_token glpat-YourGitLabTokenHere</code>");
+        guide.AppendLine();
+        guide.AppendLine("💡 <b>Pro-Tips & Management:</b>");
+        guide.AppendLine("• <b>Rotation:</b> Add 3–5 GitHub tokens to rotate and easily bypass GitHub's 30 req/min rate limit.");
+        guide.AppendLine("• <b>List Tokens:</b> <code>/tokens</code>");
+        guide.AppendLine("• <b>Disable Token:</b> <code>/delete_token &lt;id&gt;</code>");
+        guide.AppendLine("• <b>Replace Secret:</b> <code>/replace_token &lt;id&gt; &lt;new_token&gt;</code>");
+        guide.AppendLine("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+
+        await _botClient.SendMessage(
+            chatId,
+            guide.ToString(),
+            parseMode: ParseMode.Html,
+            cancellationToken: ct);
     }
 
     private async Task HandleAddTokenCommand(long chatId, string token, CancellationToken ct)
