@@ -71,7 +71,7 @@ public class ScraperController : ControllerBase
         var hasTokens = await _grantEvaluator.ApplyAuthorization(
                 _dbContext.SearchProviderTokens.Where(t =>
                     t.IsEnabled &&
-                    t.SearchProvider == UnsecuredAPIKeys.Data.Common.SearchProviderEnum.GitHub),
+                    (t.SearchProvider == UnsecuredAPIKeys.Data.Common.SearchProviderEnum.GitHub || (int)t.SearchProvider == 0)),
                 SchedulerPrincipal.System)
             .AnyAsync();
 

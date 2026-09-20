@@ -983,7 +983,7 @@ public class TelegramBotService : BackgroundService
         var pageGroups = allGroups.Where(g => currentPage.Targets.Contains(g)).OrderBy(g => Array.IndexOf(currentPage.Targets, g)).ToList();
 
         var hasTokens = await dbContext.SearchProviderTokens
-            .AnyAsync(t => t.IsEnabled && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab), ct);
+            .AnyAsync(t => t.IsEnabled && (t.SearchProvider == SearchProviderEnum.GitHub || (int)t.SearchProvider == 0 || t.SearchProvider == SearchProviderEnum.GitLab), ct);
 
         var sb = new StringBuilder();
         sb.AppendLine($"<b>📡 MISSION CONTROL: SCRAPER</b>");

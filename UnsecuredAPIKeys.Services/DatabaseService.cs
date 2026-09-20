@@ -2259,13 +2259,14 @@ public class DatabaseService
         var query = dbContext.SearchProviderTokens.AsNoTracking();
         if (provider.HasValue)
         {
-            query = query.Where(credential => credential.SearchProvider == provider.Value);
+            query = query.Where(credential => credential.SearchProvider == provider.Value ||
+                (provider.Value == SearchProviderEnum.GitHub && (int)credential.SearchProvider == 0));
         }
 
         if (filterByTelegramId.HasValue)
         {
             var telegramPrincipalId = filterByTelegramId.Value;
-            query = query.Where(credential => credential.CredentialGrants.Any(grant =>
+            query = query.Where(credential => !credential.CredentialGrants.Any() || credential.CredentialGrants.Any(grant =>
                 grant.Scope == CredentialGrantScope.Global ||
                 (grant.Scope == CredentialGrantScope.User &&
                  grant.TelegramPrincipalId == telegramPrincipalId)));

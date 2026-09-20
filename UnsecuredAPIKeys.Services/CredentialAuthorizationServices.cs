@@ -119,9 +119,11 @@ public sealed class CredentialGrantEvaluator(DBContext dbContext) : ICredentialG
 
         if (principal.IsAdministrator || principal.IsSystem)
         {
-            return credentials.Where(credential => credential.CredentialGrants.Any(grant =>
-                grant.Scope == CredentialGrantScope.Global ||
-                grant.Scope == CredentialGrantScope.Admin));
+            return credentials.Where(credential =>
+                !credential.CredentialGrants.Any() ||
+                credential.CredentialGrants.Any(grant =>
+                    grant.Scope == CredentialGrantScope.Global ||
+                    grant.Scope == CredentialGrantScope.Admin));
         }
 
         if (principal.TelegramPrincipalId is not > 0)

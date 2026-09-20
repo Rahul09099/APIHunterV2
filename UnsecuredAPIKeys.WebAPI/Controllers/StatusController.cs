@@ -244,10 +244,12 @@ public class StatusController : ControllerBase
         {
             token.Id,
             credentialAlias = token.Alias,
+            tokenPreview = token.Alias,
             token.IsEnabled,
             token.Source,
             token.LastClaimedUtc,
             token.LastUsedUtc,
+            lastUsedUTC = token.LastUsedUtc,
             token.CooldownUntilUtc,
             token.DisabledReason,
             token.DisabledAtUtc
