@@ -1,0 +1,1086 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Write characterization tests for the current search and Worker defects": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635845557
+      },
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635908810
+      }
+    ],
+    "1.2 Make the test project capable of exercising WebAPI and SQLite paths": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635845661
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657392609
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657406008
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657888161
+      }
+    ],
+    "2.1 Write failing schema-parity and Provider Instance tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635845738
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393142
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657898018
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788658376541
+      }
+    ],
+    "2.2 Implement the additive Provider Instance and readiness-marker slice": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635845807
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393271
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788658384198
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788661085164
+      }
+    ],
+    "2.3 Expose and test a secret-free readiness projection": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635845882
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393366
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788661093669
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788661405519
+      }
+    ],
+    "2.4 Define and enforce the fail-closed feature-flag matrix before scheduling exists": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635845949
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393450
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788661417211
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788663120091
+      }
+    ],
+    "3.1 Write failing principal and grant-evaluator tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846020
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393562
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788663129314
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788663509837
+      }
+    ],
+    "3.2 Implement the principal resolver, Grant Store, and common evaluator": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846110
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393640
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788663519551
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788664472269
+      }
+    ],
+    "3.3 Write failing privilege/audit tests and implement the command boundary": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846200
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393730
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788664492304
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788665085838
+      }
+    ],
+    "4.1 Write failing protection, state-invariant, and redaction property tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846274
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393821
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788665092250
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788665602855
+      }
+    ],
+    "4.2 Implement protected credential storage behind guarded dual-read/protected-write": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846346
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393884
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788665623628
+      }
+    ],
+    "4.3 Test and implement disable, re-enable, and replacement as one vertical management slice": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846418
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657393944
+      },
+      {
+        "executionId": "4596fa03-772c-4c11-b2d2-1e2ff3675316",
+        "chatSessionId": "sess_6c6c0088-158f-4bed-9282-ee1e5aeb2173",
+        "timestamp": 1788673345298
+      }
+    ],
+    "5.1 Write failing bootstrap-generation tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846490
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394006
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788676721588
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788677403050
+      }
+    ],
+    "5.2 Implement and wire Master bootstrap before Claim readiness": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846574
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394069
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788677433346
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788678902529
+      }
+    ],
+    "5.3 Write failing duplicate-merge tests and implement atomic reconciliation": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846673
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394163
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788678921086
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788680233033
+      }
+    ],
+    "6.1 Write failing registry and adapter-contract tests with a fake provider": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846739
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394229
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788680304482
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788680840036
+      }
+    ],
+    "6.2 Implement the registry and capability metadata slice without invoking a provider": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846820
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394288
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788680923726
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788682352595
+      }
+    ],
+    "6.3 Write failing endpoint-policy and SSRF tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846890
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394359
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788682400537
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788682748591
+      }
+    ],
+    "6.4 Implement Endpoint Policy and wire it to instance approval": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635846970
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394433
+      },
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788682772867
+      }
+    ],
+    "7.1 Write failing Work/query/hash/continuation tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847042
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394495
+      }
+    ],
+    "7.2 Implement Work, Partition, query override, and reproducibility services": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847124
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394564
+      }
+    ],
+    "7.3 Write failing result/dedup/checkpoint transaction tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847251
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394634
+      }
+    ],
+    "7.4 Implement normalized result, provenance, and transactional checkpoint persistence": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847332
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394697
+      }
+    ],
+    "8.1 Write failing Scheduler property/unit tests before implementation": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847404
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394755
+      }
+    ],
+    "8.2 Implement SQLite Claim records and credential Leases": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847478
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394831
+      }
+    ],
+    "8.3 Write failing Slot-capacity tests and implement Operation Slots atomically": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847551
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394891
+      }
+    ],
+    "8.4 Implement completion health transitions and runtime protection quarantine": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847626
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657394952
+      }
+    ],
+    "8.5 Gate every adapter invocation with an Operation Slot and every credentialed invocation with a Claim": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847697
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395015
+      }
+    ],
+    "9.1 Write failing PostgreSQL concurrency and transaction-retry tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847776
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395075
+      }
+    ],
+    "9.2 Implement the PostgreSQL Scheduler strategy": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847853
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395156
+      }
+    ],
+    "9.3 Add query-plan and deployment-boundary release assertions": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847926
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395231
+      }
+    ],
+    "10.1 Revalidate Phase 0 GitHub and GitLab APIs before adapter implementation": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635847993
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395295
+      }
+    ],
+    "10.2 Write the complete failing GitHub search/content response table": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848064
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395364
+      }
+    ],
+    "10.3 Implement the versioned GitHub adapter and classifier": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848192
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395422
+      }
+    ],
+    "10.4 Wire a feature-flagged Master GitHub operation end to end": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848267
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395490
+      }
+    ],
+    "11.1 Write the complete failing GitLab search/content response table": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848335
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395548
+      }
+    ],
+    "11.2 Implement the versioned GitLab SaaS/self-hosted adapter": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848418
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395639
+      }
+    ],
+    "11.3 Wire and prove the Master GitLab vertical slice": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848490
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395754
+      }
+    ],
+    "12.1 Write failing WebAPI contract tests for all three routes": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848568
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395820
+      }
+    ],
+    "12.2 Implement Claim DTOs/controllers and node authentication integration": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848637
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395881
+      }
+    ],
+    "12.3 Keep configuration sync separate and deploy APIs before Worker execution": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848717
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657395964
+      }
+    ],
+    "13.1 Write failing Worker lifecycle and outage tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848792
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396041
+      }
+    ],
+    "13.2 Implement `WorkerScraperHostedService` and role-correct registration": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848873
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396112
+      }
+    ],
+    "13.3 Write failing provenance-report tests and implement immutable report validation": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635848949
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396170
+      }
+    ],
+    "13.4 Run the one-Worker canary path under flags": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849025
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396233
+      }
+    ],
+    "14.1 Write failing consent and public-operation property tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849093
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396303
+      }
+    ],
+    "14.2 Implement Consent Service and the public Scheduler path": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849179
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396368
+      }
+    ],
+    "14.3 Extend endpoint-security tests through the public path": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849256
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396434
+      }
+    ],
+    "15.1 Write failing role-filtered health and command tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849328
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396540
+      }
+    ],
+    "15.2 Route Config, Status, Telegram, and dashboard surfaces through platform services": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849410
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396607
+      }
+    ],
+    "15.3 Write failing metrics, redaction, and retention load tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849495
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396672
+      }
+    ],
+    "15.4 Implement provider/instance metrics, centralized redaction, and bounded audit retention": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849580
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396738
+      }
+    ],
+    "16.1 Re-run the fail-closed flag matrix against durable migration markers": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849661
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396830
+      }
+    ],
+    "16.2 Automate and test additive/backfill/shadow/Master/Worker-canary stages": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849746
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396890
+      }
+    ],
+    "16.3 Cut the fleet away from Worker credentials and secret sync": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849841
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657396956
+      }
+    ],
+    "16.4 Verify protected reads, scrub plaintext, and remove legacy runtime selection": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635849934
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397033
+      }
+    ],
+    "16.5 Execute rollback tests on both sides of plaintext scrub": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850146
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397102
+      }
+    ],
+    "17.1 Re-run characterization scenarios as desired-behavior regression tests": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850225
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397172
+      }
+    ],
+    "17.2 Run Phase 0 scale, security, schema, and transaction-exclusion evidence": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850297
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397297
+      }
+    ],
+    "17.3 Pass the complete GitHub/GitLab Definition of Done and deployment smoke gate": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850376
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397360
+      }
+    ],
+    "18.1 Revalidate the supported Sourcegraph API and write failing transport/stream fixtures": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850445
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397421
+      }
+    ],
+    "18.2 Implement the Sourcegraph adapter through the common platform": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850515
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397482
+      }
+    ],
+    "18.3 Pass Sourcegraph's full provider Definition of Done": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850593
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397561
+      }
+    ],
+    "19.1 Revalidate and document the November 1, 2026 deprecation premise immediately before implementation": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850662
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397635
+      }
+    ],
+    "19.2 Implement Bitbucket only if the decision gate is positive; otherwise record the skip": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850731
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397698
+      }
+    ],
+    "20.1 Revalidate supported Hub APIs and write failing model/dataset/Space fixtures": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850808
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397771
+      }
+    ],
+    "20.2 Implement and wire the Hugging Face adapter": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850886
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397835
+      }
+    ],
+    "20.3 Pass Hugging Face's complete Definition of Done before Azure work": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635850974
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397906
+      }
+    ],
+    "21.1 Revalidate Services/server APIs and write failing scoped-search fixtures": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635851047
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657397966
+      }
+    ],
+    "21.2 Implement and wire the Azure DevOps adapter": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635851122
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657398044
+      }
+    ],
+    "21.3 Pass Azure DevOps' complete Definition of Done before Gitea/Forgejo": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635851194
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657398103
+      }
+    ],
+    "22.1 Revalidate supported APIs and write failing flavor/version capability fixtures": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635851265
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657398177
+      }
+    ],
+    "22.2 Implement and wire the Gitea/Forgejo adapter": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635851350
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657398238
+      }
+    ],
+    "22.3 Pass the final provider Definition of Done and platform release gate": [
+      {
+        "executionId": "2ca18260-96df-47f3-a0d4-2d23466e99c7",
+        "chatSessionId": "sess_6aa8d57f-b640-4fa3-ac15-5764a53b77bc",
+        "timestamp": 1788635851420
+      },
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657398300
+      }
+    ],
+    "1. Lock the legacy defect boundary and executable release gate": [
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788657888268
+      }
+    ],
+    "2. Deliver Provider Instance identity, schema readiness, and a read-only health slice": [
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788663120214
+      }
+    ],
+    "3. Establish Scheduler Principals, exact grants, and privileged authorization": [
+      {
+        "executionId": "3972ce7c-2316-425b-9189-5de4cc764fb1",
+        "chatSessionId": "sess_12440dab-6531-41db-84a0-0333592b64bc",
+        "timestamp": 1788665085919
+      }
+    ],
+    "5. Import, reconcile, and retain credentials without identity loss": [
+      {
+        "executionId": "24ac3724-a8f8-4f8a-bea6-c388d0d87888",
+        "chatSessionId": "sess_6f8f3622-148c-4fa3-9fa4-8052474f3dd8",
+        "timestamp": 1788680233157
+      }
+    ]
+  }
+}

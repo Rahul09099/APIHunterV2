@@ -1,12 +1,18 @@
-using UnsecuredAPIKeys.Data.Models;
-using UnsecuredAPIKeys.Data.Common;
-
 namespace UnsecuredAPIKeys.Data.DTOs;
 
+/// <summary>
+/// Credential-free worker configuration. Provider access is obtained through a
+/// separate operation-scoped claim path; sync never transports credential material.
+/// </summary>
 public class NodeSyncDTO
 {
-    public List<SearchProviderTokenDTO> Tokens { get; set; } = new();
-    public List<SearchQueryDTO> Queries { get; set; } = new();
+    public List<SearchQueryDTO> Queries { get; set; } = [];
+
+    /// <summary>
+    /// Enabled provider instances the worker may claim against (Task 13.2).
+    /// Stable references only — never credential material.
+    /// </summary>
+    public List<ProviderInstanceDescriptor> ProviderInstances { get; set; } = [];
 
     /// <summary>Zero-based index of this node in the active node pool (for logging).</summary>
     public int NodeIndex { get; set; }
@@ -15,10 +21,12 @@ public class NodeSyncDTO
     public int TotalNodes { get; set; }
 }
 
-public class SearchProviderTokenDTO
+/// <summary>Non-secret descriptor of one enabled search provider instance.</summary>
+public class ProviderInstanceDescriptor
 {
-    public string Token { get; set; } = string.Empty;
-    public SearchProviderEnum SearchProvider { get; set; }
+    public Guid StableId { get; set; }
+    public UnsecuredAPIKeys.Data.Common.SearchProviderEnum ProviderKind { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
 }
 
 public class SearchQueryDTO
@@ -27,8 +35,10 @@ public class SearchQueryDTO
     public string Query { get; set; } = string.Empty;
     public bool IsEnabled { get; set; }
     public DateTime LastSearchUTC { get; set; }
-    /// <summary>Propagated to workers so pushed:> filter uses the real incremental window.</summary>
+
+    /// <summary>Propagated to workers so the incremental window uses the durable checkpoint.</summary>
     public DateTime? LastSuccessfulSearchUTC { get; set; }
-    /// <summary>Propagated to workers so LastRepoPushedSeenUTC checkpoint is not lost on sync.</summary>
+
+    /// <summary>Propagated so workers preserve the repository push checkpoint.</summary>
     public DateTime? LastRepoPushedSeenUTC { get; set; }
 }

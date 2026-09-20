@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using UnsecuredAPIKeys.Data;
+using UnsecuredAPIKeys.Providers;
+using UnsecuredAPIKeys.Providers._Interfaces;
 using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.Services.Telegram;
 using UnsecuredAPIKeys.WebAPI.Services;
@@ -44,13 +46,13 @@ builder.Services.AddSwaggerGen();
 
 // Configure Database
 var connectionString = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING");
-var dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") 
+var dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH")
     ?? Path.Combine(AppContext.BaseDirectory, "unsecuredapikeys.db");
 
 if (!string.IsNullOrEmpty(connectionString))
 {
     var parsedConnectionString = DBContext.ConvertPostgresUrl(connectionString);
-    var maskedConnectionString = parsedConnectionString.Contains("Password=") 
+    var maskedConnectionString = parsedConnectionString.Contains("Password=")
         ? System.Text.RegularExpressions.Regex.Replace(parsedConnectionString, "Password=[^;]+", "Password=********")
         : parsedConnectionString;
 
@@ -92,10 +94,89 @@ var nodeToken = Environment.GetEnvironmentVariable("NODE_TOKEN");
 
 // Register services
 builder.Services.AddHttpClient();
+builder.Services.AddSearchProviderAdapters();
+builder.Services.AddSingleton<CredentialProtectionService>();
+builder.Services.AddSingleton<CredentialFingerprintService>();
+builder.Services.AddSingleton<CredentialStorageMigrationGuard>();
+builder.Services.AddSingleton<CredentialStorageService>();
+builder.Services.AddScoped<CredentialMaterialAccessService>();
+builder.Services.AddScoped<CredentialPlaintextMigrationService>();
+builder.Services.AddScoped<CredentialProtectionReadinessService>();
 builder.Services.AddScoped<DatabaseService>();
+builder.Services.AddScoped<INodePrincipalResolver, NodePrincipalResolver>();
+builder.Services.AddScoped<ICredentialGrantEvaluator, CredentialGrantEvaluator>();
+builder.Services.AddSingleton<CredentialGrantBackfillState>();
+builder.Services.AddScoped<CredentialGrantBackfillService>();
+builder.Services.AddScoped<CredentialGrantReadinessService>();
+builder.Services.AddSingleton<IPrivilegePolicy, PrivilegePolicy>();
+builder.Services.AddSingleton<IAuditReasonSanitizer, AuditReasonSanitizer>();
+builder.Services.AddSingleton<CredentialStateService>();
+builder.Services.AddSingleton<CredentialMutationGate>();
+builder.Services.AddScoped<CredentialDuplicateReconciliationService>();
+builder.Services.AddScoped<WorkerDiscoveryReportValidator>();
+builder.Services.AddScoped<IDatabaseUtcClock, DatabaseUtcClock>();
+builder.Services.AddSingleton(new EndpointPolicyOptions());
+builder.Services.AddSingleton<IEndpointDnsResolver, EndpointDnsResolver>();
+builder.Services.AddScoped<EndpointPolicy>();
+if (!isWorkerMode)
+{
+    builder.Services.AddSingleton<EnvironmentBootstrapReadinessState>();
+    builder.Services.AddScoped<EnvironmentBootstrapService>();
+}
+builder.Services.AddScoped<IProviderInstanceCommandService, ProviderInstanceCommandService>();
+builder.Services.AddScoped<ProviderInstanceCatalogService>();
+builder.Services.AddScoped<ICredentialManagementService, CredentialManagementService>();
+builder.Services.AddScoped<ProviderInstanceReadinessService>();
+builder.Services.AddScoped<SearchPlatformSchedulingReadinessService>();
+builder.Services.AddScoped<ISearchPlatformSchedulingReadinessService>(serviceProvider =>
+    serviceProvider.GetRequiredService<SearchPlatformSchedulingReadinessService>());
+builder.Services.AddSingleton<SearchPlatformFeatureFlagMatrix>();
+builder.Services.AddSingleton<SearchPlatformRuntimeReadinessState>();
+builder.Services.AddSingleton<ProviderInstanceReadinessState>();
+builder.Services.AddScoped<SchedulingReadinessFilter>();
 builder.Services.AddScoped<VerifierService>();
 builder.Services.AddSingleton<BackgroundJobManager>();
 builder.Services.AddSingleton<DashboardAccessService>();
+
+// Wave 7: Work pipeline and result persistence
+builder.Services.AddScoped<IWorkService, WorkService>();
+builder.Services.AddScoped<ResultPersistenceService>();
+
+// Wave 14: Public-search consent and credential-free public operations
+builder.Services.AddScoped<IPublicSearchConsentService, PublicSearchConsentService>();
+builder.Services.AddScoped<PublicOperationSlotService>();
+builder.Services.AddScoped<PublicSearchOperationService>();
+
+// Wave 8 & 9: Credential Scheduler with injectable jitter (AC-6.19), policy options, and Postgres/SQLite strategies
+builder.Services.AddSingleton<LeasePolicyOptions>();
+builder.Services.AddSingleton<ISchedulerJitterSource, CryptographicSchedulerJitterSource>();
+builder.Services.AddScoped<SqliteCredentialScheduler>();
+builder.Services.AddScoped<PostgresCredentialScheduler>();
+builder.Services.AddScoped<ICredentialScheduler>(serviceProvider =>
+{
+    var context = serviceProvider.GetRequiredService<DBContext>();
+    return context.Database.IsNpgsql()
+        ? serviceProvider.GetRequiredService<PostgresCredentialScheduler>()
+        : serviceProvider.GetRequiredService<SqliteCredentialScheduler>();
+});
+
+// Wave 8.5: Safe Provider Adapter Runtime and Outcome Classifier
+builder.Services.AddSingleton<ISearchProviderOutcomeClassifier, SearchProviderOutcomeClassifier>();
+builder.Services.AddScoped<ISearchProviderAdapterRuntime, SearchProviderAdapterRuntime>();
+
+// Wave 14: Public-search consent and credential-free public operations
+builder.Services.AddScoped<IPublicSearchConsentService, PublicSearchConsentService>();
+builder.Services.AddScoped<PublicOperationSlotService>();
+builder.Services.AddScoped<PublicSearchOperationService>();
+
+// Wave 15: Platform telemetry, role-filtered health, and bounded retention
+builder.Services.AddSingleton(new SearchPlatformMetrics());
+builder.Services.AddSingleton(new PlatformRetentionOptions());
+builder.Services.AddScoped<CredentialHealthProjectionService>();
+builder.Services.AddScoped<PlatformRetentionService>();
+
+// Wave 16: Durable Worker-Claims cutover and rollback drain
+builder.Services.AddScoped<WorkerClaimsCutoverService>();
 
 if (isWorkerMode)
 {
@@ -103,6 +184,23 @@ if (isWorkerMode)
     Console.WriteLine($"📡 Master API Target: {masterApiUrl}");
     Console.WriteLine($"🔑 Node Token Configured: {(!string.IsNullOrEmpty(nodeToken) ? "Yes" : "No")}");
     builder.Services.AddHostedService<NodeKeepAliveService>();
+
+    // Wave 13: claim-enabled Worker orchestrator. Master mode never registers these;
+    // Master scraping routes through the common Scheduler instead (Task 10.4).
+    builder.Services.AddSingleton(new WorkerScraperOptions
+    {
+        MasterApiUrl = masterApiUrl ?? string.Empty,
+        NodeToken = nodeToken ?? string.Empty
+    });
+    builder.Services.AddHttpClient("WorkerMaster");
+    builder.Services.AddScoped<IMasterApiClient>(serviceProvider =>
+        new HttpMasterApiClient(
+            serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("WorkerMaster"),
+            serviceProvider.GetRequiredService<WorkerScraperOptions>().MasterApiUrl,
+            serviceProvider.GetRequiredService<WorkerScraperOptions>().NodeToken));
+    builder.Services.AddScoped<WorkerSecretExtractor>();
+    builder.Services.AddScoped<WorkerCycleRunner>();
+    builder.Services.AddHostedService<WorkerScraperHostedService>();
 }
 else
 {
@@ -112,17 +210,20 @@ else
 
 var app = builder.Build();
 
-// Health check endpoints placed at top of pipeline for immediate <1ms responses to Render health probes
+// Health check endpoints remain process-liveness probes. Scheduling readiness is
+// evaluated independently and includes the fail-closed feature-flag matrix.
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }));
 app.MapGet("/api/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }));
 
-// Auto-create SQLite database directory and schema if Npgsql connection string is not present
+// Initialize and validate every supported database provider. PostgreSQL may no longer
+// assume an externally supplied schema is current; SQLite remains a one-Master mode.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<DBContext>();
+    var readinessState = scope.ServiceProvider.GetRequiredService<ProviderInstanceReadinessState>();
     try
     {
-        if (string.IsNullOrEmpty(connectionString))
+        if (db.Database.IsSqlite())
         {
             var dbDir = Path.GetDirectoryName(dbPath);
             if (!string.IsNullOrEmpty(dbDir) && !Directory.Exists(dbDir))
@@ -130,13 +231,82 @@ using (var scope = app.Services.CreateScope())
                 Directory.CreateDirectory(dbDir);
                 Console.WriteLine($"📁 Created database directory: {dbDir}");
             }
-            db.Database.EnsureCreated();
-            Console.WriteLine("✅ SQLite Database initialized successfully.");
+        }
+
+        var databaseService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+        await databaseService.InitializeDatabaseAsync();
+
+        if (!isWorkerMode)
+        {
+            await scope.ServiceProvider
+                .GetRequiredService<EnvironmentBootstrapService>()
+                .RunAsync();
+        }
+
+        var grantBackfill = scope.ServiceProvider.GetRequiredService<CredentialGrantBackfillService>();
+        await grantBackfill.BackfillAsync();
+
+        // Default-instance linking is completed by database initialization. Environment
+        // imports are protected writes, and explicit grants are backfilled before duplicate
+        // identities are reconciled under the common mutation gate.
+        await scope.ServiceProvider
+            .GetRequiredService<CredentialDuplicateReconciliationService>()
+            .ReconcileAsync();
+
+        var migrationGuard = scope.ServiceProvider.GetRequiredService<CredentialStorageMigrationGuard>();
+        if (migrationGuard.CanVerifyProtectedReadsOnStartup)
+        {
+            var migrationService = scope.ServiceProvider.GetRequiredService<CredentialPlaintextMigrationService>();
+            var verification = await migrationService.VerifyEnabledProtectedReadsAsync();
+            Console.WriteLine(
+                $"[READY] Protected credential verification: " +
+                $"{(verification.AllEnabledCredentialsUseProtectedReads ? "verified" : "failed")}; " +
+                $"failures={verification.FailedCredentialStableIds.Count}.");
+        }
+
+        var protectionReadiness = await scope.ServiceProvider
+            .GetRequiredService<CredentialProtectionReadinessService>()
+            .EvaluateAsync();
+        var runtimeReadinessState = scope.ServiceProvider
+            .GetRequiredService<SearchPlatformRuntimeReadinessState>();
+        var priorRuntimeReadiness = runtimeReadinessState.Current;
+        runtimeReadinessState.Update(priorRuntimeReadiness with
+        {
+            ProtectedStorageReady = protectionReadiness.IsReady
+        });
+
+        var readinessService = scope.ServiceProvider.GetRequiredService<ISearchPlatformSchedulingReadinessService>();
+        var readiness = await readinessService.EvaluateAsync();
+        readinessState.Update(readiness);
+
+        Console.WriteLine(
+            $"[READY] Search platform: {(readiness.IsReady ? "ready" : "not ready")}; " +
+            $"coordination={readiness.CoordinationMode}; " +
+            $"distributed={readiness.DistributedCoordinationReady}.");
+        if (!readiness.IsReady)
+        {
+            Console.WriteLine($"[READY] Validation withheld readiness ({readiness.Failures.Count} issue(s)).");
         }
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"⚠️ Database initialization warning: {ex.Message}");
+        var coordinationMode = db.Database.IsSqlite()
+            ? DatabaseCoordinationMode.SingleMaster
+            : db.Database.IsNpgsql()
+                ? DatabaseCoordinationMode.Distributed
+                : DatabaseCoordinationMode.Unsupported;
+        readinessState.Update(new ProviderInstanceReadinessReport(
+            DatabaseReady: false,
+            SchemaReady: false,
+            ProviderInstancesReady: false,
+            MarkersReady: false,
+            CoordinationMode: coordinationMode,
+            DistributedCoordinationReady: false,
+            Failures: ["Database startup initialization failed."])
+        {
+            ConfigurationReady = false
+        });
+        Console.WriteLine($"⚠️ Database initialization failed closed ({ex.GetType().Name}).");
     }
 }
 
@@ -151,3 +321,8 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// Expose the minimal-host entry point to WebApplicationFactory without changing runtime behavior.
+public partial class Program
+{
+}

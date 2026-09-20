@@ -4,6 +4,7 @@ using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.DTOs;
 using UnsecuredAPIKeys.Data.Models;
 using UnsecuredAPIKeys.Data.Common;
+using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.WebAPI.Services;
 
 namespace UnsecuredAPIKeys.WebAPI.Controllers;
@@ -15,12 +16,21 @@ public class NodesController : ControllerBase
     private readonly DBContext _dbContext;
     private readonly ILogger<NodesController> _logger;
     private readonly DashboardAccessService _accessService;
+    private readonly INodePrincipalResolver _principalResolver;
+    private readonly WorkerDiscoveryReportValidator _reportValidator;
 
-    public NodesController(DBContext dbContext, ILogger<NodesController> logger, DashboardAccessService accessService)
+    public NodesController(
+        DBContext dbContext,
+        ILogger<NodesController> logger,
+        DashboardAccessService accessService,
+        INodePrincipalResolver principalResolver,
+        WorkerDiscoveryReportValidator reportValidator)
     {
         _dbContext = dbContext;
         _logger = logger;
         _accessService = accessService;
+        _principalResolver = principalResolver;
+        _reportValidator = reportValidator;
     }
 
     /// <summary>
@@ -59,21 +69,17 @@ public class NodesController : ControllerBase
     {
         if (string.IsNullOrEmpty(nodeToken)) return Unauthorized("Missing Node Token");
 
-        var node = await _dbContext.TelegramSubscribers
-            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
-
-        if (node == null) return Unauthorized("Invalid Node Token");
-
-        // Fetch tokens belonging to this user or ALL tokens if admin
-        var tokenQuery = _dbContext.SearchProviderTokens
-            .Where(t => t.IsEnabled && t.SearchProvider == SearchProviderEnum.GitHub);
-
-        if (!node.IsAdmin)
+        var resolution = await _principalResolver.ResolveNodeAsync(nodeToken, HttpContext.RequestAborted);
+        if (!resolution.IsAuthenticated) return Unauthorized("Invalid Node Token");
+        if (!resolution.IsResolved)
         {
-            tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == node.TelegramId || t.AddedByTelegramId == null);
+            return StatusCode(StatusCodes.Status403Forbidden, "Node has no registered Telegram principal mapping");
         }
 
-        var tokens = await tokenQuery.ToListAsync();
+        var principal = resolution.Principal!;
+
+        // Credential pools are deliberately absent from synchronization. Workers obtain
+        // one operation-scoped claim immediately before a credentialed provider request.
 
         // ── Query Partitioning ────────────────────────────────────────────────
         // Determine how many nodes are currently active (heartbeat within last 10 min).
@@ -94,7 +100,8 @@ public class NodesController : ControllerBase
         List<SearchQuery> assignedQueries;
 
         int totalNodes = activeNodeIds.Count;
-        int nodeIndex  = activeNodeIds.IndexOf(node.TelegramId);
+        var telegramPrincipalId = principal.TelegramPrincipalId!.Value;
+        int nodeIndex  = activeNodeIds.IndexOf(telegramPrincipalId);
 
         if (totalNodes <= 1 || nodeIndex < 0)
         {
@@ -111,62 +118,104 @@ public class NodesController : ControllerBase
                 .ToList();
         }
 
+        // Enabled provider instances as stable references (Task 13.2). Workers claim
+        // against these descriptors; sync never transports credential material.
+        var descriptors = await _dbContext.SearchProviderInstances
+            .AsNoTracking()
+            .Where(instance => instance.IsEnabled)
+            .OrderBy(instance => instance.ProviderKind)
+            .ThenBy(instance => instance.StableId)
+            .Select(instance => new ProviderInstanceDescriptor
+            {
+                StableId = instance.StableId,
+                ProviderKind = instance.ProviderKind,
+                DisplayName = instance.DisplayName
+            })
+            .ToListAsync(HttpContext.RequestAborted);
+
         var result = new NodeSyncDTO
         {
-            Tokens = tokens.Select(t => new SearchProviderTokenDTO 
-            { 
-                Token = t.Token, 
-                SearchProvider = t.SearchProvider 
-            }).ToList(),
-            Queries = assignedQueries.Select(q => new SearchQueryDTO 
-            { 
-                Id = q.Id, 
-                Query = q.Query, 
+            Queries = assignedQueries.Select(q => new SearchQueryDTO
+            {
+                Id = q.Id,
+                Query = q.Query,
                 IsEnabled = q.IsEnabled,
                 LastSearchUTC = q.LastSearchUTC,          // Workers use this for priority ordering
                 LastSuccessfulSearchUTC = q.LastSuccessfulSearchUTC, // Workers use this for pushed:> window
                 LastRepoPushedSeenUTC = q.LastRepoPushedSeenUTC      // Workers preserve repo push checkpoint
             }).ToList(),
+            ProviderInstances = descriptors,
             // Expose partition info so workers can log it
             NodeIndex  = nodeIndex < 0 ? 0 : nodeIndex,
             TotalNodes = totalNodes < 1 ? 1 : totalNodes
         };
 
         _logger.LogInformation(
-            "Node {Id} synced: partition {Index}/{Total}, {QCount} queries, {TCount} tokens",
-            node.TelegramId, result.NodeIndex + 1, result.TotalNodes,
-            result.Queries.Count, result.Tokens.Count);
+            "Node {Id} synced credential-free configuration: partition {Index}/{Total}, {QCount} queries",
+            telegramPrincipalId, result.NodeIndex + 1, result.TotalNodes,
+            result.Queries.Count);
 
         return Ok(result);
     }
 
     /// <summary>
-    /// Workers report discovered keys to the Master.
+    /// Workers report discovered keys to the Master with immutable normalized provenance.
+    /// Every discovery carries Provider Kind, Provider Instance, and Claim identity (plus
+    /// Work/Partition/Slot when present); omitted, unknown, conflicting, or mismatched
+    /// identity is rejected per item before persistence. Accepted findings retain their
+    /// actual provider attribution and existing classification.
     /// </summary>
     [HttpPost("report")]
     public async Task<IActionResult> Report(
-        [FromHeader(Name = "X-Node-Token")] string nodeToken, 
-        [FromBody] NodeBulkReportDto report)
+        [FromHeader(Name = "X-Node-Token")] string nodeToken,
+        [FromBody] NodeBulkReportDto? report)
     {
         if (string.IsNullOrEmpty(nodeToken)) return Unauthorized("Missing Node Token");
 
-        var node = await _dbContext.TelegramSubscribers
-            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken);
+        var resolution = await _principalResolver.ResolveNodeAsync(nodeToken, HttpContext.RequestAborted);
+        if (!resolution.IsAuthenticated) return Unauthorized("Invalid Node Token");
+        if (!resolution.IsResolved || resolution.Principal is null)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, "Node has no registered Telegram principal mapping");
+        }
 
-        if (node == null) return Unauthorized("Invalid Node Token");
+        var principal = resolution.Principal;
+
+        if (report?.Discoveries is null)
+        {
+            return BadRequest(new { message = "The discovery report carries no findings." });
+        }
+
+        var node = await _dbContext.TelegramSubscribers
+            .FirstOrDefaultAsync(s => s.NodeToken == nodeToken, HttpContext.RequestAborted);
 
         // Mark heartbeat during report too
-        node.LastNodeHeartbeatUtc = DateTime.UtcNow;
+        if (node is not null)
+        {
+            node.LastNodeHeartbeatUtc = DateTime.UtcNow;
+        }
+
+        var validation = await _reportValidator.ValidateAsync(
+            principal, report.Discoveries, HttpContext.RequestAborted);
 
         int newKeys = 0;
         var reportedApiKeys = report.Discoveries.Select(d => d.ApiKey).Distinct().ToList();
         var existingApiKeys = await _dbContext.APIKeys
             .Where(k => reportedApiKeys.Contains(k.ApiKey))
             .Select(k => k.ApiKey)
-            .ToListAsync();
+            .ToListAsync(HttpContext.RequestAborted);
 
-        foreach (var discovery in report.Discoveries)
+        var rejected = new List<object>();
+        for (var index = 0; index < report.Discoveries.Count; index++)
         {
+            var discovery = report.Discoveries[index];
+            var verdict = validation.Items[index];
+            if (!verdict.Accepted)
+            {
+                rejected.Add(new { index, reason = verdict.RejectionReason });
+                continue;
+            }
+
             if (existingApiKeys.Contains(discovery.ApiKey)) continue;
 
             var newKey = new APIKey
@@ -176,9 +225,11 @@ public class NodesController : ControllerBase
                 Status = ApiStatusEnum.Unverified,
                 FirstFoundUTC = DateTime.UtcNow,
                 LastFoundUTC = DateTime.UtcNow,
-                DiscoveredByTelegramId = node.TelegramId,
-                SearchProvider = SearchProviderEnum.GitHub,
-                Metadata = $"[GhostNode: {(!string.IsNullOrEmpty(node.Username) ? $"@{node.Username} ({node.TelegramId})" : node.TelegramId.ToString())}]"
+                DiscoveredByTelegramId = principal.TelegramPrincipalId,
+                SearchProvider = discovery.ProviderKind,
+                Metadata = node is null
+                    ? $"[GhostNode: {principal.TelegramPrincipalId}]"
+                    : $"[GhostNode: {(!string.IsNullOrEmpty(node.Username) ? $"@{node.Username} ({node.TelegramId})" : node.TelegramId.ToString())}]"
             };
 
             var repoRef = new RepoReference
@@ -188,21 +239,31 @@ public class NodesController : ControllerBase
                 FilePath = discovery.FilePath,
                 FileURL = discovery.FileUrl,
                 FoundUTC = DateTime.UtcNow,
-                Provider = "GitHub (Ghost)"
+                Provider = $"{discovery.ProviderKind} (Ghost)"
             };
             newKey.References.Add(repoRef);
 
             _dbContext.APIKeys.Add(newKey);
-            
+
             // Add to existing list to avoid duplicates within the same batch
             existingApiKeys.Add(discovery.ApiKey);
             newKeys++;
         }
 
-        await _dbContext.SaveChangesAsync();
-        _logger.LogInformation("Node {Id} reported {Count} keys ({New} new)", node.TelegramId, report.Discoveries.Count, newKeys);
+        await _dbContext.SaveChangesAsync(HttpContext.RequestAborted);
+        _logger.LogInformation(
+            "Node {Id} reported {Count} keys ({New} new, {Accepted} accepted, {Rejected} rejected)",
+            principal.TelegramPrincipalId, report.Discoveries.Count, newKeys,
+            validation.AcceptedCount, validation.RejectedCount);
 
-        return Ok(new { status = "success", addedCount = newKeys });
+        return Ok(new
+        {
+            status = "success",
+            addedCount = newKeys,
+            acceptedCount = validation.AcceptedCount,
+            rejectedCount = validation.RejectedCount,
+            rejected
+        });
     }
 
     /// <summary>

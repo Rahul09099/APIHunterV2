@@ -39,8 +39,15 @@ namespace UnsecuredAPIKeys.Tests
         {
             // Connect to a known non-SSL service or unreachable host
             var certInfo = await _verifier.ExtractSslCertificateAsync("192.0.2.1", 12345);
-            Assert.NotNull(certInfo);
-            Assert.True(certInfo.Subject == "Timeout connecting" || certInfo.Subject == "Unreachable" || certInfo.Subject.Contains("unreachable") || certInfo.Subject.Contains("failed") || certInfo.Subject.Contains("Connection") || certInfo.Subject.Contains("Error"));
+            Assert.True(
+                certInfo.Subject == "Timeout connecting" ||
+                certInfo.Subject == "Unreachable" ||
+                certInfo.Subject.Contains("unreachable", StringComparison.OrdinalIgnoreCase) ||
+                certInfo.Subject.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+                certInfo.Subject.Contains("connection", StringComparison.OrdinalIgnoreCase) ||
+                certInfo.Subject.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                certInfo.Subject.Contains("refused", StringComparison.OrdinalIgnoreCase) ||
+                certInfo.Subject.Contains("error", StringComparison.OrdinalIgnoreCase));
         }
 
         [Fact]

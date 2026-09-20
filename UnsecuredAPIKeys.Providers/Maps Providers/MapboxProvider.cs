@@ -10,11 +10,11 @@ namespace UnsecuredAPIKeys.Providers.Maps_Providers
 {
     /// <summary>
     /// Provider for Mapbox access tokens (pk. public, sk. secret, tk. temporary).
-    /// Auth: access_token query parameter. Mapbox APIs also support Bearer token authentication.
+    /// Auth: Bearer authorization header; credential material is never placed in a URL.
     ///
     /// Verification strategy:
     ///   1. Local JWT parsing: Extracts non-secret token metadata (token_type, scopes, allowedURLs, usage, exp)
-    ///   2. Live verification: GET https://api.mapbox.com/styles/v1/mapbox/streets-v12?access_token={apiKey}
+    ///   2. Live verification: authenticated GET to the Mapbox Styles API
     /// Official docs: https://docs.mapbox.com/api/accounts/tokens/
     /// </summary>
     [ApiProvider]
@@ -102,9 +102,14 @@ namespace UnsecuredAPIKeys.Providers.Maps_Providers
                 }
                 catch { /* Best effort local JWT parsing */ }
 
-                // Live verification call using Mapbox Styles API (streets-v12)
-                var endpoint = $"https://api.mapbox.com/styles/v1/mapbox/streets-v12?access_token={Uri.EscapeDataString(apiKey)}";
-                var response = await httpClient.GetAsync(endpoint);
+                // Live verification uses an authorization header so credential material never
+                // enters a URL, query string, proxy log, or HTTP instrumentation target.
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    "https://api.mapbox.com/styles/v1/mapbox/streets-v12");
+                request.Headers.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                using var response = await httpClient.SendAsync(request);
                 string responseBody = await response.Content.ReadAsStringAsync();
 
                 _logger?.LogDebug("Mapbox API response ({TokenType}): Status={StatusCode}", tokenType, response.StatusCode);

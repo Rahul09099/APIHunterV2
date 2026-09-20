@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Spectre.Console;
+using System.Collections;
 using System.Text.Json;
 
 using UnsecuredAPIKeys.Services;
@@ -35,17 +37,41 @@ await using var serviceProvider = services.BuildServiceProvider();
 var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
 var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
 
-// Initialize database
-var dbService = new DatabaseService(AppInfo.DatabaseName);
-DBContext? dbContext = null;
+// Initialize protected credential services from deployment configuration. Environment
+// variables use the standard double-underscore hierarchy separator.
+var credentialConfiguration = new ConfigurationManager();
+foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
+{
+    if (entry.Key is string key && entry.Value is string value)
+    {
+        credentialConfiguration[key.Replace("__", ":", StringComparison.Ordinal)] = value;
+    }
+}
+
+DBContext dbContext;
+DatabaseService dbService;
+CredentialMaterialAccessService credentialMaterialAccess;
 
 try
 {
-    dbContext = await dbService.InitializeDatabaseAsync();
+    dbContext = await dbContextFactory.CreateDbContextAsync();
+    var protectionService = new CredentialProtectionService(credentialConfiguration);
+    var fingerprintService = new CredentialFingerprintService(credentialConfiguration);
+    var migrationGuard = new CredentialStorageMigrationGuard(credentialConfiguration);
+    var storageService = new CredentialStorageService(
+        protectionService,
+        fingerprintService,
+        migrationGuard);
+    credentialMaterialAccess = new CredentialMaterialAccessService(
+        dbContext,
+        protectionService,
+        migrationGuard);
+    dbService = new DatabaseService(dbContext, storageService);
+    await dbService.InitializeDatabaseAsync();
 }
 catch (Exception ex)
 {
-    AnsiConsole.MarkupLine($"[red]Failed to initialize database: {Markup.Escape(ex.Message)}[/]");
+    AnsiConsole.MarkupLine($"[red]Failed to initialize database or protected credential storage: {Markup.Escape(ex.GetType().Name)}[/]");
     return;
 }
 
@@ -75,7 +101,11 @@ while (running)
     switch (choice[0])
     {
         case '1':
-            await RunScraperAsync(dbContext, dbContextFactory, httpClientFactory);
+            await RunScraperAsync(
+                dbContext,
+                dbContextFactory,
+                httpClientFactory,
+                credentialMaterialAccess);
             break;
         case '2':
             await RunVerifierAsync(dbContext, dbContextFactory, httpClientFactory);
@@ -84,29 +114,18 @@ while (running)
             await ShowStatusMenuAsync(dbContext, dbService);
             break;
         case '4':
-
-            if (dbContext != null)
+            var shouldReset = await ConfigureSettingsAsync(dbContext, dbService);
+            if (shouldReset)
             {
-                var shouldReset = await ConfigureSettingsAsync(dbContext, dbService);
-                if (shouldReset)
-                {
-                    // Dispose context to release file lock
-                    dbContext.Dispose();
-                    dbContext = null;
-                    
-                    // Perform reset
-                    await AnsiConsole.Status()
-                        .Spinner(Spinner.Known.Dots)
-                        .SpinnerStyle(Style.Parse("red"))
-                        .StartAsync("Resetting database...", async ctx =>
-                        {
-                            await dbService.ResetDatabaseAsync();
-                        });
+                await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .SpinnerStyle(Style.Parse("red"))
+                    .StartAsync("Resetting database...", async ctx =>
+                    {
+                        await dbService.ResetDatabaseAsync();
+                    });
 
-                    // Re-initialize
-                    dbContext = await dbService.InitializeDatabaseAsync();
-                    AnsiConsole.MarkupLine("[green]Database reset complete.[/]");
-                }
+                AnsiConsole.MarkupLine("[green]Database reset complete.[/]");
             }
             break;
         case '5':
@@ -128,7 +147,7 @@ while (running)
 }
 
 AnsiConsole.MarkupLine("[green]Goodbye![/]");
-dbContext?.Dispose();
+dbContext.Dispose();
 
 // === Helper Methods ===
 
@@ -161,7 +180,11 @@ void DisplayBanner()
     AnsiConsole.WriteLine();
 }
 
-async Task RunScraperAsync(DBContext db, IDbContextFactory<DBContext> dbFactory, IHttpClientFactory factory)
+async Task RunScraperAsync(
+    DBContext db,
+    IDbContextFactory<DBContext> dbFactory,
+    IHttpClientFactory factory,
+    CredentialMaterialAccessService materialAccessService)
 {
     AnsiConsole.Write(new Rule("[cyan]GitHub Scraper[/]").RuleStyle("cyan"));
     AnsiConsole.MarkupLine("[dim]Searches GitHub for exposed API keys. Runs continuously.[/]");
@@ -179,7 +202,11 @@ async Task RunScraperAsync(DBContext db, IDbContextFactory<DBContext> dbFactory,
     Console.CancelKeyPress += handler;
     try
     {
-        var scraper = new ScraperService(db, dbFactory, factory);
+        var scraper = new ScraperService(
+            db,
+            dbFactory,
+            factory,
+            materialAccessService: materialAccessService);
         await scraper.RunAsync(cts.Token);
     }
     finally
@@ -511,20 +538,22 @@ async Task ManageGitHubTokensAsync(DBContext db, DatabaseService dbService)
         
         var table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("ID");
-        table.AddColumn("Token (Masked)");
+        table.AddColumn("Credential Alias");
+        table.AddColumn("State");
         table.AddColumn("Last Used");
         
-        foreach (var t in tokens)
+        foreach (var credential in tokens)
         {
-            var masked = t.Token.Length > 8 
-                ? $"{t.Token.Substring(0, 4)}...{t.Token.Substring(t.Token.Length - 4)}" 
-                : "****";
-            table.AddRow(t.Id.ToString(), masked, t.LastUsedUTC?.ToString("g") ?? "Never");
+            table.AddRow(
+                credential.Id.ToString(),
+                credential.Alias,
+                credential.IsEnabled ? "Enabled" : "Disabled",
+                credential.LastUsedUtc?.ToString("g") ?? "Never");
         }
         
         if (tokens.Count == 0)
         {
-            table.AddRow("-", "[dim]No tokens found[/]", "-");
+            table.AddRow("-", "[dim]No credentials found[/]", "-", "-");
         }
         
         AnsiConsole.Write(table);
@@ -536,7 +565,7 @@ async Task ManageGitHubTokensAsync(DBContext db, DatabaseService dbService)
                 .AddChoices(new[]
                 {
                     "1. Add New Token",
-                    "2. Remove Token",
+                    "2. Credential Management Help",
                     "3. Back to Configuration"
                 }));
 
@@ -548,27 +577,8 @@ async Task ManageGitHubTokensAsync(DBContext db, DatabaseService dbService)
         }
         else if (choice.StartsWith("2"))
         {
-             if (tokens.Count == 0)
-             {
-                 AnsiConsole.MarkupLine("[red]No tokens to remove.[/]");
-                 await Task.Delay(1000);
-                 continue;
-             }
-
-             var tokenChoices = tokens.Select(t => $"{t.Id}").ToList();
-             tokenChoices.Add("Cancel");
-
-             var selectedId = AnsiConsole.Prompt(
-                 new SelectionPrompt<string>()
-                     .Title("Select Token ID to remove:")
-                     .AddChoices(tokenChoices));
-
-             if (selectedId != "Cancel" && int.TryParse(selectedId, out int id))
-             {
-                 await dbService.DeleteGitHubTokenAsync(db, id);
-                 AnsiConsole.MarkupLine($"[green]Token {id} removed.[/]");
-                 await Task.Delay(1000);
-             }
+            AnsiConsole.MarkupLine("[yellow]Credential disable, re-enable, and replacement require an authenticated administrator through the Config API or Telegram commands.[/]");
+            await Task.Delay(1500);
         }
     }
 }
@@ -600,8 +610,10 @@ async Task SetGitHubTokenAsync(DBContext db, DatabaseService dbService)
         if (!proceed) return;
     }
 
-    await dbService.AddGitHubTokenAsync(db, token);
-    AnsiConsole.MarkupLine("[green]GitHub token added successfully![/]");
+    var result = await dbService.AddGitHubTokenAsync(db, token);
+    AnsiConsole.MarkupLine(result.Created
+        ? $"[green]GitHub credential added (alias {result.Alias}).[/]"
+        : $"[yellow]GitHub credential already exists (alias {result.Alias}).[/]");
     await Task.Delay(1000);
 }
 

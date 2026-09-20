@@ -9,6 +9,7 @@ using Telegram.Bot.Types.Enums;
 using UnsecuredAPIKeys.Data;
 using UnsecuredAPIKeys.Data.Models;
 using UnsecuredAPIKeys.Data.Common;
+using UnsecuredAPIKeys.Providers;
 using System.Text;
 using System.Net.Http;
 using Microsoft.EntityFrameworkCore;
@@ -208,7 +209,8 @@ public class TelegramBotService : BackgroundService
 
         if (messageText != null)
         {
-            _logger.LogInformation("Received Telegram message: '{Text}' from '{ChatId}'", messageText, chatId);
+            var commandName = messageText.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "<empty>";
+            _logger.LogInformation("Received Telegram command '{Command}' from '{ChatId}'", commandName, chatId);
             await botClient.SendChatAction(chatId, ChatAction.Typing, cancellationToken: cancellationToken);
             await HandleCommand(chatId, messageText, user, isAdmin, isSuperAdmin, cancellationToken);
         }
@@ -271,6 +273,12 @@ public class TelegramBotService : BackgroundService
                     break;
                 case "/delete_token":
                     await HandleDeleteTokenCommand(chatId, args, isAdmin, cancellationToken);
+                    break;
+                case "/reenable_token":
+                    await HandleReenableTokenCommand(chatId, args, isAdmin, cancellationToken);
+                    break;
+                case "/replace_token":
+                    await HandleReplaceTokenCommand(chatId, args, isAdmin, cancellationToken);
                     break;
                 case "/queries":
                     if (isAdmin) await HandleListQueriesCommand(chatId, cancellationToken);
@@ -432,7 +440,14 @@ public class TelegramBotService : BackgroundService
                         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
                         var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
                         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-                        var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
+                        var materialAccessService = scope.ServiceProvider.GetRequiredService<CredentialMaterialAccessService>();
+                        var adapterRegistry = scope.ServiceProvider.GetRequiredService<SearchProviderAdapterRegistry>();
+                        var scraper = new ScraperService(
+                            dbContext,
+                            dbContextFactory,
+                            httpClientFactory,
+                            materialAccessService: materialAccessService,
+                            adapterRegistry: adapterRegistry);
                         await scraper.RunScrapeByGroupAsync(groupName, isDeep, chatId, ct);
                     }, chatId);
  
@@ -526,7 +541,14 @@ public class TelegramBotService : BackgroundService
                         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
                         var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
                         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-                        var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
+                        var materialAccessService = scope.ServiceProvider.GetRequiredService<CredentialMaterialAccessService>();
+                        var adapterRegistry = scope.ServiceProvider.GetRequiredService<SearchProviderAdapterRegistry>();
+                        var scraper = new ScraperService(
+                            dbContext,
+                            dbContextFactory,
+                            httpClientFactory,
+                            materialAccessService: materialAccessService,
+                            adapterRegistry: adapterRegistry);
                         await scraper.RunScrapeByGroupAsync(group, isDeep, chatId, ct);
                     }, userId);
 
@@ -615,7 +637,14 @@ public class TelegramBotService : BackgroundService
                     var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
                     var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
                     var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-                    var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
+                    var materialAccessService = scope.ServiceProvider.GetRequiredService<CredentialMaterialAccessService>();
+                        var adapterRegistry = scope.ServiceProvider.GetRequiredService<SearchProviderAdapterRegistry>();
+                    var scraper = new ScraperService(
+                        dbContext,
+                        dbContextFactory,
+                        httpClientFactory,
+                        materialAccessService: materialAccessService,
+                            adapterRegistry: adapterRegistry);
                     await scraper.RunScrapeAllGroupsAsync(chatId, ct);
                 }, chatId);
 
@@ -671,10 +700,9 @@ public class TelegramBotService : BackgroundService
         help.AppendLine("👻 <b>Ghost Node (Worker)</b>");
         help.AppendLine("├ /master_url - Master connection URL");
         help.AppendLine("├ /node_token - Your personal access token");
-        help.AppendLine("├ /tokens - List your GitHub tokens");
-        help.AppendLine("├ /add_token &lt;token&gt; - Add GitHub token");
-        help.AppendLine("├ /delete_token &lt;id&gt; - Delete your token");
-        help.AppendLine("├ /node_status - View your node status");
+        help.AppendLine("├ /tokens - List your provider credentials");
+        help.AppendLine("├ /add_token &lt;token&gt; - Add a provider credential");
+        help.AppendLine("└ /node_status - View your node status");
         help.AppendLine("├ /set_deploy_hook &lt;url&gt; - Save Render Deploy Hook");
         help.AppendLine("├ /remove_deploy_hook - Clear Deploy Hook");
         help.AppendLine("└ /redeploy_node - Deploy your worker from Telegram");
@@ -688,8 +716,11 @@ public class TelegramBotService : BackgroundService
             help.AppendLine("├ /list_subs - List all subscribers");
             help.AppendLine("├ /admins - List all admins");
             help.AppendLine("├ /set_admin &lt;id&gt; &lt;true/false&gt; - Toggle admin");
-            help.AppendLine("├ /manage_tokens &lt;id&gt; - Manage user's GitHub tokens");
-            help.AppendLine("├ /add_token_for &lt;id&gt; &lt;token&gt; - Add token for user");
+            help.AppendLine("├ /manage_tokens &lt;id&gt; - Manage user's provider credentials");
+            help.AppendLine("├ /add_token_for &lt;id&gt; &lt;token&gt; - Add credential for user");
+            help.AppendLine("├ /delete_token &lt;id&gt; - Disable a credential");
+            help.AppendLine("├ /reenable_token &lt;id&gt; - Re-enable a credential");
+            help.AppendLine("├ /replace_token &lt;id&gt; &lt;token&gt; - Replace credential material");
             help.AppendLine("├ /broadcast &lt;msg&gt; - Message all subscribers");
             help.AppendLine("├ /stop_all - Kill all running jobs");
             help.AppendLine("├ /redeploy_all - Redeploy all subscriber nodes");
@@ -909,7 +940,14 @@ public class TelegramBotService : BackgroundService
         var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
         var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-        var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
+        var materialAccessService = scope.ServiceProvider.GetRequiredService<CredentialMaterialAccessService>();
+                        var adapterRegistry = scope.ServiceProvider.GetRequiredService<SearchProviderAdapterRegistry>();
+        var scraper = new ScraperService(
+            dbContext,
+            dbContextFactory,
+            httpClientFactory,
+            materialAccessService: materialAccessService,
+                            adapterRegistry: adapterRegistry);
 
         var allGroups = await scraper.GetAvailableGroupsAsync(ct);
         var stats = await dbService.GetCategorizedStatisticsAsync(dbContext);
@@ -1185,22 +1223,24 @@ public class TelegramBotService : BackgroundService
             return;
         }
 
-        var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-        var statusTasks = tokens.Select(async t =>
-        {
-            var status = await CheckTokenStatusAsync(t.Token, httpClientFactory);
-            return (t.Id, Status: status);
-        });
-        var statuses = (await Task.WhenAll(statusTasks)).ToDictionary(x => x.Id, x => x.Status);
-
         var sb = new StringBuilder();
-        sb.AppendLine("<b>🔑 Search Provider Tokens:</b>");
-        foreach (var t in tokens)
+        sb.AppendLine("<b>🔑 Search Provider Credentials:</b>");
+        foreach (var credential in tokens)
         {
-            var preview = System.Net.WebUtility.HtmlEncode(t.Token);
-            var owner = t.AddedByTelegramId.HasValue ? $" [Owner: {t.AddedByTelegramId}]" : " [System]";
-            var status = statuses[t.Id];
-            sb.AppendLine($"- [{t.SearchProvider}] ID: <code>{t.Id}</code> | {preview} | Enabled: {t.IsEnabled}{(isAdmin ? owner : "")}   <b>{status}</b>");
+            var grantSummary = string.Join(", ", credential.Grants
+                .OrderBy(grant => grant.Scope)
+                .ThenBy(grant => grant.TelegramPrincipalId)
+                .Select(grant => grant.Scope == CredentialGrantScope.User
+                    ? $"User:{grant.TelegramPrincipalId}"
+                    : grant.Scope.ToString()));
+            var authorization = string.IsNullOrEmpty(grantSummary)
+                ? " [No Grant]"
+                : $" [Grants: {grantSummary}]";
+            var state = credential.IsEnabled ? "Enabled" : $"Disabled ({credential.DisabledReason ?? "Unavailable"})";
+            sb.AppendLine(
+                $"- [{credential.ProviderKind}] ID: <code>{credential.Id}</code> | " +
+                $"Alias: <code>{credential.Alias}</code> | {state}" +
+                $"{(isAdmin ? authorization : string.Empty)}");
         }
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
@@ -1221,41 +1261,142 @@ public class TelegramBotService : BackgroundService
         var isGitLab = token.StartsWith("glpat-", StringComparison.OrdinalIgnoreCase);
         var provider = isGitLab ? SearchProviderEnum.GitLab : SearchProviderEnum.GitHub;
 
-        await dbService.AddSearchProviderTokenAsync(dbContext, token, provider, chatId);
+        var result = await dbService.AddSearchProviderTokenAsync(dbContext, token, provider, chatId);
 
         var providerName = isGitLab ? "GitLab" : "GitHub";
-        await _botClient.SendMessage(chatId, $"✅ {providerName} token added successfully!", cancellationToken: ct);
+        var message = result.Created
+            ? $"✅ {providerName} credential added successfully (alias <code>{result.Alias}</code>)."
+            : $"ℹ️ {providerName} credential already exists (alias <code>{result.Alias}</code>).";
+        await _botClient.SendMessage(
+            chatId,
+            message,
+            parseMode: ParseMode.Html,
+            cancellationToken: ct);
     }
 
     private async Task HandleDeleteTokenCommand(long chatId, string arg, bool isAdmin, CancellationToken ct)
     {
-        if (!int.TryParse(arg, out int id))
+        if (!isAdmin)
         {
-            await _botClient.SendMessage(chatId, "❌ Please provide the token ID: /delete_token <id>", cancellationToken: ct);
+            await _botClient.SendMessage(chatId, "⛔ Administrator authorization is required.", cancellationToken: ct);
+            return;
+        }
+        if (!int.TryParse(arg, out var id))
+        {
+            await _botClient.SendMessage(chatId, "❌ Please provide the credential ID: /delete_token <id>", cancellationToken: ct);
             return;
         }
 
+        var result = await ExecuteCredentialManagementCommandAsync(
+            chatId,
+            id,
+            (service, stableId, actor) => service.DisableAsync(
+                stableId,
+                actor,
+                "Disabled through Telegram administrator command",
+                ct),
+            ct);
+        if (result is not null)
+        {
+            await _botClient.SendMessage(chatId, FormatCredentialManagementResult(result, "disabled"), cancellationToken: ct);
+        }
+    }
+
+    private async Task HandleReenableTokenCommand(long chatId, string arg, bool isAdmin, CancellationToken ct)
+    {
+        if (!isAdmin)
+        {
+            await _botClient.SendMessage(chatId, "⛔ Administrator authorization is required.", cancellationToken: ct);
+            return;
+        }
+        if (!int.TryParse(arg, out var id))
+        {
+            await _botClient.SendMessage(chatId, "❌ Please provide the credential ID: /reenable_token <id>", cancellationToken: ct);
+            return;
+        }
+
+        var result = await ExecuteCredentialManagementCommandAsync(
+            chatId,
+            id,
+            (service, stableId, actor) => service.ReenableAsync(
+                stableId,
+                actor,
+                "Re-enabled through Telegram administrator command",
+                ct),
+            ct);
+        if (result is not null)
+        {
+            await _botClient.SendMessage(chatId, FormatCredentialManagementResult(result, "re-enabled"), cancellationToken: ct);
+        }
+    }
+
+    private async Task HandleReplaceTokenCommand(long chatId, string arg, bool isAdmin, CancellationToken ct)
+    {
+        if (!isAdmin)
+        {
+            await _botClient.SendMessage(chatId, "⛔ Administrator authorization is required.", cancellationToken: ct);
+            return;
+        }
+
+        var parts = arg.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2 || !int.TryParse(parts[0], out var id) || string.IsNullOrWhiteSpace(parts[1]))
+        {
+            await _botClient.SendMessage(chatId, "❌ Usage: /replace_token <id> <new-token>", cancellationToken: ct);
+            return;
+        }
+
+        var replacementMaterial = parts[1];
+        var result = await ExecuteCredentialManagementCommandAsync(
+            chatId,
+            id,
+            (service, stableId, actor) => service.ReplaceAsync(
+                stableId,
+                replacementMaterial,
+                actor,
+                "Replaced through Telegram administrator command",
+                ct),
+            ct);
+        replacementMaterial = string.Empty;
+        if (result is not null)
+        {
+            await _botClient.SendMessage(chatId, FormatCredentialManagementResult(result, "replaced"), cancellationToken: ct);
+        }
+    }
+
+    private async Task<CredentialManagementResult?> ExecuteCredentialManagementCommandAsync(
+        long chatId,
+        int credentialId,
+        Func<ICredentialManagementService, Guid, SchedulerPrincipal, Task<CredentialManagementResult>> command,
+        CancellationToken ct)
+    {
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
-        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
-        
-        // Security check: Only owner or admin can delete
-        var token = await dbContext.SearchProviderTokens.FindAsync(id);
-        if (token == null)
+        var stableId = await dbContext.SearchProviderTokens
+            .AsNoTracking()
+            .Where(credential => credential.Id == credentialId)
+            .Select(credential => (Guid?)credential.StableId)
+            .SingleOrDefaultAsync(ct);
+        if (stableId is null)
         {
-            await _botClient.SendMessage(chatId, $"❌ Token ID {id} not found.", cancellationToken: ct);
-            return;
+            await _botClient.SendMessage(chatId, $"❌ Credential ID {credentialId} not found.", cancellationToken: ct);
+            return null;
         }
 
-        if (!isAdmin && token.AddedByTelegramId != chatId)
-        {
-            await _botClient.SendMessage(chatId, "⛔ You can only delete tokens that you added yourself.", cancellationToken: ct);
-            return;
-        }
-
-        await dbService.DeleteGitHubTokenAsync(dbContext, id);
-        await _botClient.SendMessage(chatId, $"✅ Token ID {id} deleted successfully.", cancellationToken: ct);
+        var service = scope.ServiceProvider.GetRequiredService<ICredentialManagementService>();
+        return await command(
+            service,
+            stableId.Value,
+            SchedulerPrincipal.ForTelegram(chatId, isAdministrator: true));
     }
+
+    private static string FormatCredentialManagementResult(CredentialManagementResult result, string action) =>
+        result.Status switch
+        {
+            CredentialManagementStatus.Succeeded => $"✅ Credential {action} successfully.",
+            CredentialManagementStatus.Archived => "❌ Archived credentials cannot be changed.",
+            CredentialManagementStatus.DuplicateMaterial => "❌ That replacement credential already exists.",
+            _ => "❌ Credential not found."
+        };
 
     private async Task HandleListQueriesCommand(long chatId, CancellationToken ct)
     {
@@ -2008,7 +2149,14 @@ public class TelegramBotService : BackgroundService
         var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
         var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-        var scraper = new ScraperService(dbContext, dbContextFactory, httpClientFactory);
+        var materialAccessService = scope.ServiceProvider.GetRequiredService<CredentialMaterialAccessService>();
+                        var adapterRegistry = scope.ServiceProvider.GetRequiredService<SearchProviderAdapterRegistry>();
+        var scraper = new ScraperService(
+            dbContext,
+            dbContextFactory,
+            httpClientFactory,
+            materialAccessService: materialAccessService,
+                            adapterRegistry: adapterRegistry);
 
         var groups = await scraper.GetAvailableGroupsAsync(ct);
 
@@ -2141,10 +2289,11 @@ public class TelegramBotService : BackgroundService
             return;
         }
 
-        var tokens = await dbContext.SearchProviderTokens
-            .Where(t => t.AddedByTelegramId == targetUserId && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab))
-            .OrderBy(t => t.Id)
-            .ToListAsync(ct);
+        var dbService = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+        var tokens = await dbService.GetSearchTokensAsync(
+            dbContext,
+            provider: null,
+            filterByTelegramId: targetUserId);
 
         var nameStr = !string.IsNullOrEmpty(targetUser.Username) ? $"@{targetUser.Username}" : $"{targetUserId}";
         var sb = new StringBuilder();
@@ -2157,20 +2306,12 @@ public class TelegramBotService : BackgroundService
         }
         else
         {
-            var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-            var statusTasks = tokens.Select(async t =>
+            foreach (var credential in tokens)
             {
-                var status = await CheckTokenStatusAsync(t.Token, httpClientFactory);
-                return (t.Id, Status: status);
-            });
-            var statuses = (await Task.WhenAll(statusTasks)).ToDictionary(x => x.Id, x => x.Status);
-
-            foreach (var t in tokens)
-            {
-                var status = t.IsEnabled ? "🟢" : "🔴";
-                var statusText = statuses[t.Id];
-                var fullToken = System.Net.WebUtility.HtmlEncode(t.Token);
-                sb.AppendLine($"{status} [{t.SearchProvider}] ID: <code>{t.Id}</code> | <code>{fullToken}</code> | <b>{statusText}</b>");
+                var status = credential.IsEnabled ? "🟢 Enabled" : "🔴 Disabled";
+                sb.AppendLine(
+                    $"{status} [{credential.ProviderKind}] ID: <code>{credential.Id}</code> | " +
+                    $"Alias: <code>{credential.Alias}</code>");
             }
         }
 
@@ -2206,23 +2347,22 @@ public class TelegramBotService : BackgroundService
         var isGitLab = token.StartsWith("glpat-", StringComparison.OrdinalIgnoreCase);
         var provider = isGitLab ? SearchProviderEnum.GitLab : SearchProviderEnum.GitHub;
 
-        // Check for duplicate
-        var exists = await dbContext.SearchProviderTokens
-            .AnyAsync(t => t.Token == token && t.SearchProvider == provider, ct);
-
-        if (exists)
-        {
-            await _botClient.SendMessage(chatId, "⚠️ This token already exists in the system.", cancellationToken: ct);
-            return;
-        }
-
-        await dbService.AddSearchProviderTokenAsync(dbContext, token, provider, targetUserId);
+        var result = await dbService.AddSearchProviderTokenAsync(
+            dbContext,
+            token,
+            provider,
+            targetUserId);
 
         var nameStr = !string.IsNullOrEmpty(targetUser.Username) ? $"@{targetUser.Username}" : $"{targetUserId}";
         var providerName = isGitLab ? "GitLab" : "GitHub";
-        await _botClient.SendMessage(chatId,
-            $"✅ {providerName} token added for <b>{System.Net.WebUtility.HtmlEncode(nameStr)}</b>.",
-            parseMode: ParseMode.Html, cancellationToken: ct);
+        var message = result.Created
+            ? $"✅ {providerName} credential added for <b>{System.Net.WebUtility.HtmlEncode(nameStr)}</b> (alias <code>{result.Alias}</code>)."
+            : $"ℹ️ That {providerName} credential already exists (alias <code>{result.Alias}</code>).";
+        await _botClient.SendMessage(
+            chatId,
+            message,
+            parseMode: ParseMode.Html,
+            cancellationToken: ct);
     }
 
     /// <summary>
@@ -2342,54 +2482,6 @@ public class TelegramBotService : BackgroundService
         sb.AppendLine("<i>Nodes are considered active if heartbeat &lt; 10 min ago.</i>");
 
         await _botClient.SendMessage(chatId, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct);
-    }
-
-    private async Task<string> CheckTokenStatusAsync(string token, IHttpClientFactory httpClientFactory)
-    {
-        try
-        {
-            using var client = httpClientFactory.CreateClient();
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("UnsecuredAPIKeys-Bot/1.1");
-            
-            if (token.StartsWith("glpat-", StringComparison.OrdinalIgnoreCase))
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Get, "https://gitlab.com/api/v4/user");
-                request.Headers.Add("PRIVATE-TOKEN", token);
-                var response = await client.SendAsync(request);
-                if (response.IsSuccessStatusCode) return "Valid (GitLab)";
-                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) return "Invalid";
-                return $"Error ({response.StatusCode})";
-            }
-            else
-            {
-                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-                var response = await client.GetAsync("https://api.github.com/rate_limit");
-                if (response.IsSuccessStatusCode)
-                {
-                    if (response.Headers.Contains("X-RateLimit-Remaining"))
-                    {
-                        var remainingStr = response.Headers.GetValues("X-RateLimit-Remaining").FirstOrDefault();
-                        if (int.TryParse(remainingStr, out int remaining) && remaining == 0)
-                        {
-                            return "Rate Limited";
-                        }
-                    }
-                    return "Valid";
-                }
-                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                {
-                    return "Invalid";
-                }
-                else
-                {
-                    return $"Error ({response.StatusCode})";
-                }
-            }
-        }
-        catch
-        {
-            return "Connection Error";
-        }
     }
 
     #endregion

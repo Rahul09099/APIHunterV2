@@ -15,12 +15,21 @@ public class ConfigController : ControllerBase
     private readonly DBContext _dbContext;
     private readonly DatabaseService _dbService;
     private readonly DashboardAccessService _accessService;
+    private readonly INodePrincipalResolver _principalResolver;
+    private readonly ICredentialManagementService _credentialManagement;
 
-    public ConfigController(DBContext dbContext, DatabaseService dbService, DashboardAccessService accessService)
+    public ConfigController(
+        DBContext dbContext,
+        DatabaseService dbService,
+        DashboardAccessService accessService,
+        INodePrincipalResolver principalResolver,
+        ICredentialManagementService credentialManagement)
     {
         _dbContext = dbContext;
         _dbService = dbService;
         _accessService = accessService;
+        _principalResolver = principalResolver;
+        _credentialManagement = credentialManagement;
     }
 
     private async Task<bool> IsAdministratorAsync(string? nodeToken, string? accessToken)
@@ -34,66 +43,174 @@ public class ConfigController : ControllerBase
         return await _dbContext.TelegramSubscribers.AnyAsync(s => s.NodeToken == nodeToken && s.IsAdmin);
     }
 
+    private async Task<(SchedulerPrincipal? Principal, IActionResult? Error)> ResolveCredentialAdministratorAsync(
+        string? nodeToken,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(nodeToken))
+        {
+            return (null, Unauthorized("An authenticated administrator node is required for credential management"));
+        }
+
+        var resolution = await _principalResolver.ResolveNodeAsync(nodeToken, cancellationToken);
+        if (!resolution.IsAuthenticated)
+        {
+            return (null, Unauthorized("An authenticated administrator node is required for credential management"));
+        }
+        if (resolution.Principal is not { IsAdministrator: true } principal)
+        {
+            return (null, Forbid());
+        }
+
+        return (principal, null);
+    }
+
     /// <summary>
-    /// Add a GitHub token
+    /// Add a protected GitHub credential. The controller never writes envelope or fingerprint fields.
     /// </summary>
     [HttpPost("github-token")]
     public async Task<IActionResult> AddGitHubToken(
         [FromBody] AddTokenRequest request,
         [FromHeader(Name = "X-Node-Token")] string? nodeToken = null,
-        [FromHeader(Name = "X-Access-Token")] string? accessToken = null)
+        [FromHeader(Name = "X-Access-Token")] string? accessToken = null,
+        CancellationToken cancellationToken = default)
     {
-        if (!await IsAdministratorAsync(nodeToken, accessToken)) return Unauthorized("Admin access required");
+        _ = accessToken; // Dashboard sessions do not carry the required Telegram audit actor.
+        var authorization = await ResolveCredentialAdministratorAsync(nodeToken, cancellationToken);
+        if (authorization.Error is not null) return authorization.Error;
 
         if (string.IsNullOrWhiteSpace(request.Token))
         {
             return BadRequest(new { message = "Token is required" });
         }
 
-        // Check if token already exists
-        var exists = await _dbContext.SearchProviderTokens
-            .AnyAsync(t => t.Token == request.Token && t.SearchProvider == SearchProviderEnum.GitHub);
-
-        if (exists)
+        var result = await _dbService.AddGitHubTokenAsync(_dbContext, request.Token);
+        if (!result.Created)
         {
-            return Conflict(new { message = "Token already exists" });
+            return Conflict(new
+            {
+                message = "Credential already exists",
+                credentialAlias = result.Alias
+            });
         }
 
-        var token = new SearchProviderToken
+        return Ok(new
         {
-            Token = request.Token,
-            SearchProvider = SearchProviderEnum.GitHub,
-            IsEnabled = true
-        };
-
-        _dbContext.SearchProviderTokens.Add(token);
-        await _dbContext.SaveChangesAsync();
-
-        return Ok(new { message = "GitHub token added successfully", tokenId = token.Id });
+            message = "GitHub credential added successfully",
+            credentialId = result.Id,
+            credentialAlias = result.Alias
+        });
     }
 
     /// <summary>
-    /// Delete a GitHub token
+    /// Compatibility route: deletion now performs an audited administrator disable and preserves identity/history.
     /// </summary>
     [HttpDelete("github-token/{id}")]
     public async Task<IActionResult> DeleteGitHubToken(
         int id,
+        [FromQuery] string? reason,
         [FromHeader(Name = "X-Node-Token")] string? nodeToken,
-        [FromHeader(Name = "X-Access-Token")] string? accessToken)
+        [FromHeader(Name = "X-Access-Token")] string? accessToken,
+        CancellationToken cancellationToken)
     {
-        if (!await IsAdministratorAsync(nodeToken, accessToken)) return Unauthorized("Admin access required");
+        _ = accessToken;
+        var authorization = await ResolveCredentialAdministratorAsync(nodeToken, cancellationToken);
+        if (authorization.Error is not null) return authorization.Error;
 
-        var token = await _dbContext.SearchProviderTokens.FindAsync(id);
-        
-        if (token == null)
+        var stableId = await FindCredentialStableIdAsync(id, cancellationToken);
+        if (stableId is null) return NotFound(new { message = "Credential not found" });
+
+        var result = await _credentialManagement.DisableAsync(
+            stableId.Value,
+            authorization.Principal!,
+            string.IsNullOrWhiteSpace(reason) ? "Disabled through Config API" : reason,
+            cancellationToken);
+        return ToCredentialManagementResult(result, "Credential disabled successfully");
+    }
+
+    [HttpPost("github-token/{id}/reenable")]
+    public async Task<IActionResult> ReenableGitHubToken(
+        int id,
+        [FromBody] CredentialManagementReasonRequest request,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken,
+        CancellationToken cancellationToken)
+    {
+        _ = accessToken;
+        var authorization = await ResolveCredentialAdministratorAsync(nodeToken, cancellationToken);
+        if (authorization.Error is not null) return authorization.Error;
+
+        var stableId = await FindCredentialStableIdAsync(id, cancellationToken);
+        if (stableId is null) return NotFound(new { message = "Credential not found" });
+
+        var result = await _credentialManagement.ReenableAsync(
+            stableId.Value,
+            authorization.Principal!,
+            request.Reason,
+            cancellationToken);
+        return ToCredentialManagementResult(result, "Credential re-enabled successfully");
+    }
+
+    [HttpPost("github-token/{id}/replace")]
+    public async Task<IActionResult> ReplaceGitHubToken(
+        int id,
+        [FromBody] ReplaceCredentialRequest request,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken,
+        [FromHeader(Name = "X-Access-Token")] string? accessToken,
+        CancellationToken cancellationToken)
+    {
+        _ = accessToken;
+        var authorization = await ResolveCredentialAdministratorAsync(nodeToken, cancellationToken);
+        if (authorization.Error is not null) return authorization.Error;
+        if (string.IsNullOrWhiteSpace(request.Token))
         {
-            return NotFound(new { message = "Token not found" });
+            return BadRequest(new { message = "Replacement credential is required" });
         }
 
-        _dbContext.SearchProviderTokens.Remove(token);
-        await _dbContext.SaveChangesAsync();
+        var stableId = await FindCredentialStableIdAsync(id, cancellationToken);
+        if (stableId is null) return NotFound(new { message = "Credential not found" });
 
-        return Ok(new { message = "GitHub token deleted successfully" });
+        var result = await _credentialManagement.ReplaceAsync(
+            stableId.Value,
+            request.Token,
+            authorization.Principal!,
+            request.Reason,
+            cancellationToken);
+        return ToCredentialManagementResult(result, "Credential replaced successfully");
+    }
+
+    private Task<Guid?> FindCredentialStableIdAsync(int id, CancellationToken cancellationToken) =>
+        _dbContext.SearchProviderTokens
+            .AsNoTracking()
+            .Where(credential => credential.Id == id)
+            .Select(credential => (Guid?)credential.StableId)
+            .SingleOrDefaultAsync(cancellationToken);
+
+    private IActionResult ToCredentialManagementResult(
+        CredentialManagementResult result,
+        string successMessage) =>
+        result.Status switch
+        {
+            CredentialManagementStatus.Succeeded => Ok(new
+            {
+                message = successMessage,
+                credentialStableId = result.CredentialStableId,
+                replacementStableId = result.ReplacementStableId
+            }),
+            CredentialManagementStatus.NotFound => NotFound(new { message = "Credential not found" }),
+            CredentialManagementStatus.Archived => Conflict(new { message = "Archived credentials cannot be mutated" }),
+            CredentialManagementStatus.DuplicateMaterial => Conflict(new { message = "Replacement credential already exists" }),
+            _ => StatusCode(StatusCodes.Status500InternalServerError)
+        };
+
+    public class CredentialManagementReasonRequest
+    {
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    public sealed class ReplaceCredentialRequest : CredentialManagementReasonRequest
+    {
+        public string Token { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -182,12 +299,10 @@ public class ConfigController : ControllerBase
     [HttpGet("export-keys")]
     public async Task<IActionResult> ExportKeys(
         [FromQuery] string format = "json",
-        [FromHeader(Name = "X-Node-Token")] string? nodeTokenHeader = null,
-        [FromQuery] string? nodeToken = null,
+        [FromHeader(Name = "X-Node-Token")] string? nodeToken = null,
         [FromHeader(Name = "X-Access-Token")] string? accessToken = null)
     {
-        var token = nodeTokenHeader ?? nodeToken ?? "";
-        if (!await IsAdministratorAsync(token, accessToken)) return Unauthorized("Admin access required for export");
+        if (!await IsAdministratorAsync(nodeToken, accessToken)) return Unauthorized("Admin access required for export");
 
         var query = _dbContext.APIKeys
             .Where(k => k.Status == ApiStatusEnum.Valid);

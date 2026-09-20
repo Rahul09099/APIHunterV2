@@ -9,7 +9,6 @@ using UnsecuredAPIKeys.Data.DTOs;
 using UnsecuredAPIKeys.Data.Models;
 using UnsecuredAPIKeys.Providers;
 using UnsecuredAPIKeys.Providers._Interfaces;
-using UnsecuredAPIKeys.Providers.Search_Providers;
 
 namespace UnsecuredAPIKeys.Services;
 
@@ -22,6 +21,8 @@ public class ScraperService
     private readonly IDbContextFactory<DBContext> _dbContextFactory;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ScraperService>? _logger;
+    private readonly ICredentialGrantEvaluator _grantEvaluator;
+    private readonly CredentialMaterialAccessService? _materialAccessService;
     private readonly IReadOnlyList<IApiKeyProvider> _providers;
     private CancellationTokenSource? _cancellationTokenSource;
     private readonly SemaphoreSlim _parallelSemaphore = new(4); // Limit concurrency for Render Free Tier (512MB RAM)
@@ -31,8 +32,8 @@ public class ScraperService
 
     private int _newKeysFound;
     private int _duplicateKeysFound;
-    private readonly GitHubSearchProvider _gitHubSearchProvider;
-    private readonly GitLabSearchProvider _gitLabSearchProvider;
+    private readonly SearchProviderAdapterRegistry _adapterRegistry;
+    private readonly MasterSearchOperationService? _masterOperations;
 
     // Worker Mode Properties
     public bool IsWorkerMode { get; set; } = false;
@@ -138,15 +139,26 @@ public class ScraperService
         }
     }
 
-    public ScraperService(DBContext dbContext, IDbContextFactory<DBContext> dbContextFactory, IHttpClientFactory httpClientFactory, ILogger<ScraperService>? logger = null)
+    public ScraperService(
+        DBContext dbContext,
+        IDbContextFactory<DBContext> dbContextFactory,
+        IHttpClientFactory httpClientFactory,
+        ILogger<ScraperService>? logger = null,
+        ICredentialGrantEvaluator? grantEvaluator = null,
+        CredentialMaterialAccessService? materialAccessService = null,
+        SearchProviderAdapterRegistry? adapterRegistry = null,
+        MasterSearchOperationService? masterOperations = null)
     {
         _dbContext = dbContext;
         _dbContextFactory = dbContextFactory;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _grantEvaluator = grantEvaluator ?? new CredentialGrantEvaluator(dbContext);
+        _materialAccessService = materialAccessService;
+        _masterOperations = masterOperations;
         _providers = ApiProviderRegistry.ScraperProviders;
-        _gitHubSearchProvider = new GitHubSearchProvider();
-        _gitLabSearchProvider = new GitLabSearchProvider(httpClientFactory.CreateClient());
+        _adapterRegistry = adapterRegistry ??
+            SearchProviderAdapterRegistration.CreateDefaultRegistry(httpClientFactory);
 
         // Pre-compile all regex patterns once at startup for performance
         var compiled = new List<(IApiKeyProvider, System.Text.RegularExpressions.Regex)>();
@@ -172,11 +184,124 @@ public class ScraperService
 
     private ISearchProvider GetSearchProvider(SearchProviderEnum providerEnum)
     {
-        return providerEnum switch
+        var adapter = _adapterRegistry.GetRequiredAdapter(providerEnum);
+        AdapterKindGuard.RequireMatchingKind(adapter.ProviderKind, providerEnum);
+
+        return adapter as ISearchProvider
+            ?? throw new InvalidOperationException(
+                $"The registered adapter for Provider Kind '{providerEnum}' does not expose the legacy search bridge.");
+    }
+
+    private async Task<SchedulerPrincipal?> ResolveMasterPrincipalAsync(
+        long? initiatingTelegramId,
+        CancellationToken cancellationToken)
+    {
+        if (initiatingTelegramId is null or 0)
         {
-            SearchProviderEnum.GitLab => _gitLabSearchProvider,
-            _ => _gitHubSearchProvider
-        };
+            return SchedulerPrincipal.System;
+        }
+
+        if (initiatingTelegramId < 0)
+        {
+            return null;
+        }
+
+        var subscriber = await _dbContext.TelegramSubscribers
+            .AsNoTracking()
+            .Where(candidate => candidate.TelegramId == initiatingTelegramId.Value)
+            .Select(candidate => new { candidate.TelegramId, candidate.IsAdmin })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return subscriber is null
+            ? null
+            : SchedulerPrincipal.ForTelegram(subscriber.TelegramId, subscriber.IsAdmin);
+    }
+
+    private async Task<List<CredentialOperationReference>> LoadAuthorizedCredentialReferencesAsync(
+        SchedulerPrincipal? principal,
+        CancellationToken cancellationToken)
+    {
+        if (principal is null)
+        {
+            return [];
+        }
+
+        var query = _grantEvaluator.ApplyAuthorization(
+            _dbContext.SearchProviderTokens
+                .AsNoTracking()
+                .Where(credential =>
+                    credential.IsEnabled &&
+                    credential.DisabledAtUtc == null &&
+                    !credential.IsArchived &&
+                    (credential.SearchProvider == SearchProviderEnum.GitHub ||
+                     credential.SearchProvider == SearchProviderEnum.GitLab)),
+            principal);
+
+        return await query
+            .OrderBy(credential => credential.Id)
+            .Select(credential => new CredentialOperationReference(
+                credential.StableId,
+                credential.SearchProvider,
+                credential.ProviderInstance!.StableId,
+                credential.Revision,
+                credential.LeaseId))
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase-0 migrated execution for one legacy query across both default search
+    /// provider instances (Task 10.4). Returns null when the migrated path is
+    /// unavailable — the caller must then use the legacy cursor path (explicit
+    /// pre-cutover rollback guarded by the Task 2.4 flag matrix). A non-null return
+    /// means both providers were executed through the durable platform and the
+    /// query must not be re-scraped by the legacy path.
+    /// </summary>
+    public async Task<IReadOnlyList<MasterOperationResult>?> TryRunMigratedQueryAsync(
+        SearchQuery query,
+        SchedulerPrincipal principal,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (_masterOperations is null)
+        {
+            return null;
+        }
+        if (!await _masterOperations.IsMigratedPathAvailableAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        var kinds = new[] { SearchProviderEnum.GitHub, SearchProviderEnum.GitLab };
+        var results = new List<MasterOperationResult>(kinds.Length);
+        foreach (var kind in kinds)
+        {
+            var instanceStableId = kind == SearchProviderEnum.GitHub
+                ? ProviderInstanceSchema.DefaultGitHubStableId
+                : ProviderInstanceSchema.DefaultGitLabStableId;
+            var result = await _masterOperations.ExecuteAsync(
+                principal,
+                NodeIdentifier,
+                Guid.NewGuid(),
+                new MasterOperationQuery(
+                    instanceStableId,
+                    kind,
+                    query.Query,
+                    SearchQueryId: query.Id >= int.MinValue && query.Id <= int.MaxValue
+                        ? (int)query.Id
+                        : null),
+                cancellationToken);
+            if (!result.MigratedPathTaken)
+            {
+                _logger?.LogWarning(
+                    "Migrated query became unavailable mid-execution for {Kind}; falling back to legacy.",
+                    kind);
+                return null;
+            }
+            results.Add(result);
+        }
+        return results;
     }
 
     public async Task<List<string>> GetAvailableGroupsAsync(CancellationToken cancellationToken = default)
@@ -202,22 +327,14 @@ public class ScraperService
         
         try
         {
-            // Fetch tokens belonging to this user or ALL tokens if admin
-            var tokenQuery = _dbContext.SearchProviderTokens
-                .Where(t => t.IsEnabled && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab));
+            var principal = await ResolveMasterPrincipalAsync(
+                discoveredBy,
+                _cancellationTokenSource.Token);
+            var credentials = await LoadAuthorizedCredentialReferencesAsync(
+                principal,
+                _cancellationTokenSource.Token);
 
-            // If not admin, restrict to tokens added by this user
-            // We'll assume if discoveredBy has a value, we should check their role.
-            // Better: Fetch the subscriber record to check IsAdmin.
-            var user = await _dbContext.TelegramSubscribers.FindAsync(discoveredBy);
-            if (user != null && !user.IsAdmin && discoveredBy.HasValue)
-            {
-                tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == discoveredBy.Value);
-            }
-
-            var tokens = await tokenQuery.ToListAsync(_cancellationTokenSource.Token);
-
-            if (tokens.Count == 0)
+            if (credentials.Count == 0)
             {
                 _logger?.LogWarning("No enabled search tokens found for user {UserId}", discoveredBy);
                 if (discoveredBy.HasValue && discoveredBy.Value != 0)
@@ -228,8 +345,12 @@ public class ScraperService
                 return;
             }
 
-            var githubTokens = tokens.Where(t => t.SearchProvider == SearchProviderEnum.GitHub).ToList();
-            var gitlabTokens = tokens.Where(t => t.SearchProvider == SearchProviderEnum.GitLab).ToList();
+            var githubCredentials = credentials
+                .Where(credential => credential.ProviderKind == SearchProviderEnum.GitHub)
+                .ToList();
+            var gitlabCredentials = credentials
+                .Where(credential => credential.ProviderKind == SearchProviderEnum.GitLab)
+                .ToList();
             var githubCursor = new TokenCursor { Index = 0 };
             var gitlabCursor = new TokenCursor { Index = 0 };
             
@@ -253,8 +374,8 @@ public class ScraperService
                 return;
             }
 
-            _logger?.LogInformation("Starting {Mode} scrape for {Count} queries in group {Group} (GitHub: {GhCount} tokens, GitLab: {GlCount} tokens)...",
-                isDeepSearch ? "DEEP" : "LITE", queriesToRun.Count, selectedGroupName, githubTokens.Count, gitlabTokens.Count);
+            _logger?.LogInformation("Starting {Mode} scrape for {Count} queries in group {Group} (GitHub: {GhCount} credentials, GitLab: {GlCount} credentials)...",
+                isDeepSearch ? "DEEP" : "LITE", queriesToRun.Count, selectedGroupName, githubCredentials.Count, gitlabCredentials.Count);
 
             foreach (var query in queriesToRun)
             {
@@ -269,8 +390,22 @@ public class ScraperService
 
                 try
                 {
+                    // Phase-0 cutover (Task 10.4): when the migrated Claim/Slot path is
+                    // available, this query executes through the durable platform for
+                    // both search providers. Otherwise fall through to the legacy
+                    // cursor path (explicit pre-cutover rollback, Task 2.4 matrix).
+                    if (principal is not null)
+                    {
+                        var migrated = await TryRunMigratedQueryAsync(
+                            query, principal, _cancellationTokenSource.Token);
+                        if (migrated is not null)
+                        {
+                            continue;
+                        }
+                    }
+
                     // Run GitHub and GitLab simultaneously in parallel
-                    await ExecuteParallelScrapeForQueryAsync(githubTokens, gitlabTokens, query, githubCursor, gitlabCursor, isDeepSearch, discoveredBy, _cancellationTokenSource.Token);
+                    await ExecuteParallelScrapeForQueryAsync(githubCredentials, gitlabCredentials, query, githubCursor, gitlabCursor, isDeepSearch, discoveredBy, _cancellationTokenSource.Token);
                 }
                 finally
                 {
@@ -329,17 +464,13 @@ public class ScraperService
         
         try
         {
-            var tokenQuery = _dbContext.SearchProviderTokens
-                .Where(t => t.IsEnabled && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab));
-
-            var user = await _dbContext.TelegramSubscribers.FindAsync(discoveredBy);
-            if (user != null && !user.IsAdmin && discoveredBy.HasValue)
-            {
-                tokenQuery = tokenQuery.Where(t => t.AddedByTelegramId == discoveredBy.Value);
-            }
-
-            var tokens = await tokenQuery.ToListAsync(_cancellationTokenSource.Token);
-            if (tokens.Count == 0)
+            var principal = await ResolveMasterPrincipalAsync(
+                discoveredBy,
+                _cancellationTokenSource.Token);
+            var credentials = await LoadAuthorizedCredentialReferencesAsync(
+                principal,
+                _cancellationTokenSource.Token);
+            if (credentials.Count == 0)
             {
                 _logger?.LogWarning("No enabled search tokens found for comprehensive scan for user {UserId}", discoveredBy);
                 if (discoveredBy.HasValue && discoveredBy.Value != 0)
@@ -418,103 +549,18 @@ public class ScraperService
 
     private async Task RunWorkerCycleAsync(CancellationToken ct)
     {
-        // 1. Sync tokens and queries from Master
+        // Configuration synchronization is credential-free. Until the operation-scoped
+        // Worker Claim path is enabled by a later task, workers must remain safely idle;
+        // environment and synchronized credential fallback are intentionally prohibited.
         var syncData = await SyncWithMasterAsync(ct);
-        
-        // 2. Identify tokens to use
-        var tokensToUse = new List<SearchProviderToken>();
-        
-        // Add Local Tokens (from Env Var)
-        var localTokensRaw = Environment.GetEnvironmentVariable("WORKER_GITHUB_TOKENS");
-        if (!string.IsNullOrEmpty(localTokensRaw))
-        {
-            var localTokens = localTokensRaw.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var t in localTokens)
-            {
-                tokensToUse.Add(new SearchProviderToken { Token = t.Trim(), SearchProvider = SearchProviderEnum.GitHub, IsEnabled = true });
-            }
-            Console.WriteLine($"[green]Loaded {localTokens.Length} LOCAL GitHub tokens from environment.[/]");
-        }
-
-        var localGitLabTokensRaw = Environment.GetEnvironmentVariable("WORKER_GITLAB_TOKENS");
-        if (!string.IsNullOrEmpty(localGitLabTokensRaw))
-        {
-            var localTokens = localGitLabTokensRaw.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var t in localTokens)
-            {
-                tokensToUse.Add(new SearchProviderToken { Token = t.Trim(), SearchProvider = SearchProviderEnum.GitLab, IsEnabled = true });
-            }
-            Console.WriteLine($"[green]Loaded {localTokens.Length} LOCAL GitLab tokens from environment.[/]");
-        }
-
-        // Add Master Tokens (assigned by admin)
-        if (syncData?.Tokens != null)
-        {
-            foreach (var t in syncData.Tokens)
-            {
-                if (!tokensToUse.Any(existing => existing.Token == t.Token))
-                {
-                    tokensToUse.Add(new SearchProviderToken { Token = t.Token, SearchProvider = t.SearchProvider, IsEnabled = true });
-                }
-            }
-            Console.WriteLine($"[green]Loaded {syncData.Tokens.Count} tokens from MASTER API.[/]");
-        }
-
-        if (tokensToUse.Count == 0)
-        {
-            _logger?.LogWarning("No GitHub tokens available. Worker is idle.");
-            return;
-        }
-
-        // 3. Identify queries to use — ordered by LastSearchUTC ASC to match master priority
         var queriesToRun = syncData?.Queries?
             .Where(q => q.IsEnabled)
             .OrderBy(q => q.LastSearchUTC)
-            .ToList() ?? new List<SearchQueryDTO>();
-        if (queriesToRun.Count == 0)
-        {
-            _logger?.LogWarning("No enabled search queries found on master. Worker is idling.");
-            return;
-        }
+            .ToList() ?? [];
 
-        Console.WriteLine($"[yellow]Starting scrape of {queriesToRun.Count} queries (partition {syncData?.NodeIndex + 1}/{syncData?.TotalNodes})...[/]");
-        var tokenCursor = new TokenCursor { Index = 0 };
-
-        foreach (var qDto in queriesToRun)
-        {
-            if (ct.IsCancellationRequested) break;
-
-            // Hydrate all checkpoint fields from master DTO so the worker's pushed:> filter
-            // uses the real incremental window instead of falling back to 7-day default.
-            var queryModel = new SearchQuery
-            {
-                Id = qDto.Id,
-                Query = qDto.Query,
-                IsEnabled = qDto.IsEnabled,
-                LastSearchUTC = qDto.LastSearchUTC,
-                LastSuccessfulSearchUTC = qDto.LastSuccessfulSearchUTC,
-                LastRepoPushedSeenUTC = qDto.LastRepoPushedSeenUTC
-            };
-
-            // Acquire distributed lock — skip if Master or another worker is already on this query
-            if (!await TryAcquireScrapeQueryLockAsync(queryModel.Id, ct))
-            {
-                Console.WriteLine($"[dim]Skipping '{queryModel.Query}' — locked by another node[/]");
-                continue;
-            }
-
-            try
-            {
-                await RunScrapingCycleUtilsAsync(tokensToUse, queryModel, tokenCursor, null, null);
-            }
-            finally
-            {
-                await ReleaseScrapeQueryLockAsync(queryModel.Id);
-            }
-
-            // Short delay between queries
-            await Task.Delay(LiteLimits.SEARCH_DELAY_MS, ct);
-        }
+        _logger?.LogWarning(
+            "Worker synchronized {QueryCount} queries but no operation-scoped credential Claim path is active; worker remains idle.",
+            queriesToRun.Count);
     }
 
     private async Task<NodeSyncDTO?> SyncWithMasterAsync(CancellationToken ct)
@@ -594,20 +640,23 @@ public class ScraperService
 
         Console.WriteLine("[cyan]Starting scraper...[/]");
 
-        // Get tokens
-        var tokens = await _dbContext.SearchProviderTokens
-            .Where(t => t.IsEnabled && (t.SearchProvider == SearchProviderEnum.GitHub || t.SearchProvider == SearchProviderEnum.GitLab))
-            .ToListAsync(cancellationToken);
+        var credentials = await LoadAuthorizedCredentialReferencesAsync(
+            SchedulerPrincipal.System,
+            cancellationToken);
 
-        if (tokens.Count == 0)
+        if (credentials.Count == 0)
         {
-            Console.WriteLine("[red]No search tokens configured. Use 'Configure Settings' to add one.[/]");
+            Console.WriteLine("[red]No authorized search credentials configured. Use 'Configure Settings' to add one.[/]");
             return;
         }
 
-        Console.WriteLine($"[dim]Loaded {tokens.Count} search token(s).[/]");
-        var githubTokens = tokens.Where(t => t.SearchProvider == SearchProviderEnum.GitHub).ToList();
-        var gitlabTokens = tokens.Where(t => t.SearchProvider == SearchProviderEnum.GitLab).ToList();
+        Console.WriteLine($"[dim]Loaded {credentials.Count} non-secret credential reference(s).[/]");
+        var githubCredentials = credentials
+            .Where(credential => credential.ProviderKind == SearchProviderEnum.GitHub)
+            .ToList();
+        var gitlabCredentials = credentials
+            .Where(credential => credential.ProviderKind == SearchProviderEnum.GitLab)
+            .ToList();
         var githubCursor = new TokenCursor { Index = 0 };
         var gitlabCursor = new TokenCursor { Index = 0 };
 
@@ -676,7 +725,7 @@ public class ScraperService
                 {
                     if (_cancellationTokenSource.Token.IsCancellationRequested) break;
 
-                    await ExecuteParallelScrapeForQueryAsync(githubTokens, gitlabTokens, query, githubCursor, gitlabCursor, isDeepSearch, discoveredBy, _cancellationTokenSource.Token);
+                    await ExecuteParallelScrapeForQueryAsync(githubCredentials, gitlabCredentials, query, githubCursor, gitlabCursor, isDeepSearch, discoveredBy, _cancellationTokenSource.Token);
 
                     // Delay between queries (if not the last one)
                     if (query != queriesToRun.Last())
@@ -743,8 +792,8 @@ public class ScraperService
     }
 
     private async Task ExecuteParallelScrapeForQueryAsync(
-        List<SearchProviderToken> githubTokens,
-        List<SearchProviderToken> gitlabTokens,
+        IReadOnlyList<CredentialOperationReference> githubTokens,
+        IReadOnlyList<CredentialOperationReference> gitlabTokens,
         SearchQuery query,
         TokenCursor githubCursor,
         TokenCursor gitlabCursor,
@@ -799,7 +848,7 @@ public class ScraperService
         }
     }
 
-    private async Task RunDeepSearchAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, long? discoveredBy)
+    private async Task RunDeepSearchAsync(IReadOnlyList<CredentialOperationReference> tokens, SearchQuery query, TokenCursor cursor, long? discoveredBy)
     {
         // Deep search strategy using language and file extension filters with progress tracking
         
@@ -968,7 +1017,7 @@ public class ScraperService
         AnsiConsole.WriteLine();
     }
 
-    private async Task<SearchResponse?> SearchPartitionAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string partitionType, string partitionValue, DeepSearchStats stats, long? discoveredBy)
+    private async Task<SearchResponse?> SearchPartitionAsync(IReadOnlyList<CredentialOperationReference> tokens, SearchQuery query, TokenCursor cursor, string partitionType, string partitionValue, DeepSearchStats stats, long? discoveredBy)
     {
         // Get or create progress record
         var progress = await _dbContext.DeepSearchProgress
@@ -1086,13 +1135,13 @@ public class ScraperService
     }
 
     private async Task SearchDateRangePartitionAsync(
-        List<SearchProviderToken> tokens, 
-        SearchQuery query, 
-        TokenCursor cursor, 
-        string baseFilter, 
-        DateTime startDate, 
-        DateTime endDate, 
-        DeepSearchStats stats, 
+        IReadOnlyList<CredentialOperationReference> tokens,
+        SearchQuery query,
+        TokenCursor cursor,
+        string baseFilter,
+        DateTime startDate,
+        DateTime endDate,
+        DeepSearchStats stats,
         long? discoveredBy)
     {
         if (_cancellationTokenSource!.Token.IsCancellationRequested) return;
@@ -1118,14 +1167,19 @@ public class ScraperService
         }
     }
 
-    private async Task<SearchResponse?> RunScrapingCycleUtilsAsync(List<SearchProviderToken> tokens, SearchQuery query, TokenCursor cursor, string? extraParams, long? discoveredBy, int startPage = 1)
+    private async Task<SearchResponse?> RunScrapingCycleUtilsAsync(IReadOnlyList<CredentialOperationReference> tokens, SearchQuery query, TokenCursor cursor, string? extraParams, long? discoveredBy, int startPage = 1)
     {
         int retryCount = 0;
         bool querySuccess = false;
         SearchResponse? finalResponse = null;
         var depletedTokens = new Dictionary<int, DateTime>();
 
-        while (!querySuccess && retryCount < (tokens.Count * 2)) // Allow orbiting tokens once
+        if (tokens.Count == 0)
+        {
+            return null;
+        }
+
+        while (!querySuccess && retryCount < (tokens.Count * 2)) // Allow orbiting credentials once
         {
             if (depletedTokens.ContainsKey(cursor.Index))
             {
@@ -1156,11 +1210,42 @@ public class ScraperService
                 }
             }
 
-            var currentToken = tokens[cursor.Index];
+            var currentCredential = tokens[cursor.Index];
             try
             {
-               finalResponse = await RunScrapingCycleAsync(currentToken, query, extraParams, discoveredBy, startPage);
-               querySuccess = true;
+                if (_materialAccessService is null)
+                {
+                    throw new CredentialProtectionException(
+                        "Current-operation credential access is not configured.");
+                }
+
+                var grant = _materialAccessService.GrantAfterCommit(
+                    currentCredential,
+                    Guid.NewGuid());
+                using var material = await _materialAccessService.DecryptGrantedAsync(
+                    grant,
+                    _cancellationTokenSource!.Token);
+                var operationToken = new SearchProviderToken
+                {
+                    StableId = currentCredential.CredentialStableId,
+                    SearchProvider = currentCredential.ProviderKind,
+                    Token = material.Value,
+                    IsEnabled = true
+                };
+                try
+                {
+                    finalResponse = await RunScrapingCycleAsync(
+                        operationToken,
+                        query,
+                        extraParams,
+                        discoveredBy,
+                        startPage);
+                    querySuccess = true;
+                }
+                finally
+                {
+                    operationToken.Token = string.Empty;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -1176,7 +1261,12 @@ public class ScraperService
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[red]Error with token {cursor.Index + 1}: {Markup.Escape(ex.Message)}. Switching token...[/]");
+                var alias = currentCredential.CredentialStableId.ToString("N")[..12];
+                Console.WriteLine($"[red]Credential {alias} failed. Switching credential...[/]");
+                _logger?.LogWarning(
+                    "Credential {CredentialAlias} operation failed with {FailureType}; switching credential.",
+                    alias,
+                    ex.GetType().Name);
                 cursor.Index = (cursor.Index + 1) % tokens.Count;
                 retryCount++;
 

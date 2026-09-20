@@ -42,8 +42,12 @@ namespace UnsecuredAPIKeys.Providers.Communication_Providers
                 // Branch 1: Access Tokens (ya29...) - Verification via Google TokenInfo API
                 if (apiKey.StartsWith("ya29.", StringComparison.OrdinalIgnoreCase))
                 {
-                    var tokenInfoUrl = $"https://oauth2.googleapis.com/tokeninfo?access_token={Uri.EscapeDataString(apiKey)}";
-                    using var response = await httpClient.GetAsync(tokenInfoUrl);
+                    using var request = new HttpRequestMessage(
+                        HttpMethod.Get,
+                        "https://oauth2.googleapis.com/tokeninfo");
+                    request.Headers.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                    using var response = await httpClient.SendAsync(request);
                     string responseBody = await response.Content.ReadAsStringAsync();
 
                     _logger?.LogDebug("Google OAuth TokenInfo response: Status={StatusCode}", response.StatusCode);

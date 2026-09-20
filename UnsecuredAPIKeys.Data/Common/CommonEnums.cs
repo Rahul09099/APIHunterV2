@@ -7,7 +7,12 @@ namespace UnsecuredAPIKeys.Data.Common
     {
         Unknown = -99,
         GitHub = 1,
-        GitLab = 2
+        GitLab = 2,
+        Sourcegraph = 3,
+        HuggingFace = 4,
+        AzureDevOps = 5,
+        Gitea = 6,
+        Forgejo = 7
     }
 
     /// <summary>

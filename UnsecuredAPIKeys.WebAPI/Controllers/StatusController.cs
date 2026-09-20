@@ -239,20 +239,19 @@ public class StatusController : ControllerBase
         var access = await GetAccess(nodeToken, accessToken);
         if (access is null || !access.IsAdmin) return Unauthorized("Admin access required");
 
-        var query = _dbContext.SearchProviderTokens
-            .Where(t => t.SearchProvider == SearchProviderEnum.GitHub);
-
-        var tokens = await query
-            .Select(t => new
-            {
-                t.Id,
-                t.IsEnabled,
-                t.LastUsedUTC,
-                tokenPreview = t.Token.Length > 10 ? t.Token.Substring(0, 10) + "..." : "***"
-            })
-            .ToListAsync();
-
-        return Ok(tokens);
+        var tokens = await _dbService.GetGitHubTokensAsync(_dbContext);
+        return Ok(tokens.Select(token => new
+        {
+            token.Id,
+            credentialAlias = token.Alias,
+            token.IsEnabled,
+            token.Source,
+            token.LastClaimedUtc,
+            token.LastUsedUtc,
+            token.CooldownUntilUtc,
+            token.DisabledReason,
+            token.DisabledAtUtc
+        }));
     }
 
     /// <summary>

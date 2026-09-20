@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using UnsecuredAPIKeys.Data;
+using UnsecuredAPIKeys.Providers;
 using UnsecuredAPIKeys.Services;
 using UnsecuredAPIKeys.Services.Telegram;
 using UnsecuredAPIKeys.WebAPI.Services;
@@ -17,19 +18,28 @@ public class ScraperController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly BackgroundJobManager _jobManager;
     private readonly DashboardAccessService _accessService;
+    private readonly ICredentialGrantEvaluator _grantEvaluator;
+    private readonly CredentialMaterialAccessService _materialAccessService;
+    private readonly SearchProviderAdapterRegistry _adapterRegistry;
 
     public ScraperController(
         DBContext dbContext,
         IDbContextFactory<DBContext> dbContextFactory,
         IHttpClientFactory httpClientFactory,
         BackgroundJobManager jobManager,
-        DashboardAccessService accessService)
+        DashboardAccessService accessService,
+        ICredentialGrantEvaluator grantEvaluator,
+        CredentialMaterialAccessService materialAccessService,
+        SearchProviderAdapterRegistry adapterRegistry)
     {
         _dbContext = dbContext;
         _dbContextFactory = dbContextFactory;
         _httpClientFactory = httpClientFactory;
         _jobManager = jobManager;
         _accessService = accessService;
+        _grantEvaluator = grantEvaluator;
+        _materialAccessService = materialAccessService;
+        _adapterRegistry = adapterRegistry;
     }
 
     private async Task<bool> IsAdministratorAsync(string? nodeToken, string? accessToken)
@@ -47,6 +57,7 @@ public class ScraperController : ControllerBase
     /// Start the scraper service in the background
     /// </summary>
     [HttpPost("start")]
+    [ServiceFilter(typeof(SchedulingReadinessFilter))]
     public async Task<IActionResult> StartScraper(
         [FromHeader(Name = "X-Node-Token")] string? nodeToken,
         [FromHeader(Name = "X-Access-Token")] string? accessToken)
@@ -57,8 +68,12 @@ public class ScraperController : ControllerBase
         var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => (j.JobType == "Scraper" || j.JobType == "AutoScraper-All" || j.JobType.StartsWith("Scraper-")) && j.Status == "Running");
         if (isAlreadyRunning) return Conflict(new { message = "A scraper job is already running." });
 
-        var hasTokens = await _dbContext.SearchProviderTokens
-            .AnyAsync(t => t.IsEnabled && t.SearchProvider == UnsecuredAPIKeys.Data.Common.SearchProviderEnum.GitHub);
+        var hasTokens = await _grantEvaluator.ApplyAuthorization(
+                _dbContext.SearchProviderTokens.Where(t =>
+                    t.IsEnabled &&
+                    t.SearchProvider == UnsecuredAPIKeys.Data.Common.SearchProviderEnum.GitHub),
+                SchedulerPrincipal.System)
+            .AnyAsync();
 
         if (!hasTokens)
         {
@@ -69,7 +84,13 @@ public class ScraperController : ControllerBase
 
         var jobId = _jobManager.StartJob("Scraper", async (cancellationToken) =>
         {
-            var scraper = new ScraperService(_dbContext, _dbContextFactory, _httpClientFactory);
+            var scraper = new ScraperService(
+                _dbContext,
+                _dbContextFactory,
+                _httpClientFactory,
+                grantEvaluator: _grantEvaluator,
+                materialAccessService: _materialAccessService,
+                adapterRegistry: _adapterRegistry);
             await scraper.RunScrapeAllGroupsAsync(null, cancellationToken);
         });
 
