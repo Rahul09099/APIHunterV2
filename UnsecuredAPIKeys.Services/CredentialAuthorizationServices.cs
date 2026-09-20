@@ -220,67 +220,72 @@ public sealed class CredentialGrantBackfillService(
                 "Legacy unowned credentials require an explicit Global or Admin grant policy.");
         }
 
-        var existingGrantKeys = (await dbContext.CredentialGrants
-                .AsNoTracking()
-                .Select(grant => new
-                {
-                    grant.CredentialId,
-                    grant.Scope,
-                    grant.TelegramPrincipalId
-                })
-                .ToListAsync(cancellationToken))
-            .Select(grant => (grant.CredentialId, grant.Scope, grant.TelegramPrincipalId))
-            .ToHashSet();
-
-        var userGrantsAdded = 0;
-        var compatibilityGrantsAdded = 0;
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-
-        try
+        var executionStrategy = dbContext.Database.CreateExecutionStrategy();
+        return await executionStrategy.ExecuteAsync(async () =>
         {
-            foreach (var credential in legacyCredentials)
+            dbContext.ChangeTracker.Clear();
+            var existingGrantKeys = (await dbContext.CredentialGrants
+                    .AsNoTracking()
+                    .Select(grant => new
+                    {
+                        grant.CredentialId,
+                        grant.Scope,
+                        grant.TelegramPrincipalId
+                    })
+                    .ToListAsync(cancellationToken))
+                .Select(grant => (grant.CredentialId, grant.Scope, grant.TelegramPrincipalId))
+                .ToHashSet();
+
+            var userGrantsAdded = 0;
+            var compatibilityGrantsAdded = 0;
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            try
             {
-                var scope = credential.AddedByTelegramId is > 0
-                    ? CredentialGrantScope.User
-                    : compatibilityScope!.Value;
-                var telegramPrincipalId = scope == CredentialGrantScope.User
-                    ? credential.AddedByTelegramId
-                    : null;
-                var key = (credential.Id, scope, telegramPrincipalId);
-                if (!existingGrantKeys.Add(key))
+                foreach (var credential in legacyCredentials)
                 {
-                    continue;
+                    var scope = credential.AddedByTelegramId is > 0
+                        ? CredentialGrantScope.User
+                        : compatibilityScope!.Value;
+                    var telegramPrincipalId = scope == CredentialGrantScope.User
+                        ? credential.AddedByTelegramId
+                        : null;
+                    var key = (credential.Id, scope, telegramPrincipalId);
+                    if (!existingGrantKeys.Add(key))
+                    {
+                        continue;
+                    }
+
+                    dbContext.CredentialGrants.Add(new CredentialGrant
+                    {
+                        CredentialId = credential.Id,
+                        Scope = scope,
+                        TelegramPrincipalId = telegramPrincipalId,
+                        CreatedUtc = DateTime.UtcNow
+                    });
+
+                    if (scope == CredentialGrantScope.User)
+                    {
+                        userGrantsAdded++;
+                    }
+                    else
+                    {
+                        compatibilityGrantsAdded++;
+                    }
                 }
 
-                dbContext.CredentialGrants.Add(new CredentialGrant
-                {
-                    CredentialId = credential.Id,
-                    Scope = scope,
-                    TelegramPrincipalId = telegramPrincipalId,
-                    CreatedUtc = DateTime.UtcNow
-                });
-
-                if (scope == CredentialGrantScope.User)
-                {
-                    userGrantsAdded++;
-                }
-                else
-                {
-                    compatibilityGrantsAdded++;
-                }
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                readinessState.MarkReady();
+                return new CredentialGrantBackfillResult(userGrantsAdded, compatibilityGrantsAdded);
             }
-
-            await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            readinessState.MarkReady();
-            return new CredentialGrantBackfillResult(userGrantsAdded, compatibilityGrantsAdded);
-        }
-        catch
-        {
-            await transaction.RollbackAsync(CancellationToken.None);
-            readinessState.MarkFailed();
-            throw;
-        }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                readinessState.MarkFailed();
+                throw;
+            }
+        });
     }
 
     private CredentialGrantScope? ResolveExplicitCompatibilityScope()
