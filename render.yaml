@@ -29,5 +29,7 @@ services:
         value: "5"
       - key: DOTNET_GCHeapHardLimitPercent
         value: "75"
+      - key: SearchCredentials__LegacyUnownedGrantScope
+        value: "Global"
 
 # Databases section removed as we are using Supabase (External PostgreSQL)

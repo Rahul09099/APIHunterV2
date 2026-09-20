@@ -239,6 +239,10 @@ VALUES
      443, '/', TRUE, FALSE, 4, 1, '{}', NULL,
      0, NULL, NULL, FALSE, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;
+ 
+UPDATE "SearchProviderTokens"
+   SET "SearchProvider" = 1
+ WHERE "SearchProvider" = 0;
 
 UPDATE "SearchProviderTokens" AS token
    SET "ProviderInstanceId" = instance."Id"

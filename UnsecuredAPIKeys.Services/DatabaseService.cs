@@ -425,6 +425,10 @@ public class DatabaseService
                  0, NULL, NULL, 0, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
             UPDATE "SearchProviderTokens"
+               SET "SearchProvider" = 1
+             WHERE "SearchProvider" = 0;
+
+            UPDATE "SearchProviderTokens"
                SET "ProviderInstanceId" = (
                    SELECT instance."Id"
                      FROM "SearchProviderInstances" AS instance
@@ -924,6 +928,10 @@ public class DatabaseService
                  0, NULL, NULL, FALSE, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT DO NOTHING;
 
+            UPDATE "SearchProviderTokens"
+               SET "SearchProvider" = 1
+             WHERE "SearchProvider" = 0;
+
             UPDATE "SearchProviderTokens" AS token
                SET "ProviderInstanceId" = instance."Id"
               FROM "SearchProviderInstances" AS instance
@@ -1080,7 +1088,7 @@ public class DatabaseService
                 "SearchQueryId" INTEGER,
                 "EffectiveQueryHash" VARCHAR(64) NOT NULL DEFAULT '',
                 "AdapterVersion" VARCHAR(128) NOT NULL DEFAULT '',
-                "QuerySnapshotJson" TEXT NOT NULL DEFAULT '{}',
+                "QuerySnapshotJson" TEXT NOT NULL DEFAULT '{{}}',
                 "IsTerminal" BOOLEAN NOT NULL DEFAULT FALSE,
                 "IsComplete" BOOLEAN NOT NULL DEFAULT FALSE,
                 "CreatedUtc" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1110,7 +1118,7 @@ public class DatabaseService
                 "WorkItemId" BIGINT NOT NULL,
                 "GenericQuery" TEXT NOT NULL DEFAULT '',
                 "NativeOverride" TEXT,
-                "SettingsJson" TEXT NOT NULL DEFAULT '{}'
+                "SettingsJson" TEXT NOT NULL DEFAULT '{{}}'
             );
             CREATE INDEX IF NOT EXISTS "IX_SearchQueryOverrides_WorkItemId" ON "SearchQueryOverrides" ("WorkItemId");
 
@@ -1132,7 +1140,7 @@ public class DatabaseService
                 "WorkItemId" BIGINT,
                 "WorkPartitionId" BIGINT,
                 "DiscoveredUtc" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                "ProvenanceJson" TEXT NOT NULL DEFAULT '{}',
+                "ProvenanceJson" TEXT NOT NULL DEFAULT '{{}}',
                 "ApiKeyId" INTEGER
             );
             CREATE INDEX IF NOT EXISTS "IX_NormalizedResults_WorkItemId" ON "NormalizedResults" ("WorkItemId");
@@ -1154,7 +1162,7 @@ public class DatabaseService
                 "Id" BIGSERIAL PRIMARY KEY,
                 "NormalizedResultId" BIGINT NOT NULL,
                 "EventKind" VARCHAR(64) NOT NULL DEFAULT '',
-                "PayloadJson" TEXT NOT NULL DEFAULT '{}',
+                "PayloadJson" TEXT NOT NULL DEFAULT '{{}}',
                 "IsProcessed" BOOLEAN NOT NULL DEFAULT FALSE,
                 "CreatedUtc" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 "ProcessedUtc" TIMESTAMP WITH TIME ZONE
