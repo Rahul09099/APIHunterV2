@@ -27,7 +27,9 @@ ENV DOTNET_gcServer=0
 ENV DOTNET_GCConserveMemory=5
 ENV DOTNET_GCHeapHardLimitPercent=75
 
-# Expose port (Render assigns this dynamically)
-EXPOSE $PORT
+# Port: hosting platforms inject PORT; default 8080 so Dokku can detect it
+ENV PORT=8080
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "UnsecuredAPIKeys.WebAPI.dll"]
