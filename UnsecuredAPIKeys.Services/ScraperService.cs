@@ -1077,8 +1077,24 @@ public class ScraperService
         
         stats.TotalRangesSearched++;
         var response = await RunScrapingCycleUtilsAsync(tokens, query, cursor, filter, discoveredBy, startPage);
-        int resultCount = response?.Results?.Count() ?? 0;
-        
+
+        if (response == null)
+        {
+            // Every credential failed for this partition (all tokens rejected / rate-limited /
+            // network failure). Do NOT mark the partition complete, otherwise a later Deep
+            // Search would skip it and the results would be permanently lost.
+            Console.WriteLine($"[red]Partition '{Markup.Escape(partitionValue)}' ({partitionType}) failed on all credentials; leaving it incomplete for the next run.[/]");
+            progress.LastSearchedUTC = DateTime.UtcNow;
+            if (!IsWorkerMode)
+            {
+                await _dbContext.SaveChangesAsync(_cancellationTokenSource.Token);
+            }
+            await Task.Delay(1000, _cancellationTokenSource!.Token);
+            return null;
+        }
+
+        int resultCount = response.Results?.Count() ?? 0;
+
         // Update progress
         progress.TotalResultsFound += resultCount;
         progress.LastPageSearched = response?.LastPageReached ?? progress.LastPageSearched;

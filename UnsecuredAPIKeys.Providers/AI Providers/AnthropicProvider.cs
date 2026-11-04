@@ -21,8 +21,8 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     public class AnthropicProvider : BaseApiKeyProvider
     {
         private const string API_ENDPOINT = "https://api.anthropic.com/v1/messages";
-        private const string ANTHROPIC_VERSION = "2023-06-01";
-        private const string DEFAULT_MODEL = "claude-haiku-4-5-20251001";
+        private const string ANTHROPIC_VERSION = "2026-10-21";
+        private const string DEFAULT_MODEL = "claude-haiku-5-5";
 
         public override string ProviderName => "Anthropic";
         public override ApiTypeEnum ApiType => ApiTypeEnum.AnthropicClaude;
@@ -142,6 +142,15 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         return ValidationResult.IsUnauthorized(statusCode, errorMessage ?? "Invalid API key (400 auth error)");
                     }
 
+                    // Some API versions report an unknown/retired model as a 400
+                    // invalid_request_error instead of a 404. The key itself is still valid.
+                    if ((bodyLower.Contains("model") && (bodyLower.Contains("not found") || bodyLower.Contains("not_found") || bodyLower.Contains("does not exist"))) ||
+                        string.Equals(errorType, "not_found_error", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger?.LogInformation("API key is valid (400 model-not-found confirms gateway acceptance)");
+                        return ValidationResult.Success(statusCode, "Valid key (model not found)");
+                    }
+
                     if (ContainsAny(bodyLower, QuotaIndicators) ||
                         bodyLower.Contains("credit balance") ||
                         bodyLower.Contains("credit_balance") ||
@@ -179,6 +188,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     };
 
                 case HttpStatusCode.InternalServerError: // 500 (api_error)
+                case HttpStatusCode.BadGateway:            // 502
                 case HttpStatusCode.ServiceUnavailable:   // 503
                 case HttpStatusCode.GatewayTimeout:        // 504
                 case (HttpStatusCode)529:                  // 529 (overloaded_error)

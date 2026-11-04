@@ -9,3 +9,4 @@ publish_win/
 .vscode/
 *.sqlite
 *.log
+.env

@@ -35,8 +35,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             // Emerging Google Gemini Developer / Auth keys (AQ.xxx format)
             @"\bAQ\.[0-9A-Za-z\-_]{40,65}\b",
 
-            // Context-aware assignment patterns
-            @"(?:GEMINI_API_KEY|GOOGLE_API_KEY|GEMINI_KEY)\s*[=:]\s*['""]?([A-Za-z0-9\-_.]+)['""]?"
+            // Context-aware assignment patterns (only capture real key shapes, not placeholders
+            // such as "your_api_key" or "z.string()")
+            @"(?:GEMINI_API_KEY|GOOGLE_API_KEY|GEMINI_KEY)\s*[=:]\s*['""]?(AIza[0-9A-Za-z\-_]{35,40}|AQ\.[0-9A-Za-z\-_]{40,65})['""]?"
         ];
 
         public GoogleProvider() : base() { }
@@ -98,81 +99,110 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 }
 
                 // ── Step 2: Select best inference model ────────────────────────────────
-                // Prioritize fast/flash models, then pro models, then first available
-                var selectedModel = modelsToUse.FirstOrDefault(m => m.ModelId.Contains("flash", StringComparison.OrdinalIgnoreCase))
-                                 ?? modelsToUse.FirstOrDefault(m => m.ModelId.Contains("pro", StringComparison.OrdinalIgnoreCase))
-                                 ?? modelsToUse.First();
+                // Prefer the newest flash model, then any flash, then pro, then anything else.
+                var preferredModels = modelsToUse
+                    .OrderByDescending(m => m.ModelId.Contains("gemini-3.8-flash", StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(m => m.ModelId.Contains("flash", StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(m => m.ModelId.Contains("pro", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
 
-                // Build exact endpoint URL: /v1beta/models/{model}:generateContent
-                string modelPath = selectedModel.ModelId.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
-                    ? selectedModel.ModelId
-                    : $"models/{selectedModel.ModelId}";
-
-                var generateEndpoint = $"https://generativelanguage.googleapis.com/v1beta/{modelPath}:generateContent";
-
-                using var generateRequest = new HttpRequestMessage(HttpMethod.Post, generateEndpoint);
-                generateRequest.Headers.Add("x-goog-api-key", apiKey);
-                generateRequest.Content = new StringContent(
-                    JsonSerializer.Serialize(new
-                    {
-                        contents = new[]
-                        {
-                            new
-                            {
-                                parts = new[] { new { text = "Hi" } }
-                            }
-                        }
-                    }),
-                    Encoding.UTF8,
-                    "application/json");
-
-                var generateResponse = await httpClient.SendAsync(generateRequest, cts.Token);
-                var generateBody = await generateResponse.Content.ReadAsStringAsync(cts.Token);
-
-                _logger?.LogDebug(
-                    "Google AI generateContent response ({Model}): Status={Status}, Body={Body}",
-                    modelPath,
-                    generateResponse.StatusCode,
-                    TruncateResponse(generateBody));
-
-                // ── 200 OK: Full inference verified ───────────────────────────────────
-                if (IsSuccessStatusCode(generateResponse.StatusCode))
+                // Try a few models so a single deprecated/unavailable model cannot make a
+                // perfectly valid key look invalid.
+                ValidationResult? lastModelError = null;
+                foreach (var candidate in preferredModels.Take(3))
                 {
-                    // Check if Google reported leaked key inside 200 response body
-                    if (IsLeakedKeyResponse(generateBody))
-                    {
-                        var leakedResult = ValidationResult.IsUnauthorized(
-                            HttpStatusCode.Forbidden,
-                            "Key reported as leaked by Google");
-                        leakedResult.Metadata = new Dictionary<string, object>
+                    string modelPath = candidate.ModelId.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
+                        ? candidate.ModelId
+                        : $"models/{candidate.ModelId}";
+
+                    var generateEndpoint = $"https://generativelanguage.googleapis.com/v1beta/{modelPath}:generateContent";
+
+                    using var generateRequest = new HttpRequestMessage(HttpMethod.Post, generateEndpoint);
+                    generateRequest.Headers.Add("x-goog-api-key", apiKey);
+                    generateRequest.Content = new StringContent(
+                        JsonSerializer.Serialize(new
                         {
-                            ["is_leaked"] = true,
-                            ["security_status"] = "LEAKED_KEY"
+                            contents = new[]
+                            {
+                                new
+                                {
+                                    parts = new[] { new { text = "Hi" } }
+                                }
+                            }
+                        }),
+                        Encoding.UTF8,
+                        "application/json");
+
+                    var generateResponse = await httpClient.SendAsync(generateRequest, cts.Token);
+                    var generateBody = await generateResponse.Content.ReadAsStringAsync(cts.Token);
+
+                    _logger?.LogDebug(
+                        "Google AI generateContent response ({Model}): Status={Status}, Body={Body}",
+                        modelPath,
+                        generateResponse.StatusCode,
+                        TruncateResponse(generateBody));
+
+                    // ── 200 OK: Full inference verified ───────────────────────────────
+                    if (IsSuccessStatusCode(generateResponse.StatusCode))
+                    {
+                        // Check if Google reported leaked key inside 200 response body
+                        if (IsLeakedKeyResponse(generateBody))
+                        {
+                            var leakedResult = ValidationResult.IsUnauthorized(
+                                HttpStatusCode.Forbidden,
+                                "Key reported as leaked by Google");
+                            leakedResult.Metadata = new Dictionary<string, object>
+                            {
+                                ["is_leaked"] = true,
+                                ["security_status"] = "LEAKED_KEY"
+                            };
+                            leakedResult.RawResponse = TruncateResponse(generateBody);
+                            return leakedResult;
+                        }
+
+                        var result = ValidationResult.Success(
+                            generateResponse.StatusCode,
+                            "Content generation successful");
+                        result.AvailableModels = modelsToUse;
+                        result.Metadata = new Dictionary<string, object>
+                        {
+                            ["authentication_valid"] = true,
+                            ["inference_tested"] = true,
+                            ["inference_working"] = true,
+                            ["tested_model"] = modelPath,
+                            ["api_endpoint_version"] = "v1beta",
+                            ["total_models_available"] = allModels.Count,
+                            ["models_scan_truncated"] = !string.IsNullOrEmpty(pageToken)
                         };
-                        leakedResult.RawResponse = TruncateResponse(generateBody);
-                        return leakedResult;
+                        result.RawResponse = TruncateResponse(generateBody);
+                        return result;
                     }
 
-                    var result = ValidationResult.Success(
-                        generateResponse.StatusCode,
-                        "Content generation successful");
-                    result.AvailableModels = modelsToUse;
-                    result.Metadata = new Dictionary<string, object>
+                    // A 404 means this particular model is retired/unavailable; try the next one.
+                    if (generateResponse.StatusCode == HttpStatusCode.NotFound)
                     {
-                        ["authentication_valid"] = true,
-                        ["inference_tested"] = true,
-                        ["inference_working"] = true,
-                        ["tested_model"] = modelPath,
-                        ["api_endpoint_version"] = "v1beta",
-                        ["total_models_available"] = allModels.Count,
-                        ["models_scan_truncated"] = !string.IsNullOrEmpty(pageToken)
-                    };
-                    result.RawResponse = TruncateResponse(generateBody);
-                    return result;
+                        lastModelError = ParseGoogleErrorResponse(generateBody, generateResponse.StatusCode, $"Model unavailable: {modelPath}", modelsToUse, modelPath);
+                        continue;
+                    }
+
+                    // Any other error (401/403/429/5xx) is decisive for the key itself.
+                    return ParseGoogleErrorResponse(generateBody, generateResponse.StatusCode, $"Generation failed on {modelPath}", modelsToUse, modelPath);
                 }
 
-                // ── Error Response Inspection ─────────────────────────────────────────
-                return ParseGoogleErrorResponse(generateBody, generateResponse.StatusCode, $"Generation failed on {modelPath}", modelsToUse, modelPath);
+                // Every candidate model was retired/unavailable. Step 1 already authenticated
+                // the key via the model-listing call, so do not mark a working key invalid.
+                var authOnlyResult = ValidationResult.Success(
+                    HttpStatusCode.OK,
+                    "Key authenticated via model listing (no runnable generateContent model found)");
+                authOnlyResult.AvailableModels = modelsToUse;
+                authOnlyResult.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = false,
+                    ["total_models_available"] = allModels.Count
+                };
+                authOnlyResult.RawResponse = lastModelError?.RawResponse;
+                return authOnlyResult;
             }
             catch (OperationCanceledException)
             {
@@ -301,8 +331,22 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             // 4. Quota vs Rate Limit handling (429 / RESOURCE_EXHAUSTED)
             if ((int)statusCode == 429 || errorStatus == "RESOURCE_EXHAUSTED")
             {
-                bool isQuotaExhausted = errorReason == "QUOTA_EXCEEDED" ||
-                    (errorMessage != null && (errorMessage.Contains("quota", StringComparison.OrdinalIgnoreCase) || errorMessage.Contains("insufficient", StringComparison.OrdinalIgnoreCase)));
+                var lowerMessage = errorMessage ?? string.Empty;
+
+                // A per-minute throttling error is NOT exhausted quota. Google returns
+                // "Quota exceeded for quota metric 'Generate Content API requests per minute'"
+                // for ordinary rate limiting, which would otherwise be misreported as
+                // ValidNoCredits. Only treat daily/credit exhaustion as a quota failure.
+                bool isRateLimit =
+                    errorReason == "RATE_LIMIT_EXCEEDED" ||
+                    lowerMessage.Contains("per minute", StringComparison.OrdinalIgnoreCase) ||
+                    lowerMessage.Contains("per-minute", StringComparison.OrdinalIgnoreCase) ||
+                    lowerMessage.Contains("rate limit", StringComparison.OrdinalIgnoreCase);
+
+                bool isQuotaExhausted = !isRateLimit &&
+                    (errorReason == "QUOTA_EXCEEDED" ||
+                     lowerMessage.Contains("quota", StringComparison.OrdinalIgnoreCase) ||
+                     lowerMessage.Contains("insufficient", StringComparison.OrdinalIgnoreCase));
 
                 if (isQuotaExhausted)
                 {

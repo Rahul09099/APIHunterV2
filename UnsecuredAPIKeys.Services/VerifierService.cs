@@ -549,6 +549,19 @@ public class VerifierService(
                         }
                         return false;
 
+                    case Providers.Common.ValidationAttemptStatus.ValidationUnavailable:
+                        // The provider could not validate right now (HTTP 429, 5xx, overloaded,
+                        // suspended project, etc.). This says nothing about whether the key is
+                        // valid, so NEVER mark it Invalid or purge its references here.
+                        key.ErrorCount++;
+                        key.ValidationResponse = result.Detail ?? "Validation temporarily unavailable";
+                        if (key.ErrorCount >= 3 && key.Status == ApiStatusEnum.Unverified)
+                        {
+                            key.Status = ApiStatusEnum.Error;
+                        }
+                        Console.WriteLine($"[yellow]~ Validation unavailable for {Markup.Escape(provider.ProviderName)} key #{key.Id}: {Markup.Escape(result.Detail ?? "transient error")}[/]");
+                        return false;
+
                     default:
                         // Provider-specific error - try next provider
                         continue;

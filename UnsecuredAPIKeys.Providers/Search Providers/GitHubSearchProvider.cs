@@ -77,6 +77,19 @@ namespace UnsecuredAPIKeys.Providers.Search_Providers
                         Console.WriteLine($"[yellow]GitHub API rate limit exceeded for this token. Reset at: {resetTime:HH:mm:ss} IST[/]");
                         throw;
                     }
+                    catch (ApiException apiEx) when (
+                        apiEx.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                        apiEx.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    {
+                        // 401 Bad credentials / 403 forbidden means this credential is unusable
+                        // (revoked, expired, missing scope, or secondary-rate-limited). Rethrow so
+                        // ScraperService rotates to the next credential instead of silently
+                        // returning zero results forever on a dead token.
+                        logger?.LogError(apiEx, "GitHub credential rejected (HTTP {StatusCode}) on page {Page}; rotating credential.",
+                            (int)apiEx.StatusCode, page);
+                        Console.WriteLine($"[red]GitHub credential rejected (HTTP {(int)apiEx.StatusCode}) on page {page}; rotating credential...[/]");
+                        throw;
+                    }
                     catch (ApiException apiEx)
                     {
                         logger?.LogError(apiEx, "GitHub API error during search on page {Page}. Status: {StatusCode}", page, apiEx.StatusCode);
