@@ -444,9 +444,15 @@ public sealed class ProviderInstanceReadinessService
                 }
             }
 
+            // PostgreSQL silently truncates identifiers to 63 bytes, so a constraint whose
+            // logical name is longer is stored under its 63-byte prefix.
+            var isPostgres = dbContext.Database.IsNpgsql();
             foreach (var constraint in RequiredConstraints)
             {
-                if (!snapshot.ConstraintDefinitions.ContainsKey(constraint))
+                var effectiveName = isPostgres && constraint.Length > 63
+                    ? constraint[..63]
+                    : constraint;
+                if (!snapshot.ConstraintDefinitions.ContainsKey(effectiveName))
                 {
                     failures.Add($"Required constraint '{constraint}' is missing.");
                 }

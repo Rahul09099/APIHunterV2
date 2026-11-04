@@ -286,6 +286,10 @@ using (var scope = app.Services.CreateScope())
         if (!readiness.IsReady)
         {
             Console.WriteLine($"[READY] Validation withheld readiness ({readiness.Failures.Count} issue(s)).");
+            foreach (var failure in readiness.Failures)
+            {
+                Console.WriteLine($"[READY]  - {failure}");
+            }
         }
     }
     catch (Exception ex)
@@ -306,7 +310,7 @@ using (var scope = app.Services.CreateScope())
         {
             ConfigurationReady = false
         });
-        Console.WriteLine($"⚠️ Database initialization failed closed ({ex.GetType().Name}).");
+        Console.WriteLine($"⚠️ Database initialization failed closed ({ex.GetType().Name}): {ex.Message}");
     }
 }
 
