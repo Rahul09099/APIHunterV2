@@ -21,6 +21,7 @@ public class ScraperController : ControllerBase
     private readonly ICredentialGrantEvaluator _grantEvaluator;
     private readonly CredentialMaterialAccessService _materialAccessService;
     private readonly SearchProviderAdapterRegistry _adapterRegistry;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public ScraperController(
         DBContext dbContext,
@@ -30,7 +31,8 @@ public class ScraperController : ControllerBase
         DashboardAccessService accessService,
         ICredentialGrantEvaluator grantEvaluator,
         CredentialMaterialAccessService materialAccessService,
-        SearchProviderAdapterRegistry adapterRegistry)
+        SearchProviderAdapterRegistry adapterRegistry,
+        IServiceScopeFactory scopeFactory)
     {
         _dbContext = dbContext;
         _dbContextFactory = dbContextFactory;
@@ -40,6 +42,7 @@ public class ScraperController : ControllerBase
         _grantEvaluator = grantEvaluator;
         _materialAccessService = materialAccessService;
         _adapterRegistry = adapterRegistry;
+        _scopeFactory = scopeFactory;
     }
 
     private async Task<bool> IsAdministratorAsync(string? nodeToken, string? accessToken)
@@ -91,13 +94,17 @@ public class ScraperController : ControllerBase
 
         var jobId = _jobManager.StartJob(jobName, async (cancellationToken) =>
         {
+            // The HTTP request scope is disposed as soon as this response is sent, so the
+            // background job must create and own its own service scope.
+            using var scope = _scopeFactory.CreateScope();
+            var scopedProvider = scope.ServiceProvider;
             var scraper = new ScraperService(
-                _dbContext,
-                _dbContextFactory,
-                _httpClientFactory,
-                grantEvaluator: _grantEvaluator,
-                materialAccessService: _materialAccessService,
-                adapterRegistry: _adapterRegistry);
+                scopedProvider.GetRequiredService<DBContext>(),
+                scopedProvider.GetRequiredService<IDbContextFactory<DBContext>>(),
+                scopedProvider.GetRequiredService<IHttpClientFactory>(),
+                grantEvaluator: scopedProvider.GetRequiredService<ICredentialGrantEvaluator>(),
+                materialAccessService: scopedProvider.GetRequiredService<CredentialMaterialAccessService>(),
+                adapterRegistry: scopedProvider.GetRequiredService<SearchProviderAdapterRegistry>());
 
             if (targetGroup is null)
             {

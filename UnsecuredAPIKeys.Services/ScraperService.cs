@@ -400,7 +400,10 @@ public class ScraperService
                     // available, this query executes through the durable platform for
                     // both search providers. Otherwise fall through to the legacy
                     // cursor path (explicit pre-cutover rollback, Task 2.4 matrix).
-                    if (principal is not null)
+                    // The migrated claim/platform path only performs a Lite search. When the
+                    // caller explicitly asked for Deep Search, honor it via the legacy
+                    // partition path instead of silently downgrading to Lite.
+                    if (principal is not null && !isDeepSearch)
                     {
                         var migrated = await TryRunMigratedQueryAsync(
                             query, principal, _cancellationTokenSource.Token);
