@@ -13,23 +13,20 @@ namespace UnsecuredAPIKeys.WebAPI.Controllers;
 public class VerifierController : ControllerBase
 {
     private readonly DBContext _dbContext;
-    private readonly IDbContextFactory<DBContext> _dbContextFactory;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly BackgroundJobManager _jobManager;
     private readonly DatabaseService _dbService;
     private readonly DashboardAccessService _accessService;
 
     public VerifierController(
         DBContext dbContext,
-        IDbContextFactory<DBContext> dbContextFactory,
-        IHttpClientFactory httpClientFactory,
+        IServiceScopeFactory scopeFactory,
         BackgroundJobManager jobManager,
         DatabaseService dbService,
         DashboardAccessService accessService)
     {
         _dbContext = dbContext;
-        _dbContextFactory = dbContextFactory;
-        _httpClientFactory = httpClientFactory;
+        _scopeFactory = scopeFactory;
         _jobManager = jobManager;
         _dbService = dbService;
         _accessService = accessService;
@@ -82,7 +79,11 @@ public class VerifierController : ControllerBase
 
         var jobId = _jobManager.StartJob("Verifier", async (cancellationToken) =>
         {
-            var verifier = new VerifierService(_dbContext, _dbContextFactory, _httpClientFactory, selectedTypes, reverify);
+            using var scope = _scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<DBContext>();
+            var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DBContext>>();
+            var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+            var verifier = new VerifierService(dbContext, dbContextFactory, httpClientFactory, selectedTypes, reverify);
             await verifier.RunAsync(cancellationToken);
         });
 
