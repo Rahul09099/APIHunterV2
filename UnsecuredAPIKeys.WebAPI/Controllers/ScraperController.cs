@@ -60,12 +60,19 @@ public class ScraperController : ControllerBase
     [ServiceFilter(typeof(SchedulingReadinessFilter))]
     public async Task<IActionResult> StartScraper(
         [FromHeader(Name = "X-Node-Token")] string? nodeToken,
-        [FromHeader(Name = "X-Access-Token")] string? accessToken)
+        [FromHeader(Name = "X-Access-Token")] string? accessToken,
+        [FromQuery] string? group = null,
+        [FromQuery] bool deep = false)
     {
         if (!await IsAdministratorAsync(nodeToken, accessToken))
             return Unauthorized(new { message = "Admin access required" });
 
-        var isAlreadyRunning = _jobManager.GetAllJobs().Any(j => (j.JobType == "Scraper" || j.JobType == "AutoScraper-All" || j.JobType.StartsWith("Scraper-")) && j.Status == "Running");
+        var targetGroup = string.IsNullOrWhiteSpace(group) ? null : group.Trim();
+        var jobName = targetGroup is null ? "Scraper" : $"Scraper-{targetGroup}";
+
+        var isAlreadyRunning = targetGroup is null
+            ? _jobManager.GetAllJobs().Any(j => (j.JobType == "Scraper" || j.JobType == "AutoScraper-All" || j.JobType.StartsWith("Scraper-")) && j.Status == "Running")
+            : _jobManager.GetAllJobs().Any(j => j.JobType == jobName && j.Status == "Running");
         if (isAlreadyRunning) return Conflict(new { message = "A scraper job is already running." });
 
         var hasTokens = await _grantEvaluator.ApplyAuthorization(
@@ -82,7 +89,7 @@ public class ScraperController : ControllerBase
             });
         }
 
-        var jobId = _jobManager.StartJob("Scraper", async (cancellationToken) =>
+        var jobId = _jobManager.StartJob(jobName, async (cancellationToken) =>
         {
             var scraper = new ScraperService(
                 _dbContext,
@@ -91,13 +98,23 @@ public class ScraperController : ControllerBase
                 grantEvaluator: _grantEvaluator,
                 materialAccessService: _materialAccessService,
                 adapterRegistry: _adapterRegistry);
-            await scraper.RunScrapeAllGroupsAsync(null, cancellationToken);
+
+            if (targetGroup is null)
+            {
+                await scraper.RunScrapeAllGroupsAsync(null, cancellationToken);
+            }
+            else
+            {
+                await scraper.RunScrapeByGroupAsync(targetGroup, deep, null, cancellationToken);
+            }
         });
 
         return Ok(new { 
             message = "Scraper started successfully",
             jobId = jobId,
-            status = "Running"
+            status = "Running",
+            group = targetGroup ?? "All",
+            mode = deep ? "Deep" : "Lite"
         });
     }
 
@@ -157,7 +174,7 @@ public class ScraperController : ControllerBase
             return Unauthorized(new { message = "Admin access required" });
 
         var jobs = _jobManager.GetAllJobs()
-            .Where(j => j.JobType == "Scraper");
+            .Where(j => j.JobType == "Scraper" || j.JobType == "AutoScraper-All" || j.JobType.StartsWith("Scraper-"));
         
         return Ok(jobs);
     }
