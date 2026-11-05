@@ -30,6 +30,12 @@ public static class LiteLimits
     /// Reduced to 50 to avoid loading too many keys into memory at once on Render free tier.
     /// </summary>
     public const int VERIFICATION_BATCH_SIZE = 50;
+
+    /// <summary>
+    /// How long a key that could not be verified (HTTP 429/5xx, suspended project, network
+    /// error) is left alone before the verifier retries it. Prevents tight retry loops.
+    /// </summary>
+    public const int VERIFICATION_RETRY_COOLDOWN_MINUTES = 10;
 }
 
 /// <summary>

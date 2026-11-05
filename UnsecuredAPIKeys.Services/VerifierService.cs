@@ -277,7 +277,10 @@ public class VerifierService(
 
         // Get unverified keys (filtered by selected types if applicable)
         // Get keys that need verification (Unverified or previously encountered an Error)
-        var query = dbContext.APIKeys.Where(k => k.Status == ApiStatusEnum.Unverified || k.Status == ApiStatusEnum.Error);
+        var cooldownCutoff = DateTime.UtcNow.AddMinutes(-LiteLimits.VERIFICATION_RETRY_COOLDOWN_MINUTES);
+        var query = dbContext.APIKeys.Where(k =>
+            (k.Status == ApiStatusEnum.Unverified || k.Status == ApiStatusEnum.Error) &&
+            (k.LastCheckedUTC == null || k.LastCheckedUTC < cooldownCutoff));
         if (_selectedApiTypes != null && _selectedApiTypes.Count > 0)
         {
             query = query.Where(k => _selectedApiTypes.Contains(k.ApiType));
