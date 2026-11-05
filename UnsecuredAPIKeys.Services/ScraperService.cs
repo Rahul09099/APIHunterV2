@@ -1034,7 +1034,7 @@ public class ScraperService
         AnsiConsole.WriteLine();
     }
 
-    private async Task<SearchResponse?> SearchPartitionAsync(IReadOnlyList<CredentialOperationReference> tokens, SearchQuery query, TokenCursor cursor, string partitionType, string partitionValue, DeepSearchStats stats, long? discoveredBy)
+    private async Task<SearchResponse?> SearchPartitionAsync(IReadOnlyList<CredentialOperationReference> tokens, SearchQuery query, TokenCursor cursor, string partitionType, string partitionValue, DeepSearchStats stats, long? discoveredBy, int depth = 0)
     {
         // Get or create progress record
         var progress = await _dbContext.DeepSearchProgress
@@ -1113,7 +1113,7 @@ public class ScraperService
         }
         
         // Handle "Hit Wall" logic
-        if (response != null && response.HitLimit)
+        if (response != null && response.HitLimit && depth == 0)
         {
             Console.WriteLine($"[yellow]⚠ Partition '{partitionValue}' hit the 1,000 result limit. Triggering sub-partitions...[/]");
             
@@ -1123,7 +1123,7 @@ public class ScraperService
             {
                 if (_cancellationTokenSource!.Token.IsCancellationRequested) break;
                 string subFilter = $"{filter} size:{bucket}";
-                await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy);
+                await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy, depth + 1);
             }
 
             // Subdivision Strategy 2: Common Paths
@@ -1132,7 +1132,7 @@ public class ScraperService
             {
                 if (_cancellationTokenSource!.Token.IsCancellationRequested) break;
                 string subFilter = $"{filter} path:{path}";
-                await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy);
+                await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy, depth + 1);
             }
 
             // Subdivision Strategy 3: Common Filenames
@@ -1141,10 +1141,18 @@ public class ScraperService
             {
                 if (_cancellationTokenSource!.Token.IsCancellationRequested) break;
                 string subFilter = $"{filter} filename:{fn}";
-                await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy);
+                await SearchPartitionAsync(tokens, query, cursor, "sub-partition", subFilter, stats, discoveredBy, depth + 1);
             }
 
             progress.IsCompleted = true; // The parent partition is effectively "managed" by sub-partitions now
+        }
+        else if (response != null && response.HitLimit)
+        {
+            // A sub-partition is already the finest granularity we generate. Never subdivide
+            // again: that produced exponentially growing qualifiers such as
+            // "size:0..500 size:0..500 size:0..500 ...".
+            Console.WriteLine($"[yellow]⚠ Sub-partition '{partitionValue}' still hit the 1,000 result limit; accepting partial results without further recursion.[/]");
+            progress.IsCompleted = true;
         }
         else if (resultCount < 1000)
         {
