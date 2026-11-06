@@ -184,7 +184,7 @@ Metrics are visible in the **View Status** screen and flushed to `ApplicationSet
 | OpenAI      | `/v1/models` + `/v1/chat/completions`            | `gpt-4o-mini` (auto)    |
 | Anthropic   | `/v1/messages`                                   | `claude-3-5-haiku-latest` |
 | Google AI   | `/v1beta/models` + `generateContent`             | `gemini-1.5-flash` (auto)|
-| DeepSeek    | `/v1/chat/completions`                           | `deepseek-chat`         |
+| DeepSeek    | `/user/balance`                                  | N/A (balance/availability check) |
 | XAI (Grok)  | `/v1/chat/completions`                           | `grok-3-mini`           |
 | Together AI | `/v1/chat/completions`                           | `Meta-Llama-3.1-8B-Instruct-Turbo` |
 | Cohere      | `/v2/chat`                                       | `command-r`             |

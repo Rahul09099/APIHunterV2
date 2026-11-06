@@ -63,13 +63,24 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                             hasBalance = true;
                         }
 
-                        if (hasBalance && balanceInfos.ValueKind == System.Text.Json.JsonValueKind.Array && balanceInfos.GetArrayLength() > 0)
+                        if (hasBalance && balanceInfos.ValueKind == JsonValueKind.Array && balanceInfos.GetArrayLength() > 0)
                         {
+                            // Prefer the USD row when the account holds multiple currencies.
                             var firstBalance = balanceInfos[0];
-                            string total = firstBalance.TryGetProperty("total_balance", out var t) ? (t.ValueKind == JsonValueKind.String ? t.GetString() : t.GetRawText()) ?? "0" : "0";
-                            string granted = firstBalance.TryGetProperty("granted_balance", out var g) ? (g.ValueKind == JsonValueKind.String ? g.GetString() : g.GetRawText()) ?? "0" : "0";
-                            string toppedUp = firstBalance.TryGetProperty("topped_up_balance", out var tu) ? (tu.ValueKind == JsonValueKind.String ? tu.GetString() : tu.GetRawText()) ?? "0" : "0";
-                            string currency = firstBalance.TryGetProperty("currency", out var curr) && curr.ValueKind == JsonValueKind.String ? curr.GetString() ?? "USD" : "USD";
+                            foreach (var info in balanceInfos.EnumerateArray())
+                            {
+                                if (info.TryGetProperty("currency", out var c) &&
+                                    string.Equals(c.GetString(), "USD", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    firstBalance = info;
+                                    break;
+                                }
+                            }
+
+                            string total = GetStringValue(firstBalance, "total_balance", "0");
+                            string granted = GetStringValue(firstBalance, "granted_balance", "0");
+                            string toppedUp = GetStringValue(firstBalance, "topped_up_balance", "0");
+                            string currency = GetStringValue(firstBalance, "currency", "USD");
                             
                             result.Balance = $"{total} {currency} (Grant: {granted}, Paid: {toppedUp})";
                             
@@ -85,15 +96,12 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         }
 
                         // Check availability
-                        if (root.TryGetProperty("is_available", out var isAvailable))
+                        if (root.TryGetProperty("is_available", out var isAvailable) &&
+                            (isAvailable.ValueKind == JsonValueKind.True || isAvailable.ValueKind == JsonValueKind.False) &&
+                            !isAvailable.GetBoolean())
                         {
-                            bool available = isAvailable.GetBoolean();
-                            
-                            if (!available)
-                            {
-                                result.Detail = "Key is valid but not currently available (insufficient balance/quota)";
-                                result.IsQuotaExceeded = true;
-                            }
+                            result.Detail = "Key is valid but not currently available (insufficient balance/quota)";
+                            result.IsQuotaExceeded = true;
                         }
                     }
                     catch (Exception ex)
@@ -109,9 +117,27 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 {
                     return ValidationResult.IsUnauthorized(response.StatusCode);
                 }
+                else if (response.StatusCode == HttpStatusCode.PaymentRequired)
+                {
+                    // The key authenticated but has no balance. That is a valid key.
+                    var noCredits = ValidationResult.Success(response.StatusCode, "Valid DeepSeek key but insufficient balance (HTTP 402)");
+                    noCredits.IsQuotaExceeded = true;
+                    noCredits.RawResponse = TruncateResponse(responseBody, 200);
+                    return noCredits;
+                }
                 else if ((int)response.StatusCode == 429)
                 {
-                    return ValidationResult.Success(response.StatusCode, "Rate limited (key is valid)");
+                    // A rate limit does not prove the key is valid or invalid.
+                    return ValidationResult.ValidationUnavailable(response.StatusCode, "DeepSeek rate limit exceeded (HTTP 429)");
+                }
+                else if (response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    // 403 can be region/permission related; treat as transient instead of invalidating.
+                    return ValidationResult.ValidationUnavailable(response.StatusCode, "DeepSeek returned 403 Forbidden");
+                }
+                else if ((int)response.StatusCode >= 500)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode, $"DeepSeek server error (HTTP {(int)response.StatusCode})");
                 }
                 else
                 {
@@ -123,10 +149,17 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             }
             catch (Exception ex)
             {
-                return ValidationResult.HasHttpError(HttpStatusCode.ServiceUnavailable, $"Connection failed: {ex.Message}");
+                return ValidationResult.HasNetworkError($"Connection failed: {ex.Message}");
             }
         }
 
+
+        private static string GetStringValue(JsonElement element, string propertyName, string fallback)
+        {
+            if (!element.TryGetProperty(propertyName, out var value))
+                return fallback;
+            return value.ValueKind == JsonValueKind.String ? value.GetString() ?? fallback : value.GetRawText();
+        }
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
