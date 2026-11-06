@@ -18,7 +18,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Key format: jina_{alphanumeric}
     /// Auth: Authorization: Bearer {apiKey}
     /// Verification: POST https://api.jina.ai/v1/embeddings
-    ///   - Uses jina-embeddings-v4 with minimal input ["test"]
+    ///   - Uses jina-embeddings-v5-text-small with minimal input ["test"]
     /// Token billing: 10M free tokens on signup (per official docs). Top-up available at jina.ai.
     /// Docs: https://api.jina.ai/docs
     /// </summary>
@@ -42,7 +42,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         {
             try
             {
-                const string body = """{"model":"jina-embeddings-v4","input":["test"]}""";
+                const string body = """{"model":"jina-embeddings-v5-text-small","input":["test"]}""";
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.jina.ai/v1/embeddings");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
@@ -65,7 +65,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         ["api_operation_tested"] = true,
                         ["api_operation_working"] = true,
                         ["operation"] = "embeddings",
-                        ["tested_model"] = "jina-embeddings-v4"
+                        ["tested_model"] = "jina-embeddings-v5-text-small"
                     };
 
                     try
@@ -118,7 +118,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                             ["api_operation_tested"] = true,
                             ["api_operation_working"] = false,
                             ["operation"] = "embeddings",
-                            ["tested_model"] = "jina-embeddings-v4"
+                            ["tested_model"] = "jina-embeddings-v5-text-small"
                         };
                         result.RawResponse = responseBody;
                         return result;

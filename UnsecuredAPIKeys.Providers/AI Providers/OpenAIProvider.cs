@@ -90,10 +90,25 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             // Step 2: Minimal inference test — confirms the key can call chat completions.
             // Use a positive allowlist of known chat-capable model prefixes rather than a negative
             // exclusion heuristic. "Not matching a non-chat prefix" does not guarantee chat support.
-            var knownChatPrefixes = new[] { "gpt-4o", "gpt-4", "gpt-3.5", "o1", "o3", "o4", "chatgpt-" };
+            var knownChatPrefixes = new[] { "gpt-6", "gpt-5", "gpt-4o", "gpt-4.1", "gpt-4", "gpt-3.5", "o1", "o3", "o4", "chatgpt-" };
 
-            // Prefer the cheapest/most-available known chat model first
-            var preferredOrder = new[] { "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "o1-mini", "o3-mini" };
+            // Prefer inexpensive, widely available chat models. GPT-4/GPT-4 Turbo/o1/o3-mini/
+            // o4-mini were retired on 2026-10-23; GPT-4o/4.1 retire 2027-01-14.
+            var preferredOrder = new[]
+            {
+                "gpt-5.6-luna",
+                "gpt-5-nano",
+                "gpt-4.1-nano",
+                "gpt-4o-mini",
+                "gpt-5-mini",
+                "gpt-4.1-mini",
+                "gpt-5.6-terra",
+                "gpt-5",
+                "gpt-4o",
+                "gpt-4.1",
+                "o3-mini",
+                "o4-mini"
+            };
             var modelToUse = discoveredModels
                 .Select(m => m.ModelId)
                 .FirstOrDefault(id => preferredOrder.Any(p => id.Contains(p, StringComparison.OrdinalIgnoreCase)));
@@ -123,7 +138,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 {
                     model = modelToUse,
                     messages = new[] { new { role = "user", content = "Hi" } },
-                    max_tokens = 5
+                    max_completion_tokens = 5
                 }),
                 System.Text.Encoding.UTF8, "application/json");
 
@@ -314,9 +329,14 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         private string DetermineModelGroup(string modelId)
         {
+            if (modelId.StartsWith("gpt-6")) return "GPT-6";
+            if (modelId.StartsWith("gpt-5")) return "GPT-5";
+            if (modelId.StartsWith("gpt-4.1")) return "GPT-4.1";
             if (modelId.StartsWith("gpt-4")) return "GPT-4";
             if (modelId.StartsWith("gpt-3.5")) return "GPT-3.5";
             if (modelId.StartsWith("o1")) return "O1";
+            if (modelId.StartsWith("o3")) return "O3";
+            if (modelId.StartsWith("o4")) return "O4";
             if (modelId.StartsWith("text-embedding")) return "Embeddings";
             if (modelId.StartsWith("dall-e")) return "DALL-E";
             if (modelId.StartsWith("whisper")) return "Whisper";

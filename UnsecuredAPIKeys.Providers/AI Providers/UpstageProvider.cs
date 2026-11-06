@@ -18,7 +18,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Verification strategy:
     ///   1. Discovery: GET https://api.upstage.ai/v1/models (lightweight read-only auth check)
     ///   2. Active inference test: POST https://api.upstage.ai/v1/chat/completions
-    ///      Model: solar-pro3 (or preferred discovered model)
+    ///      Model: solar-pro4 (or preferred discovered model)
     ///      {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
     /// Official docs: https://console.upstage.ai/docs
     /// </summary>
@@ -107,18 +107,26 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     return result;
                 }
 
-                // Step 2: Active inference test via POST /v1/chat/completions with solar-pro3
+                // Step 2: Active inference test via POST /v1/chat/completions.
+                // Solar Pro 3 / Solar Mini / Solar Pro 2 were retired on 2026-10-30.
                 var preferredOrder = new[]
                 {
+                    "solar-pro4",
+                    "solar-mini4",
+                    "syn-pro",
                     "solar-pro3",
-                    "solar-pro",
                     "solar-mini",
-                    "solar-10.7b-instruct"
+                    "solar-pro2"
                 };
 
                 string modelToUse = discoveredModels
                     .Select(m => m.ModelId)
                     .FirstOrDefault(id => preferredOrder.Any(p => id.Equals(p, StringComparison.OrdinalIgnoreCase)))
+                    ?? discoveredModels
+                        .Select(m => m.ModelId)
+                        .FirstOrDefault(id => !id.Contains("embedding", StringComparison.OrdinalIgnoreCase)
+                                           && !id.Contains("ocr", StringComparison.OrdinalIgnoreCase)
+                                           && !id.Contains("document", StringComparison.OrdinalIgnoreCase))
                     ?? discoveredModels.First().ModelId;
 
                 try

@@ -18,7 +18,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
     /// Verification strategy:
     ///   1. Discovery: GET https://api.x.ai/v1/models (read-only auth check & model discovery)
     ///   2. Active inference test: POST https://api.x.ai/v1/chat/completions
-    ///      Model: grok-2-latest (or preferred discovered Grok model)
+    ///      Model: preferred discovered Grok language model (e.g. grok-4.6)
     ///      {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
     /// Official docs: https://docs.x.ai/developers
     /// </summary>
@@ -107,10 +107,30 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 }
 
                 // Step 2: Active inference test via POST /v1/chat/completions
-                // Dynamically select a Grok model from the returned catalog available to this API key
-                var grokModel = discoveredModels
+                // Dynamically select a Grok language model from the returned catalog.
+                // Exclude image/video/voice/embedding models (e.g. grok-imagine-*), which
+                // are not valid targets for /chat/completions.
+                var languageModels = discoveredModels
                     .Select(m => m.ModelId)
-                    .FirstOrDefault(id => id.Contains("grok", StringComparison.OrdinalIgnoreCase));
+                    .Where(id => id.Contains("grok", StringComparison.OrdinalIgnoreCase)
+                              && !id.Contains("imagine", StringComparison.OrdinalIgnoreCase)
+                              && !id.Contains("image", StringComparison.OrdinalIgnoreCase)
+                              && !id.Contains("video", StringComparison.OrdinalIgnoreCase)
+                              && !id.Contains("voice", StringComparison.OrdinalIgnoreCase)
+                              && !id.Contains("embedding", StringComparison.OrdinalIgnoreCase)
+                              && !id.Contains("tts", StringComparison.OrdinalIgnoreCase)
+                              && !id.Contains("stt", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                var grokModel = new[]
+                    {
+                        "grok-4.7", "grok-4.6", "grok-4.5", "grok-4.3", "grok-4.20",
+                        "grok-build", "grok-4"
+                    }
+                    .Select(p => languageModels.FirstOrDefault(id =>
+                        id.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                    .FirstOrDefault(id => !string.IsNullOrWhiteSpace(id))
+                    ?? languageModels.FirstOrDefault();
 
                 if (string.IsNullOrWhiteSpace(grokModel))
                 {

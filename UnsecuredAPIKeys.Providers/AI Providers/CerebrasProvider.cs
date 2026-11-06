@@ -70,12 +70,23 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
             var models = ParseModels(modelsBody);
 
-            // Step 2: Quick chat completion to test inference capability
-            var preferredModels = new[] { "llama3.1-8b", "llama-3.3-70b", "llama3.3-70b" };
+            // Step 2: Quick chat completion to test inference capability.
+            // Shared Inference catalogue as of 2026-11: gpt-oss-120b and qwen-3.8-27b.
+            // The older Llama models were deprecated on 2026-02-16 / 2026-05-27.
+            var preferredModels = new[]
+            {
+                "gpt-oss-120b",
+                "qwen-3.8-27b",
+                "qwen-3.6-27b",
+                "qwen-3-32b",
+                "llama-3.3-70b",
+                "llama3.1-8b"
+            };
             var modelToUse = models?
                 .Select(m => m.ModelId)
-                .FirstOrDefault(id => preferredModels.Any(p => id.Contains(p)))
-                ?? "llama3.1-8b";
+                .FirstOrDefault(id => preferredModels.Any(p => id.Contains(p, StringComparison.OrdinalIgnoreCase)))
+                ?? models?.Select(m => m.ModelId).FirstOrDefault()
+                ?? "gpt-oss-120b";
 
             using var chatRequest = new HttpRequestMessage(
                 HttpMethod.Post, "https://api.cerebras.ai/v1/chat/completions");
@@ -115,6 +126,25 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                     ExtractRateLimits(chatResponse, result);
                 }
                 catch { /* Best effort parsing */ }
+            }
+            else if (chatResponse.StatusCode == HttpStatusCode.PaymentRequired)
+            {
+                result = new ValidationResult
+                {
+                    Status = ValidationAttemptStatus.Valid,
+                    HttpStatusCode = chatResponse.StatusCode,
+                    IsQuotaExceeded = true,
+                    Detail = "Valid Cerebras key — payment required / no inference credits"
+                };
+                result.AvailableModels = models;
+                result.Metadata = new Dictionary<string, object>
+                {
+                    ["authentication_valid"] = true,
+                    ["inference_tested"] = true,
+                    ["inference_working"] = false,
+                    ["quota_exceeded"] = true,
+                    ["tested_model"] = modelToUse
+                };
             }
             else if ((int)chatResponse.StatusCode == 429)
             {

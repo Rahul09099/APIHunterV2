@@ -81,13 +81,19 @@
 
                     var models = ParseModels(modelsBody);
 
-                    // Step 2: Select dedicated validation model from official production catalog
+                    // Step 2: Select dedicated validation model from official production catalog.
+                    // Llama 3.1 8B and Llama 3.3 70B left the free/developer tiers on 2026-08-16;
+                    // current free/developer models are gpt-oss and Qwen. Llama IDs are kept last
+                    // for enterprise committed-spend accounts.
                     var validationModels = new[]
                     {
-                        "llama-3.3-70b-versatile",
-                        "llama-3.1-8b-instant",
+                        "openai/gpt-oss-120b",
                         "openai/gpt-oss-20b",
-                        "openai/gpt-oss-120b"
+                        "qwen/qwen3.8-27b",
+                        "qwen/qwen3.6-27b",
+                        "openai/gpt-oss-safeguard-20b",
+                        "llama-3.3-70b-versatile",
+                        "llama-3.1-8b-instant"
                     };
 
                     var modelToUse = models?
@@ -180,10 +186,13 @@
 
                     if (chatResponse.StatusCode == HttpStatusCode.Unauthorized)
                     {
-                        result = ValidationResult.IsUnauthorized(chatResponse.StatusCode, "Groq authentication failed during chat inference");
+                        // /models already returned 200, so the credential itself is valid.
+                        // A 401 here is a scoped-key/permission anomaly, not proof of an invalid key.
+                        result = ValidationResult.ValidationUnavailable(chatResponse.StatusCode,
+                            "Groq key authenticated via /models, but chat inference returned 401 — possible scoped-key restriction");
                         result.Metadata = new Dictionary<string, object>
                         {
-                            ["authentication_valid"] = false,
+                            ["authentication_valid"] = true,
                             ["inference_tested"] = true,
                             ["inference_working"] = false,
                             ["tested_model"] = modelToUse
@@ -249,8 +258,12 @@
                         return result;
                     }
 
-                    result = ValidationResult.HasHttpError(chatResponse.StatusCode,
-                        $"Chat completion failed: {TruncateResponse(chatBody)}");
+                    // /models returned 200, so the key is authenticated. A non-quota chat
+                    // failure (e.g. 400 for a model that is not enabled on this account,
+                    // or 404 for a retired model) must not mark the key invalid.
+                    result = ValidationResult.Success(
+                        chatResponse.StatusCode,
+                        $"Valid Groq key — authenticated via /models, but inference returned HTTP {(int)chatResponse.StatusCode}: {TruncateResponse(chatBody)}");
                     result.AvailableModels = models;
                     result.Metadata = new Dictionary<string, object>
                     {

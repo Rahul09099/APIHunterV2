@@ -104,6 +104,12 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                         "Invalid or expired AI21 Labs API key");
                 }
 
+                if (response.StatusCode == HttpStatusCode.Gone)
+                {
+                    return ValidationResult.ValidationUnavailable(response.StatusCode,
+                        "AI21 Jamba API reported retired (410) — key validity could not be determined");
+                }
+
                 if (response.StatusCode == HttpStatusCode.Forbidden)
                 {
                     return ValidationResult.ValidationUnavailable(response.StatusCode,

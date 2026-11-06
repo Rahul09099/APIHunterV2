@@ -56,7 +56,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 var requestBody = new
                 {
-                    model = "command-r-08-2024",
+                    model = "command-a-03-2025",
                     messages = new[] { new { role = "user", content = "hi" } },
                     max_tokens = 1
                 };

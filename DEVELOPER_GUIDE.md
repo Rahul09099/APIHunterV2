@@ -181,14 +181,23 @@ Metrics are visible in the **View Status** screen and flushed to `ApplicationSet
 
 | Provider    | Validation Endpoint                              | Model Used              |
 |-------------|--------------------------------------------------|-------------------------|
-| OpenAI      | `/v1/models` + `/v1/chat/completions`            | `gpt-4o-mini` (auto)    |
-| Anthropic   | `/v1/messages`                                   | `claude-3-5-haiku-latest` |
-| Google AI   | `/v1beta/models` + `generateContent`             | `gemini-1.5-flash` (auto)|
+| OpenAI      | `/v1/models` + `/v1/chat/completions`            | `gpt-5.6-luna` (auto)   |
+| Anthropic   | `/v1/messages`                                   | `claude-haiku-5-5`      |
+| Google AI   | `/v1beta/models` + `generateContent`             | `gemini-3.8-flash` (auto)|
 | DeepSeek    | `/user/balance`                                  | N/A (balance/availability check) |
-| XAI (Grok)  | `/v1/chat/completions`                           | `grok-3-mini`           |
-| Together AI | `/v1/chat/completions`                           | `Meta-Llama-3.1-8B-Instruct-Turbo` |
-| Cohere      | `/v2/chat`                                       | `command-r`             |
-| Fireworks   | `/inference/v1/chat/completions`                 | Auto-discovered         |
+| XAI (Grok)  | `/v1/models` + `/v1/chat/completions`            | Auto-discovered Grok language model (`grok-4.6`) |
+| Together AI | `/v1/models` + `/v1/chat/completions`            | `openai/gpt-oss-120b` (auto) |
+| Cohere      | `/v2/chat`                                       | `command-a-03-2025`     |
+| Cerebras    | `/v1/models` + `/v1/chat/completions`            | `gpt-oss-120b` (auto)   |
+| Groq        | `/v1/models` + `/v1/chat/completions`            | `openai/gpt-oss-120b` (auto) |
+| Upstage     | `/v1/models` + `/v1/chat/completions`            | `solar-pro4` (auto)     |
+| Jina AI     | `/v1/embeddings`                                 | `jina-embeddings-v5-text-small` |
+| Voyage AI   | `/v1/embeddings`                                 | `voyage-4-lite`         |
+| OpenRouter  | `/v1/auth/key` + `/v1/chat/completions`          | `google/gemini-3.8-flash` (auto) |
+| Perplexity  | `/v1/models` + `/v1/chat/completions`            | `sonar` (auto)          |
+| AWS Bedrock | `https://bedrock-mantle.{region}.api.aws/v1/models` | N/A (catalog/auth check) |
+| AI21 Labs   | `/v1/chat/completions`                           | `jamba-mini`            |
+| Fireworks   | `/v1/accounts`                                   | N/A (account check)     |
 | HuggingFace | `/api/whoami`                                    | N/A (account check)     |
 | Replicate   | `/v1/account`                                    | N/A (account check)     |
 | ElevenLabs  | `/v1/user/subscription`                          | N/A (subscription check)|

@@ -15,15 +15,17 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 {
     /// <summary>
     /// Provider for AWS Bedrock API keys.
-    /// Keys start with "bedrock:" prefix and are used via Bearer authorization.
-    /// Verification endpoint: GET https://bedrock-runtime.us-east-1.amazonaws.com/v1/models
+    /// Keys are AWS Bedrock bearer tokens (typically "ABSK..." base64), optionally stored
+    /// with a legacy "bedrock:" prefix. Verification endpoint: GET
+    /// https://bedrock-mantle.us-east-1.api.aws/v1/models
+    /// (bedrock-runtime does not implement GET /v1/models).
     /// Official docs: https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html
     /// </summary>
     [ApiProvider]
     public class AWSBedrockProvider : BaseApiKeyProvider
     {
         private const string PRIMARY_REGION = "us-east-1";
-        private const string PRIMARY_ENDPOINT = "https://bedrock-runtime.us-east-1.amazonaws.com/v1/models";
+        private const string PRIMARY_ENDPOINT = "https://bedrock-mantle.us-east-1.api.aws/v1/models";
 
         public override string ProviderName => "AWS Bedrock";
         public override ApiTypeEnum ApiType => ApiTypeEnum.AWSBedrock;
@@ -31,8 +33,9 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         public override IEnumerable<string> RegexPatterns =>
         [
             @"\bbedrock:[A-Za-z0-9_\-\+/=]{20,256}\b",
-            @"AWS_BEARER_TOKEN_BEDROCK\s*=\s*['""]?(bedrock:[A-Za-z0-9_\-\+/=]{20,256})['""]?",
-            @"BEDROCK_API_KEY\s*=\s*['""]?(bedrock:[A-Za-z0-9_\-\+/=]{20,256})['""]?"
+            @"\bABSK[A-Za-z0-9+/=]{40,}",
+            @"AWS_BEARER_TOKEN_BEDROCK\s*=\s*['""]?(bedrock:[A-Za-z0-9_\-\+/=]{20,256}|ABSK[A-Za-z0-9+/=]{40,})['""]?",
+            @"BEDROCK_API_KEY\s*=\s*['""]?(bedrock:[A-Za-z0-9_\-\+/=]{20,256}|ABSK[A-Za-z0-9+/=]{40,})['""]?"
         ];
 
         public AWSBedrockProvider() : base() { }
@@ -41,8 +44,12 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
         protected override async Task<ValidationResult> ValidateKeyWithHttpClientAsync(
             string apiKey, HttpClient httpClient)
         {
+            var credential = apiKey.StartsWith("bedrock:", StringComparison.Ordinal)
+                ? apiKey["bedrock:".Length..]
+                : apiKey;
+
             using var req = new HttpRequestMessage(HttpMethod.Get, PRIMARY_ENDPOINT);
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential);
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             var response = await httpClient.SendAsync(req);
@@ -124,13 +131,16 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
         protected override bool IsValidKeyFormat(string apiKey)
         {
-            if (string.IsNullOrWhiteSpace(apiKey) || !apiKey.StartsWith("bedrock:", StringComparison.Ordinal))
+            if (string.IsNullOrWhiteSpace(apiKey))
             {
                 return false;
             }
 
-            var value = apiKey["bedrock:".Length..];
-            return value.Length >= 20 && value.Length <= 256 &&
+            var value = apiKey.StartsWith("bedrock:", StringComparison.Ordinal)
+                ? apiKey["bedrock:".Length..]
+                : apiKey;
+
+            return value.Length >= 20 && value.Length <= 512 &&
                    value.All(c => char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == '+' || c == '/' || c == '=');
         }
     }

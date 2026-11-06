@@ -132,10 +132,13 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
                 var preferredOrder = new[]
                 {
-                    "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-                    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-                    "meta-llama/Meta-Llama-3-8B-Instruct",
-                    "mistralai/Mistral-7B-Instruct-v0.1"
+                    "openai/gpt-oss-120b",
+                    "deepseek-ai/DeepSeek-V4.1-Flash",
+                    "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+                    "Qwen/Qwen3.8-Flash",
+                    "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+                    "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+                    "meta-llama/Llama-3.3-70B-Instruct-Turbo"
                 };
 
                 string modelToUse = discoveredModels
@@ -221,6 +224,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
                     return doc.RootElement.EnumerateArray()
+                        .Where(IsChatModel)
                         .Select(m => new ModelInfo { ModelId = m.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "" })
                         .Where(m => !string.IsNullOrEmpty(m.ModelId))
                         .ToList();
@@ -229,6 +233,7 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
                 if (doc.RootElement.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
                 {
                     return dataArr.EnumerateArray()
+                        .Where(IsChatModel)
                         .Select(m => new ModelInfo { ModelId = m.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "" })
                         .Where(m => !string.IsNullOrEmpty(m.ModelId))
                         .ToList();
@@ -240,6 +245,19 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             {
                 return null;
             }
+        }
+
+        private static bool IsChatModel(JsonElement model)
+        {
+            if (!model.TryGetProperty("type", out var typeProp) || typeProp.ValueKind != JsonValueKind.String)
+            {
+                return true;
+            }
+
+            var type = typeProp.GetString();
+            return string.IsNullOrEmpty(type) ||
+                   type.Equals("chat", StringComparison.OrdinalIgnoreCase) ||
+                   type.Equals("language", StringComparison.OrdinalIgnoreCase);
         }
 
         protected override bool IsValidKeyFormat(string apiKey)

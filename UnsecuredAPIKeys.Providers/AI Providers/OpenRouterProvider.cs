@@ -209,9 +209,11 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
 
             var preferredOrder = new[]
             {
-                "google/gemini-2.5-flash",
-                "google/gemini-2.0-flash-exp:free",
-                "meta-llama/llama-3.1-8b-instruct:free",
+                "google/gemini-3.8-flash",
+                "google/gemini-3.5-flash-lite",
+                "openai/gpt-5.6-luna",
+                "anthropic/claude-haiku-5.5",
+                "qwen/qwen3.8-flash",
                 "openai/gpt-4o-mini",
                 "anthropic/claude-3-haiku"
             };

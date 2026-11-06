@@ -107,11 +107,26 @@ namespace UnsecuredAPIKeys.Providers.AI_Providers
             string? modelToUse = null;
             if (availableModels != null && availableModels.Count > 0)
             {
-                var preferred = new[] { "sonar", "sonar-pro", "llama-3.1-8b-instruct", "sonar-reasoning" };
+                var preferred = new[]
+                {
+                    "perplexity/sonar",
+                    "perplexity/sonar-pro",
+                    "sonar",
+                    "sonar-pro",
+                    "perplexity/sonar-reasoning-pro",
+                    "sonar-reasoning-pro"
+                };
                 modelToUse = availableModels
                     .Select(m => m.ModelId)
                     .FirstOrDefault(id => preferred.Any(p => id.Equals(p, StringComparison.OrdinalIgnoreCase) ||
                                                              id.Equals($"perplexity/{p}", StringComparison.OrdinalIgnoreCase)));
+
+                // Chat Completions still accepts the legacy unprefixed Sonar slug.
+                if (!string.IsNullOrEmpty(modelToUse) &&
+                    modelToUse.StartsWith("perplexity/", StringComparison.OrdinalIgnoreCase))
+                {
+                    modelToUse = modelToUse["perplexity/".Length..];
+                }
             }
 
             if (string.IsNullOrEmpty(modelToUse))
