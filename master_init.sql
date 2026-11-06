@@ -777,11 +777,10 @@ CREATE INDEX IF NOT EXISTS "IX_RepoReferences_ApiKeyId"
 
 -- =============================================================================
 -- SECTION 6: DEEP SEARCH PROGRESS
--- Dropped and recreated to ensure clean state on fresh deployments.
+-- Idempotent: must NOT drop the table, otherwise Deep Search progress is lost
+-- on every container restart/deploy.
 -- =============================================================================
-DROP TABLE IF EXISTS "DeepSearchProgress" CASCADE;
-
-CREATE TABLE "DeepSearchProgress" (
+CREATE TABLE IF NOT EXISTS "DeepSearchProgress" (
     "Id"               SERIAL PRIMARY KEY,
     "SearchQueryId"    BIGINT NOT NULL,
     "PartitionType"    TEXT NOT NULL,
@@ -792,9 +791,17 @@ CREATE TABLE "DeepSearchProgress" (
     "LastSearchedUTC"  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX "IX_DeepSearchProgress_Query_Partition"
+ALTER TABLE "DeepSearchProgress" ADD COLUMN IF NOT EXISTS "SearchQueryId" BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE "DeepSearchProgress" ADD COLUMN IF NOT EXISTS "PartitionType" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "DeepSearchProgress" ADD COLUMN IF NOT EXISTS "PartitionValue" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "DeepSearchProgress" ADD COLUMN IF NOT EXISTS "LastPageSearched" INTEGER DEFAULT 0;
+ALTER TABLE "DeepSearchProgress" ADD COLUMN IF NOT EXISTS "TotalResultsFound" INTEGER DEFAULT 0;
+ALTER TABLE "DeepSearchProgress" ADD COLUMN IF NOT EXISTS "IsCompleted" BOOLEAN DEFAULT FALSE;
+ALTER TABLE "DeepSearchProgress" ADD COLUMN IF NOT EXISTS "LastSearchedUTC" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+CREATE UNIQUE INDEX IF NOT EXISTS "IX_DeepSearchProgress_Query_Partition"
     ON "DeepSearchProgress" ("SearchQueryId", "PartitionType", "PartitionValue");
-CREATE INDEX "IX_DeepSearchProgress_IsCompleted"
+CREATE INDEX IF NOT EXISTS "IX_DeepSearchProgress_IsCompleted"
     ON "DeepSearchProgress" ("IsCompleted");
 
 -- =============================================================================

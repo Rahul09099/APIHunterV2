@@ -1496,10 +1496,9 @@ public class DatabaseService
                 ALTER TABLE ""RepoReferences"" ADD COLUMN IF NOT EXISTS ""RepoDescription"" TEXT;
                 CREATE INDEX IF NOT EXISTS ""IX_RepoReferences_ApiKeyId"" ON ""RepoReferences"" (""APIKeyId"");");
 
-            // 6. DeepSearchProgress (Aggressive Reset for Stability)
+            // 6. DeepSearchProgress (preserve progress across restarts so Deep Search can resume)
             await context.Database.ExecuteSqlRawAsync(@"
-                DROP TABLE IF EXISTS ""DeepSearchProgress"" CASCADE;
-                CREATE TABLE ""DeepSearchProgress"" (
+                CREATE TABLE IF NOT EXISTS ""DeepSearchProgress"" (
                     ""Id"" SERIAL PRIMARY KEY,
                     ""SearchQueryId"" BIGINT NOT NULL,
                     ""PartitionType"" TEXT NOT NULL,
@@ -1509,7 +1508,15 @@ public class DatabaseService
                     ""IsCompleted"" BOOLEAN DEFAULT FALSE,
                     ""LastSearchedUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE UNIQUE INDEX ""IX_DeepSearchProgress_Query_Partition"" ON ""DeepSearchProgress"" (""SearchQueryId"", ""PartitionType"", ""PartitionValue"");");
+                ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""SearchQueryId"" BIGINT NOT NULL DEFAULT 0;
+                ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""PartitionType"" TEXT NOT NULL DEFAULT '';
+                ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""PartitionValue"" TEXT NOT NULL DEFAULT '';
+                ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""LastPageSearched"" INTEGER DEFAULT 0;
+                ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""TotalResultsFound"" INTEGER DEFAULT 0;
+                ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""IsCompleted"" BOOLEAN DEFAULT FALSE;
+                ALTER TABLE ""DeepSearchProgress"" ADD COLUMN IF NOT EXISTS ""LastSearchedUTC"" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_DeepSearchProgress_Query_Partition"" ON ""DeepSearchProgress"" (""SearchQueryId"", ""PartitionType"", ""PartitionValue"");
+                CREATE INDEX IF NOT EXISTS ""IX_DeepSearchProgress_IsCompleted"" ON ""DeepSearchProgress"" (""IsCompleted"");");
 
             // 7. ApplicationSettings
             await context.Database.ExecuteSqlRawAsync(@"
